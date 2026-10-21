@@ -51,6 +51,47 @@ fn binary_search(xs: &[i64], target: i64) -> Option<usize>
 }
 ```
 
+#### Contrats scellés
+
+Quand l'agent écrit à la fois le code et son contrat, le chemin le plus court vers une
+vérification verte peut être d'affaiblir le contrat. Et une fois la vérification verte, plus
+personne ne lit le contrat : le vert agit comme un signal d'arrêt.
+
+Un contrat peut donc être **scellé** : l'agent peut le lire, pas le modifier.
+
+- Les contrats scellés sont enregistrés dans un fichier de verrouillage (`contracts.lock`), sous
+  forme d'une empreinte par fonction. C'est un humain qui le met à jour avec `quod seal` ; les
+  outils de l'agent (le serveur MCP) n'ont pas accès à cette commande et exposent les contrats
+  scellés en lecture seule.
+- Compiler une fonction dont le contrat scellé ne correspond plus au verrou est une erreur :
+
+  ```json
+  {
+    "status": "error",
+    "code": "sealed_contract_changed",
+    "fn": "lru_cache",
+    "change": "ensures #2 removed",
+    "hint": "sealed contracts can only be strengthened; ask a human to re-seal"
+  }
+  ```
+
+- **Renforcer reste permis.** L'agent peut encore transformer un contrat scellé en un contrat
+  *prouvé plus fort* : une précondition plus faible ou égale (`ancien requires ⇒ nouveau requires`)
+  et une postcondition plus forte ou égale (`nouvel ensures ⇒ ancien ensures`, sous l'ancienne
+  précondition). Le solveur vérifie les deux implications ; tout autre changement demande un
+  nouveau scellement par un humain. L'agent peut resserrer un contrat qu'il trouve trop lâche,
+  jamais desserrer un contrat qu'il trouve trop difficile.
+- **C'est le contrat que l'on relit.** Le rapport du compilateur liste, pour chaque fonction, le
+  contrat et s'il a changé depuis le dernier scellement : la relecture porte sur le contrat, pas
+  sur une coche verte.
+
+*Crédit : le scellement et la relecture centrée sur le contrat viennent de pratiques décrites par
+[piekwerk](https://dev.to/piekwerk) dans un
+[commentaire sur l'article de la Phase 0](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0) :
+des fichiers de spec et de vérification placés hors de tout dossier où l'agent peut écrire, et un
+modèle de pull request qui recopie le vrai bloc `requires` / `ensures`. « Renforcer reste permis »
+est notre extension.*
+
 ### 2. Effets par capacités
 
 Quod n'a **aucune autorité ambiante** : pas de console, de fichiers, d'horloge ni de réseau
@@ -274,6 +315,9 @@ visible et vérifiée**, et non un oubli.
   et les 3 échecs sur des specs complètes sont des formes canoniques. Restent à mesurer sur du
   code réel : la part de fonctions qui ont besoin de `loose`, et le passage à l'échelle sur des
   structures riches (cartes, ensembles, tas).
+- **Contrats scellés** : où vivent-ils (à côté du code, ou dans des fichiers de spec séparés) ?
+  Peut-on sceller un module entier ? Quelle interaction avec `loose` (élargir une relation `loose`
+  est-il un affaiblissement) ?
 - **Décidabilité / temps de preuve** : quel fragment logique garantir pour éviter les timeouts SMT ?
 - **Capacités et concurrence** : comment partager une capacité entre tâches parallèles
   (copie, emprunt, linéarité) sans perdre la précision du modèle fantôme ?

@@ -51,6 +51,44 @@ fn binary_search(xs: &[i64], target: i64) -> Option<usize>
 }
 ```
 
+#### Sealed contracts
+
+When the agent writes both the code and its contract, the cheapest path back to a green check can
+be to weaken the contract. And once the check is green, nobody reads the contract: a green verify
+works as a stop signal.
+
+A contract can therefore be **sealed**: the agent can read it, not change it.
+
+- Sealed contracts are recorded in a lock file (`contracts.lock`) as a hash per function. A human
+  updates it with `quod seal`; the agent tooling (the MCP server) has no access to that command,
+  and exposes sealed contracts read-only.
+- Compiling a function whose sealed contract no longer matches the lock is an error:
+
+  ```json
+  {
+    "status": "error",
+    "code": "sealed_contract_changed",
+    "fn": "lru_cache",
+    "change": "ensures #2 removed",
+    "hint": "sealed contracts can only be strengthened; ask a human to re-seal"
+  }
+  ```
+
+- **Strengthening is allowed.** An agent may still change a sealed contract into a provably
+  stronger one: a weaker or equal precondition (`old requires ⇒ new requires`) and a stronger or
+  equal postcondition (`new ensures ⇒ old ensures`, under the old precondition). The solver checks
+  both implications; any other change needs a human re-seal. An agent can tighten a contract it
+  finds too loose, never loosen one it finds too hard.
+- **Contracts are what reviewers read.** The compiler report lists, per function, the contract
+  and whether it changed since the last seal, so a review reads the contract instead of trusting a
+  checkmark.
+
+*Credit: sealing and contract-first review come from practices described by
+[piekwerk](https://dev.to/piekwerk) in a
+[comment on the Phase 0 write-up](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0): spec and
+verification files kept out of every directory the agent can write to, and a pull-request template
+that pastes the actual `requires` / `ensures` block. "Strengthening is allowed" is our extension.*
+
 ### 2. Effects through capabilities
 
 Quod has **no ambient authority**: no console, file system, clock or network reachable
@@ -273,6 +311,9 @@ decision** rather than an oversight.
   [dafny-complete](../tools/dafny-complete/)): uniqueness is proved unaided for 15, and the 3
   failures on complete specifications are canonical forms. Still to measure on real code: the
   share of functions that need `loose`, and scaling to rich structures (maps, sets, heap).
+- **Sealed contracts**: where do they live (next to the code, or in separate spec files)? Can a
+  module be sealed as a whole? How does sealing interact with `loose` (is widening a `loose`
+  relation a weakening)?
 - **Decidability and proof time**: which logical fragment to guarantee to avoid SMT timeouts?
 - **Capabilities and concurrency**: how to share a capability between parallel tasks (copy,
   borrowing, linearity) without losing the precision of the ghost model?
