@@ -172,7 +172,10 @@ def scopes(s: str) -> list[Scope]:
             k = m.start()
             back = max(s.rfind(";", 0, k), s.rfind("{", 0, k), s.rfind("}", 0, k))
             header = s[back + 1:k]
-            h = _SCOPE_HEAD.search(header)
+            # The last keyword wins: a brace-less declaration (`newtype Odd = ... witness 3`)
+            # can precede `trait T {` in the same header text.
+            heads = list(_SCOPE_HEAD.finditer(header))
+            h = heads[-1] if heads else None
             if h and not re.search(r"\b(method|function|lemma|predicate)\b", header):
                 kind = "datatype" if h.group(1) in ("codatatype", "newtype") else h.group(1)
                 stack.append(Scope(kind, h.group(2), k, -1))

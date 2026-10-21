@@ -1,4 +1,4 @@
-﻿"""The four Dafny passes: uniqueness (U), valid inputs (R), execution (run), witnesses (W)."""
+"""The four Dafny passes: uniqueness (U), valid inputs (R), execution (run), witnesses (W)."""
 from __future__ import annotations
 
 import re
@@ -85,7 +85,13 @@ class Checker:
     # --- generated declarations -------------------------------------------------
     @staticmethod
     def _static(m: Method) -> str:
-        return "static " if m.in_type else ""
+        # Generated members mirror the method: static next to a static method, instance members
+        # (which see `this` and its fields) next to an instance method.
+        return "static " if m.in_type and m.static else ""
+
+    @staticmethod
+    def _instance(m: Method) -> bool:
+        return m.in_type is not None and not m.static
 
     def _contract_decls(self, i: int, m: Method) -> list[str]:
         s, tp, ind = self._static(m), m.type_params, m.indent
@@ -105,6 +111,10 @@ class Checker:
                          for (x, t), (y, _) in zip(a, b))
         pre_reads = _reads([n for n, t in m.params if _is_array(t)])
         post_reads = _reads([n for n, t in m.params + m.outs if _is_array(t)])
+        if self._instance(m) and m.in_type.kind in ("class", "trait"):
+            # The contract may read any field, or call Valid()-style predicates over a
+            # representation set: let the generated predicates read the whole heap.
+            pre_reads = post_reads = " reads *"
         u = f"QuodCkU{i}_"
         return [
             f"{ind}{s}ghost predicate {u}Pre{tp}({ps}){pre_reads} {{ {req} }}",
@@ -127,24 +137,25 @@ class Checker:
                 r.status, r.reason = "skipped", "no outputs"
             elif not m.ensures:
                 r.status, r.reason = "skipped", "no ensures clause"
-            elif m.in_type and not m.static:
-                r.status, r.reason = "skipped", "instance method (heap state not supported yet)"
             elif m.other_clauses or any(re.search(r"\b(old|fresh|unchanged|allocated)\s*\(", e)
                                         for e in m.ensures):
-                r.status, r.reason = "skipped", "touches the heap (modifies/reads/old)"
+                r.status, r.reason = "skipped", ("modifies state: the contract relates the state "
+                                                 "before and after the call (not supported yet)")
             else:
                 todo[i] = m
             results[i] = r
         try:
             undetermined = self._pass_uniqueness(todo, results)
+            searched: set[int] = set()
             if witness and undetermined:
-                self._pass_witness(undetermined, results)
+                searched = self._pass_witness(undetermined, results)
             for i in undetermined:
                 if not results[i].status:
                     results[i].status = "inconclusive"
                     results[i].reason = results[i].reason or (
-                        "uniqueness not proved, no witness found" if witness
-                        else "uniqueness not proved (witness search disabled)")
+                        "uniqueness not proved (witness search disabled)" if not witness else
+                        "uniqueness not proved, no witness found" if i in searched else
+                        "uniqueness not proved; no witness search possible (see note)")
         finally:
             self.d.cleanup()
         return [results[i] for i in sorted(results)]
@@ -185,11 +196,16 @@ class Checker:
             return undetermined
         return {}
 
-    def _pass_witness(self, und: dict[int, Method], results: dict[int, Result]) -> None:
+    def _pass_witness(self, und: dict[int, Method], results: dict[int, Result]) -> set[int]:
+        """Search witnesses; returns the methods for which a search could actually run."""
         eligible: dict[int, tuple[Method, list, list]] = {}
         for i, m in und.items():
             if m.ghost:
                 results[i].notes.append("ghost method: cannot run it to search witnesses")
+                continue
+            if self._instance(m):
+                results[i].notes.append("instance method: witness search would need to build "
+                                        "objects (not supported yet)")
                 continue
             try:
                 pt = [V.parse_type(t) for _, t in m.params]
@@ -199,7 +215,7 @@ class Checker:
                 continue
             eligible[i] = (m, pt, ot)
         if not eligible:
-            return
+            return set()
 
         # R: which small inputs satisfy the precondition (proved, not assumed)?
         cands: dict[int, list[tuple]] = {}
@@ -258,7 +274,7 @@ class Checker:
                     meta[name] = (i, xi, x, a, val)
             chunks.setdefault(m.insert_at, []).extend(decls)
         if not meta:
-            return
+            return set(eligible)
         text = _insert(self.src, chunks)
         _, err = self.d.verify("witness", text, "QuodCkW")
         accepted: dict[tuple[int, int], list[Any]] = {}
@@ -277,6 +293,7 @@ class Checker:
                 "input": {n: v for (n, _), v in zip(m.params, x)},
                 "result_a": first, "result_b": second, "method_returns": a,
                 "outputs": [n for n, _ in m.outs]}
+        return set(eligible)
 
     def _execute(self, i: int, m: Method, pt: list, ot: list, xs: list[tuple],
                  res: Result) -> list[tuple[tuple, Any]]:
@@ -355,6 +372,8 @@ def _diverse(xs: list[tuple], k: int) -> list[tuple]:
 
 def _first_error(out: str) -> str:
     for line in out.splitlines():
+        if line.startswith("Prover error:"):  # Z3 model-parsing noise, not the actual error
+            continue
         if "Error" in line or "error" in line:
             return line.strip()[:200]
     return out.strip().splitlines()[-1][:200] if out.strip() else "no output"

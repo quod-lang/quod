@@ -24,6 +24,10 @@ EXPECTED = {
         "KthElement": "determined", "WeakMax": "underspecified",
         "CopyOf": "determined", "Doubled": "underspecified",
     },
+    "classes.dfy": {
+        "Available": "determined", "WeakAvailable": "inconclusive", "Deposit": "skipped",
+        "Doubled": "determined", "Sum": "determined", "AnyAbove": "inconclusive",
+    },
 }
 
 
