@@ -82,6 +82,16 @@ For each method `M(x) returns (r)` with `requires R` and `ensures E`:
 The contract is copied verbatim into a generated predicate; your file is never modified (the
 generated files sit next to it while the tool runs, then are deleted; `--keep` keeps them).
 
+## Prior work
+
+The idea of checking a Dafny specification by mutating outputs on concrete inputs and asking the
+verifier comes from **Shuvendu Lahiri, [Evaluating LLM-driven User-Intent Formalization for
+Verification-Aware Languages](https://arxiv.org/abs/2406.09757)** (FMCAD 2024), which scores
+specification completeness against test cases. `dafny-complete` builds on the same idea and
+differs in that it needs no tests (it runs the method itself), adds a universal uniqueness proof
+over all inputs, and only reports a witness when Dafny *proves* that the contract accepts it.
+More in [docs/related-work.md](../../docs/related-work.md).
+
 ## Limitations
 
 - Witness search covers `int`, `nat`, `bool`, `char`, `string`, `seq<T>` and tuples. Other types

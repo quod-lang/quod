@@ -88,6 +88,10 @@ Quod est et restera **libre et gratuit**.
 
 - **Dafny, F\*, Lean, Verus** : langages à vérification intégrée ; Dafny est la référence de la
   Phase 0.
+- **Qualité des spécifications écrites par des LLM** : le test symbolique de spécifications
+  Dafny de Lahiri ([FMCAD 2024](https://arxiv.org/abs/2406.09757)) est l'ancêtre direct de la
+  recherche de témoins de `dafny-complete` ; voir aussi nl2postcond, Clover et le programme
+  « intent formalization », résumés dans [docs/related-work.md](docs/related-work.md).
 - **Unison** : code adressé par contenu.
 - **[Warrant](https://github.com/mv2a/warrant)** : protocole de preuves pour du code écrit par des
   agents, agnostique du langage. Très proche dans l'intention ; Quod se place une couche en
