@@ -187,6 +187,24 @@ whole file was specified.
   `nat`, `bool`, `char`, `string`, `seq<T>`, tuples. Instance methods and heap-touching methods
   are skipped for now.
 
+## Prior work
+
+After publishing, I did the literature pass I should have done before. The core idea is not new:
+Shuvendu Lahiri's [Evaluating LLM-driven User-Intent Formalization for Verification-Aware Languages](https://arxiv.org/abs/2406.09757)
+(FMCAD 2024) already tests Dafny specifications symbolically, scoring their completeness by
+mutating expected outputs on test cases and checking that the verifier rejects them. Related lines
+of work include [nl2postcond](https://arxiv.org/abs/2310.01831) (completeness of LLM-written
+postconditions measured against code mutants), [Clover](https://arxiv.org/abs/2310.17807)
+(consistency between code, docstrings and Dafny annotations), and Lahiri's 2026
+[intent-formalization agenda](https://arxiv.org/abs/2603.17150), which names validating
+specifications as the central bottleneck for AI-written code. Weak or vacuous specifications are
+also a documented failure mode in recent verified-code benchmarks.
+
+What `dafny-complete` adds is modest: it needs no tests or reference code (it runs the method
+itself), it first tries a universal uniqueness proof, and it only reports a witness when Dafny
+proves the contract accepts it. Details in the repo's
+[related-work note](https://github.com/quod-lang/quod/blob/main/docs/related-work.md).
+
 ## Why I care: Quod
 
 This started as Phase 0 of [Quod](https://github.com/quod-lang/quod), a language designed to be
