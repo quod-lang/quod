@@ -99,11 +99,17 @@ class Checker:
         outs = ", ".join(f"{n}: {t}" for n, t in m.outs)
         ab = ", ".join(f"{n}: {t}" for n, t in a + b)
         call = lambda o: ", ".join([n for n, _ in m.params] + [n for n, _ in o])  # noqa: E731
-        eq = " && ".join(f"{x} == {y}" for (x, _), (y, _) in zip(a, b))
+        # Arrays live on the heap: the predicates must declare that they read them, and two
+        # array results are the same result when their contents are equal.
+        eq = " && ".join(f"{x}[..] == {y}[..]" if _is_array1(t) else f"{x} == {y}"
+                         for (x, t), (y, _) in zip(a, b))
+        pre_reads = _reads([n for n, t in m.params if _is_array(t)])
+        post_reads = _reads([n for n, t in m.params + m.outs if _is_array(t)])
         u = f"QuodCkU{i}_"
         return [
-            f"{ind}{s}ghost predicate {u}Pre{tp}({ps}) {{ {req} }}",
-            f"{ind}{s}ghost predicate {u}Post{tp}({ps}{sep}{outs}) requires {u}Pre({pn}) {{ {ens} }}",
+            f"{ind}{s}ghost predicate {u}Pre{tp}({ps}){pre_reads} {{ {req} }}",
+            f"{ind}{s}ghost predicate {u}Post{tp}({ps}{sep}{outs}){post_reads} "
+            f"requires {u}Pre({pn}) {{ {ens} }}",
             f"{ind}{s}lemma {u}Uniq{tp}({ps}{sep}{ab}) requires {u}Pre({pn}) "
             f"requires {u}Post({call(a)}) && {u}Post({call(b)}) ensures {eq} {{ }}",
         ]
@@ -203,9 +209,10 @@ class Checker:
             decls = self._contract_decls(i, m)[:2]
             if m.requires:
                 for k, x in enumerate(cands[i]):
-                    args = ", ".join(V.lit(v, t) for v, t in zip(x, pt))
-                    decls.append(f"{m.indent}{self._static(m)}lemma QuodCkR{i}_{k}() "
-                                 f"ensures QuodCkU{i}_Pre({args}) {{ }}")
+                    stmts, args = V.bind(list(x), pt, [t for _, t in m.params], "qa")
+                    decls.append(f"{m.indent}{self._static(m)}method QuodCkR{i}_{k}() {{ "
+                                 + " ".join(stmts)
+                                 + f" assert QuodCkU{i}_Pre({', '.join(args)}); }}")
             chunks.setdefault(m.insert_at, []).extend(decls)
         text = _insert(self.src, chunks)
         _, err = self.d.verify("pre", text, "QuodCkR")
@@ -227,62 +234,74 @@ class Checker:
                 continue
             answers[i] = self._execute(i, m, pt, ot, inputs[i], results[i])
 
-        # W: prove Post(x, a) and Post(x, b) for neighbours b != a
+        # W: prove Post(x, v) for the method's answer a and for candidates v != a (neighbours of
+        # a, and values taken from the input). Two distinct values proved accepted = a witness.
         chunks, meta = {}, {}
         for i, (m, pt, ot) in eligible.items():
             decls = self._contract_decls(i, m)[:2]
             otype = ot[0] if len(ot) == 1 else ("tuple", ot)
             for xi, (x, a) in enumerate(answers.get(i, [])):
-                args = ", ".join(V.lit(v, t) for v, t in zip(x, pt))
+                in_stmts, args = V.bind(list(x), pt, [t for _, t in m.params], "qa")
 
-                def post(val: Any) -> str:
+                def check_method(name: str, val: Any) -> str:
                     vals = [val] if len(ot) == 1 else list(val)
-                    return f"QuodCkU{i}_Post({args}, " + ", ".join(V.lit(v, t) for v, t in zip(vals, ot)) + ")"
-                name = f"QuodCkW{i}_{xi}_a"
-                decls.append(f"{m.indent}{self._static(m)}lemma {name}() ensures {post(a)} {{ }}")
-                meta[name] = (i, x, a, None)
+                    out_stmts, outs = V.bind(vals, ot, [t for _, t in m.outs], "qo")
+                    return (f"{m.indent}{self._static(m)}method {name}() {{ "
+                            + " ".join(in_stmts + out_stmts)
+                            + f" assert QuodCkU{i}_Post({', '.join(args + outs)}); }}")
                 seen = {V.canon(a)}
-                bs = [b for b in V.neighbours(a, otype) if not (V.canon(b) in seen or seen.add(V.canon(b)))]
-                for bi, b in enumerate(bs[:MAX_NEIGHBOURS]):
-                    name = f"QuodCkW{i}_{xi}_{bi}"
-                    decls.append(f"{m.indent}{self._static(m)}lemma {name}() ensures {post(b)} {{ }}")
-                    meta[name] = (i, x, a, b)
+                pool = V.neighbours(a, otype)[:MAX_NEIGHBOURS] + V.from_inputs(x, pt, otype)
+                cands = [a] + [b for b in pool if not (V.canon(b) in seen or seen.add(V.canon(b)))]
+                for ci, val in enumerate(cands):
+                    name = f"QuodCkW{i}_{xi}_{ci}"
+                    decls.append(check_method(name, val))
+                    meta[name] = (i, xi, x, a, val)
             chunks.setdefault(m.insert_at, []).extend(decls)
         if not meta:
             return
         text = _insert(self.src, chunks)
         _, err = self.d.verify("witness", text, "QuodCkW")
-        proved = {n for n in meta if _line_of(text, f"lemma {n}()") not in err}
-        for name in sorted(meta):
-            i, x, a, b = meta[name]
-            if b is None or results[i].status or name not in proved:
+        accepted: dict[tuple[int, int], list[Any]] = {}
+        for name, (i, xi, x, a, val) in meta.items():
+            if _line_of(text, f"method {name}()") not in err:
+                accepted.setdefault((i, xi), []).append(val)
+        for (i, xi), vals in sorted(accepted.items(), key=lambda kv: kv[0]):
+            if results[i].status or len({V.canon(v) for v in vals}) < 2:
                 continue
-            if f"QuodCkW{i}_{name.split('_')[1]}_a" in proved:
-                m = eligible[i][0]
-                results[i].status = "underspecified"
-                results[i].witness = {
-                    "input": {n: v for (n, _), v in zip(m.params, x)},
-                    "result_a": a, "result_b": b,
-                    "outputs": [n for n, _ in m.outs]}
+            x, a = answers[i][xi]
+            first = a if any(V.canon(v) == V.canon(a) for v in vals) else vals[0]
+            second = next(v for v in vals if V.canon(v) != V.canon(first))
+            m = eligible[i][0]
+            results[i].status = "underspecified"
+            results[i].witness = {
+                "input": {n: v for (n, _), v in zip(m.params, x)},
+                "result_a": first, "result_b": second, "method_returns": a,
+                "outputs": [n for n, _ in m.outs]}
 
     def _execute(self, i: int, m: Method, pt: list, ot: list, xs: list[tuple],
                  res: Result) -> list[tuple[tuple, Any]]:
         s = self._static(m)
         pr = V.Printers(f"QuodCkP{i}_", s)
         body = []
+        def show(t: Any, dt: str, var: str) -> str:
+            if V.is_array(t):  # print an array as the sequence of its elements
+                return f"{pr.name(('seq', t[1]), 'seq<' + V.elem_dafny_type(dt) + '>')}({var}[..]);"
+            return f"{pr.name(t, dt)}({var});"
+
         for k, x in enumerate(xs):
-            args = ", ".join(V.lit(v, t) for v, t in zip(x, pt))
+            stmts, args = V.bind(list(x), pt, [t for _, t in m.params], f"q{k}_")
             outs = [f"r{k}_{j}" for j in range(len(ot))]
-            body.append(f"var {', '.join(outs)} := {m.name}({args});")
+            body.extend(stmts)
+            body.append(f"var {', '.join(outs)} := {m.name}({', '.join(args)});")
             body.append(f'print "QCOUT {k} ";')
             if len(ot) == 1:
-                body.append(f"{pr.name(ot[0], m.outs[0][1])}({outs[0]});")
+                body.append(show(ot[0], m.outs[0][1], outs[0]))
             else:
                 body.append('print "(";')
                 for j, ((_, dt), t) in enumerate(zip(m.outs, ot)):
                     if j:
                         body.append('print ", ";')
-                    body.append(f"{pr.name(t, dt)}({outs[j]});")
+                    body.append(show(t, dt, outs[j]))
                 body.append('print ")";')
             body.append('print "\\n";')
         main = f"{m.indent}{s}method QuodCkM{i}() {{ " + " ".join(body) + " }"
@@ -306,6 +325,18 @@ class Checker:
             res.notes.append("could not run the method to obtain reference answers: "
                              + _first_error(out))
         return [(xs[k], got[k]) for k in sorted(got)]
+
+
+def _is_array(dafny_type: str) -> bool:
+    return re.match(r"array\d*\s*<", dafny_type) is not None
+
+
+def _is_array1(dafny_type: str) -> bool:
+    return re.match(r"array\s*<", dafny_type) is not None
+
+
+def _reads(names: list[str]) -> str:
+    return f" reads {', '.join(names)}" if names else ""
 
 
 def _diverse(xs: list[tuple], k: int) -> list[tuple]:

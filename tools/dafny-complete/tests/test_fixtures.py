@@ -20,6 +20,10 @@ EXPECTED = {
         "Length": "determined", "Single": "determined", "Abstract": "inconclusive",
         "NoOut": "skipped", "Copy": "determined", "Bang": "underspecified",
     },
+    "arrays.dfy": {
+        "KthElement": "determined", "WeakMax": "underspecified",
+        "CopyOf": "determined", "Doubled": "underspecified",
+    },
 }
 
 

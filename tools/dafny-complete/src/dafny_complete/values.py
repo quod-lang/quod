@@ -37,12 +37,21 @@ def parse_type(t: str) -> Type:
         return t
     if t.startswith("seq<") and t.endswith(">"):
         return ("seq", parse_type(t[4:-1]))
+    if t.startswith("array<") and t.endswith(">"):
+        inner = parse_type(t[6:-1])
+        if is_array(inner) or (isinstance(inner, tuple) and any(is_array(x) for x in iter_types(inner))):
+            raise Unsupported(t)  # arrays of arrays: not supported
+        return ("array", inner)
     if t.startswith("(") and t.endswith(")"):
         parts = _split_top(t[1:-1])
         if len(parts) == 1:
             return parse_type(parts[0])
         return ("tuple", [parse_type(p) for p in parts])
     raise Unsupported(t)
+
+
+def is_array(t: Type) -> bool:
+    return isinstance(t, tuple) and t[0] == "array"
 
 
 def supported(t: str) -> bool:
@@ -77,8 +86,36 @@ def lit(v: Any, t: Type) -> str:
     if t[0] == "seq":
         return "[" + ", ".join(lit(x, t[1]) for x in v) + "]"
     if t[0] == "tuple":
+        if any(is_array(x) for x in iter_types(t)):
+            raise Unsupported("array inside a tuple")
         return "(" + ", ".join(lit(x, s) for x, s in zip(v, t[1])) + ")"
-    raise Unsupported(t)
+    raise Unsupported(t)  # arrays are not expressions: use bind()
+
+
+def elem_dafny_type(dafny_type: str) -> str:
+    d = " ".join(dafny_type.split())
+    return d[d.index("<") + 1:-1]
+
+
+def bind(vals: list[Any], types: list[Type], dafny_types: list[str], prefix: str
+         ) -> tuple[list[str], list[str]]:
+    """Statements allocating array arguments, and the argument expressions to use.
+    Arrays need `new`, which only methods can do: the caller must place the statements
+    in a method body."""
+    stmts, args = [], []
+    for j, (v, t, d) in enumerate(zip(vals, types, dafny_types)):
+        if is_array(t):
+            name = f"{prefix}{j}"
+            e = elem_dafny_type(d)
+            stmts.append(f"var {name} := new {e}[0];" if not v else
+                         f"var {name} := new {e}[] [{', '.join(lit(x, t[1]) for x in v)}];")
+            # Mention every element: quantifiers like `exists i :: a[i] == x` need a term
+            # a[k] to instantiate, and an allocation alone does not provide one.
+            stmts.extend(f"assert {name}[{k}] == {lit(x, t[1])};" for k, x in enumerate(v))
+            args.append(name)
+        else:
+            args.append(lit(v, t))
+    return stmts, args
 
 
 # --- small inputs ----------------------------------------------------------------
@@ -92,10 +129,13 @@ def small_values(t: Type) -> list[Any]:
         return ["a", "0", " "]
     if t == "string":
         return ["", "a", "ab", "0", "10", "-1", "a/b", "aa"]
-    if t[0] == "seq":
+    if t[0] in ("seq", "array"):
         e = small_values(t[1])
-        e0, e1, e2 = e[0], e[1 % len(e)], e[2 % len(e)]
-        return [[], [e1], [e0, e1], [e1, e0], [e1, e1], [e0, e1, e2]]
+        e0, e1, e2, e3 = e[0], e[1 % len(e)], e[2 % len(e)], e[3 % len(e)]
+        # e3 is a negative int, or a second element of the same size as e2 for sequences:
+        # it gives inputs with negatives, and ties (two different elements of equal length).
+        return [[], [e1], [e0, e1], [e1, e0], [e1, e1], [e0, e1, e2], [e1, e3], [e2, e3],
+                [e0, e0, e1]]
     if t[0] == "tuple":
         return [tuple(c) for c in itertools.islice(
             itertools.product(*(small_values(s)[:3] for s in t[1])), 8)]
@@ -103,11 +143,21 @@ def small_values(t: Type) -> list[Any]:
 
 
 def input_tuples(types: list[Type], limit: int) -> list[tuple]:
-    """Small argument tuples, smallest first, at most `limit`."""
-    pools = [small_values(t)[:6] for t in types]
+    """At most `limit` small argument tuples. Greedy: each pick brings as many values not seen
+    yet (per argument) as possible, smaller tuples first on ties, so that unusual values
+    (negatives, ties, duplicates) are not crowded out by the many tiny combinations."""
+    pools = [small_values(t) for t in types]
     combos = list(itertools.islice(itertools.product(*pools), 4000))
     combos.sort(key=lambda c: len(repr(c)))
-    return combos[:limit]
+    seen: list[set] = [set() for _ in types]
+    picked, rest = [], combos
+    while rest and len(picked) < limit:
+        best = max(rest, key=lambda c: sum(repr(v) not in s for v, s in zip(c, seen)))
+        rest = [c for c in rest if c is not best]
+        picked.append(best)
+        for v, s in zip(best, seen):
+            s.add(repr(v))
+    return picked
 
 
 # --- neighbours of a result ------------------------------------------------------
@@ -128,12 +178,12 @@ def neighbours(v: Any, t: Type) -> list[Any]:
     if t == "char":
         return [_alt_char(v)]
     if t == "string":
-        out = [v + "x", v + "1", v[:-1], ""]
+        out = [v + "x", v + "1", v[:-1], "", v[::-1], v + v[-1:]]
         for i in sorted({0, len(v) // 2, len(v) - 1}):
             if 0 <= i < len(v):
                 out.append(v[:i] + _alt_char(v[i]) + v[i + 1:])
         return out
-    if t[0] == "seq":
+    if t[0] in ("seq", "array"):
         v = list(v)
         out = [[], v[:-1], v[::-1]]
         if v:
@@ -149,6 +199,21 @@ def neighbours(v: Any, t: Type) -> list[Any]:
                 out.append(tuple(v[:i]) + (alt,) + tuple(v[i + 1:]))
         return out
     raise Unsupported(t)
+
+
+def from_inputs(args: tuple, arg_types: list[Type], out_type: Type) -> list[Any]:
+    """Candidate results taken from the input itself: an argument of the result's type, or an
+    element of a sequence/array argument whose elements have the result's type (a 'pick one of
+    the inputs' contract often leaves the choice open)."""
+    out = []
+    for v, t in zip(args, arg_types):
+        if t == out_type or (is_array(t) and out_type == ("seq", t[1])):
+            out.append(list(v) if is_array(t) else v)
+        if isinstance(t, tuple) and t[0] in ("seq", "array") and t[1] == out_type:
+            out.extend(v)
+        if t == "string" and out_type == "char":
+            out.extend(v)
+    return out
 
 
 def canon(v: Any) -> Any:

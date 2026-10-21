@@ -36,8 +36,12 @@ def render(path: Path, results: list[Result]) -> str:
             outs = ", ".join(w["outputs"])
             lines.append(f"{head} the contract accepts two different results")
             lines.append(f"  {'':8} {'':{width}}  input  : {args}")
-            lines.append(f"  {'':8} {'':{width}}  {outs} = {_fmt(w['result_a'])}   (what the method returns)")
+            is_answer = w.get("method_returns", w["result_a"]) == w["result_a"]
+            label_a = "(what the method returns)" if is_answer else "(satisfies every ensures)"
+            lines.append(f"  {'':8} {'':{width}}  {outs} = {_fmt(w['result_a'])}   {label_a}")
             lines.append(f"  {'':8} {'':{width}}  {outs} = {_fmt(w['result_b'])}   (also satisfies every ensures)")
+            if not is_answer:
+                lines.append(f"  {'':8} {'':{width}}  (the method returns {_fmt(w['method_returns'])})")
         else:
             lines.append(f"{head} {r.reason}")
         for n in r.notes:

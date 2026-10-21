@@ -202,7 +202,8 @@ def _body_start(s: str, i: int) -> tuple[int | None, int]:
             prev = s[:j].rstrip()
             # After an operator, '{' opens a set/map display. A single '|' closes a
             # cardinality |xs| (a value), whereas '||' is the boolean operator.
-            after_op = bool(prev) and (prev[-1] in "=<>+-*&!,(:" or prev.endswith("||"))
+            after_op = bool(prev) and (prev[-1] in "=<>+-*&!,(:" or prev.endswith("||")
+                                       or re.search(r"(^|[^\w])!?in$", prev) is not None)
             if after_op:
                 j = match_close(s, j, "{", "}")  # set/map display in a clause, not a body
             else:
@@ -219,52 +220,64 @@ def find_methods(src: str) -> list[Method]:
     all_scopes = scopes(s)
     found = []
     for m in re.finditer(r"\bmethod\s+([A-Za-z_][\w']*)", s):
-        name, k = m.group(1), m.end()
-        line_start = s.rfind("\n", 0, m.start()) + 1
-        mods = s[line_start:m.start()]
-        indent = re.match(r"[ \t]*", src[line_start:]).group(0)
-        tp = ""
-        rest = s[k:]
-        if rest.lstrip().startswith("<"):
-            a = k + (len(rest) - len(rest.lstrip()))
-            b = match_close(s, a, "<", ">")
-            tp, k = code[a:b + 1], b + 1
-        p_open = s.index("(", k)
-        p_close = match_close(s, p_open)
-        params = split_params(code[p_open + 1:p_close])
-        outs, spec_from = [], p_close + 1
-        r = re.compile(r"\s*returns\s*\(").match(s, p_close + 1)
-        if r:
-            r_close = match_close(s, r.end() - 1)
-            outs = split_params(code[r.end():r_close])
-            spec_from = r_close + 1
-        body, spec_end = _body_start(s, spec_from)
-        insert_at = match_close(s, body, "{", "}") + 1 if body is not None else spec_end
-        clauses: list[tuple[str, str]] = []
-        depth, last_kw, last_pos = 0, None, 0
-        region = s[spec_from:spec_end]
-        for mm in re.finditer(r"[()\[\]]|\b(requires|ensures|modifies|decreases|reads)\b", region):
-            tok = mm.group(0)
-            if tok in "([":
-                depth += 1
-            elif tok in ")]":
-                depth -= 1
-            elif depth == 0:
-                if last_kw:
-                    clauses.append((last_kw, code[spec_from + last_pos:spec_from + mm.start()]))
-                last_kw, last_pos = tok, mm.end()
-        if last_kw:
-            clauses.append((last_kw, code[spec_from + last_pos:spec_end]))
-        clean = lambda e: re.sub(r"^\s*\w+\s*:(?!=)", "", " ".join(e.split()))  # noqa: E731 (labels)
-        chain = sorted((sc for sc in all_scopes if sc.start < m.start() < sc.end),
-                       key=lambda sc: sc.start)
-        found.append(Method(
-            name=name, line=src.count("\n", 0, m.start()) + 1,
-            static="static" in mods.split(), ghost="ghost" in mods.split(),
-            type_params=tp, params=params, outs=outs,
-            requires=[clean(e) for kw, e in clauses if kw == "requires"],
-            ensures=[clean(e) for kw, e in clauses if kw == "ensures"],
-            other_clauses=sorted({kw for kw, _ in clauses if kw in ("modifies", "reads")}),
-            insert_at=insert_at, name_pos=m.start(1), has_body=body is not None,
-            indent=indent, scope_chain=chain))
+        try:
+            found.extend(_one_method(src, code, s, m, all_scopes))
+        except ValueError:
+            continue  # a header we do not understand: leave that method out
     return found
+
+
+def _one_method(src: str, code: str, s: str, m: re.Match, all_scopes: list[Scope]) -> list[Method]:
+    """Parse one method header and contract. Raises ValueError on a header it does not
+    understand (e.g. refinement syntax `method Foo...`)."""
+    name, k = m.group(1), m.end()
+    line_start = s.rfind("\n", 0, m.start()) + 1
+    mods = s[line_start:m.start()]
+    indent = re.match(r"[ \t]*", src[line_start:]).group(0)
+    tp = ""
+    rest = s[k:]
+    if rest.lstrip().startswith("<"):
+        a = k + (len(rest) - len(rest.lstrip()))
+        b = match_close(s, a, "<", ">")
+        tp, k = code[a:b + 1], b + 1
+    if not s[k:].lstrip().startswith("("):
+        raise ValueError(f"method {name}: no parameter list (refinement syntax?)")
+    p_open = s.index("(", k)
+    p_close = match_close(s, p_open)
+    params = split_params(code[p_open + 1:p_close])
+    outs, spec_from = [], p_close + 1
+    r = re.compile(r"\s*returns\s*\(").match(s, p_close + 1)
+    if r:
+        r_close = match_close(s, r.end() - 1)
+        outs = split_params(code[r.end():r_close])
+        spec_from = r_close + 1
+    body, spec_end = _body_start(s, spec_from)
+    insert_at = match_close(s, body, "{", "}") + 1 if body is not None else spec_end
+    clauses: list[tuple[str, str]] = []
+    depth, last_kw, last_pos = 0, None, 0
+    region = s[spec_from:spec_end]
+    for mm in re.finditer(r"[()\[\]]|\b(requires|ensures|modifies|decreases|reads)\b", region):
+        tok = mm.group(0)
+        if tok in "([":
+            depth += 1
+        elif tok in ")]":
+            depth -= 1
+        elif depth == 0:
+            if last_kw:
+                clauses.append((last_kw, code[spec_from + last_pos:spec_from + mm.start()]))
+            last_kw, last_pos = tok, mm.end()
+    if last_kw:
+        clauses.append((last_kw, code[spec_from + last_pos:spec_end]))
+    # Drop clause labels (`requires L: e`) and the trailing ';' of older Dafny syntax.
+    clean = lambda e: re.sub(r"^\s*\w+\s*:(?!=)", "", " ".join(e.split())).rstrip(";").rstrip()  # noqa: E731
+    chain = sorted((sc for sc in all_scopes if sc.start < m.start() < sc.end),
+                   key=lambda sc: sc.start)
+    return [Method(
+        name=name, line=src.count("\n", 0, m.start()) + 1,
+        static="static" in mods.split(), ghost="ghost" in mods.split(),
+        type_params=tp, params=params, outs=outs,
+        requires=[clean(e) for kw, e in clauses if kw == "requires"],
+        ensures=[clean(e) for kw, e in clauses if kw == "ensures"],
+        other_clauses=sorted({kw for kw, _ in clauses if kw in ("modifies", "reads")}),
+        insert_at=insert_at, name_pos=m.start(1), has_body=body is not None,
+        indent=indent, scope_chain=chain)]
