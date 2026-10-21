@@ -17,3 +17,6 @@ bench/completeness/
 # early smoke tests, not part of the reported results
 bench/runs/smoke/
 bench/runs/smoke2/
+
+# unpublished drafts
+docs/drafts/
