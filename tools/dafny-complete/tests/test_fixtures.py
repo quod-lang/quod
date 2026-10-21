@@ -17,7 +17,7 @@ EXPECTED = {
     "tricky.dfy": {
         "Main": "skipped", "Abs": "determined", "WeakAbs": "underspecified",
         "Pair": "underspecified", "Clamp": "underspecified", "Inc": "skipped",
-        "Length": "determined", "Single": "determined", "Abstract": "inconclusive",
+        "Length": "determined", "Single": "determined", "Abstract": "underspecified",
         "NoOut": "skipped", "Copy": "determined", "Bang": "underspecified",
     },
     "arrays.dfy": {
@@ -26,7 +26,11 @@ EXPECTED = {
     },
     "classes.dfy": {
         "Available": "determined", "WeakAvailable": "inconclusive", "Deposit": "skipped",
-        "Doubled": "determined", "Sum": "determined", "AnyAbove": "inconclusive",
+        "Doubled": "determined", "Sum": "determined", "AnyAbove": "underspecified",
+    },
+    "datatypes.dfy": {
+        "Next": "determined", "Find": "underspecified", "CountNodes": "determined",
+        "WeakCount": "underspecified", "SomeOf": "underspecified",
     },
 }
 

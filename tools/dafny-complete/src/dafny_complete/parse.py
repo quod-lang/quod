@@ -217,6 +217,81 @@ def _body_start(s: str, i: int) -> tuple[int | None, int]:
     return None, len(s)
 
 
+def find_datatypes(src: str) -> dict[str, tuple[list[str], list[tuple[str, list[str]]]]]:
+    """name -> (type parameters, [(constructor, [field types])]) for each `datatype` declaration.
+    Field names are optional in Dafny (`Pair(int, int)`); only the types are kept."""
+    s = mask(src, literals=True)
+    code = mask(src, literals=False)
+    out = {}
+    for m in re.finditer(r"\bdatatype\s+([A-Za-z_][\w']*)\s*(<[^=]*?>)?\s*=", s):
+        tparams = []
+        if m.group(2):
+            for p in _split_top(m.group(2)[1:-1]):
+                pm = re.match(r"[+\-*!]?\s*([A-Za-z_]\w*)", p)
+                if pm:
+                    tparams.append(pm.group(1))
+        # The constructor list ends at a member block '{', at the next declaration, or at the
+        # end of the enclosing scope.
+        depth, j, end = 0, m.end(), len(s)
+        while j < len(s):
+            c = s[j]
+            if c in "([<":
+                depth += 1
+            elif c in ")]>":
+                depth -= 1
+            elif depth == 0 and c in "{}":
+                end = j
+                break
+            elif depth == 0 and _DECL.match(s, j) and not (s[j - 1].isalnum() or s[j - 1] == "_"):
+                end = j
+                break
+            j += 1
+        ctors = []
+        for part in _split_bars(code[m.end():end]):
+            part = re.sub(r"^\s*ghost\s+", "", part.strip())
+            cm = re.match(r"([A-Za-z_][\w']*)\s*(?:\((.*)\))?\s*$", part, re.S)
+            if not cm:
+                continue
+            fields = []
+            if cm.group(2) and cm.group(2).strip():
+                for f in _split_top(cm.group(2)):
+                    f = re.sub(r"^\s*ghost\s+", "", f)
+                    fields.append(" ".join((f.split(":", 1)[1] if ":" in f else f).split()))
+            ctors.append((cm.group(1), fields))
+        if ctors:
+            out[m.group(1)] = (tparams, ctors)
+    return out
+
+
+def _split_top(text: str) -> list[str]:
+    parts, depth, cur = [], 0, ""
+    for c in text:
+        depth += c in "(<["
+        depth -= c in ")>]"
+        if c == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += c
+    if cur.strip():
+        parts.append(cur)
+    return [p.strip() for p in parts]
+
+
+def _split_bars(text: str) -> list[str]:
+    parts, depth, cur = [], 0, ""
+    for c in text:
+        depth += c in "(<["
+        depth -= c in ")>]"
+        if c == "|" and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += c
+    parts.append(cur)
+    return [p for p in parts if p.strip()]
+
+
 def find_methods(src: str) -> list[Method]:
     code = mask(src, literals=False)  # comments gone, literals kept: source of expressions
     s = mask(src, literals=True)      # structure only

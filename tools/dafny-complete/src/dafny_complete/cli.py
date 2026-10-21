@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dafny_complete import __version__
 from dafny_complete.check import Checker, Result
+from dafny_complete.values import DVal
 
 TAG = {"determined": "[OK]   ", "underspecified": "[UNDER]", "inconclusive": "[?]    ",
        "skipped": "[skip] ", "error": "[ERR]  "}
@@ -36,12 +37,13 @@ def render(path: Path, results: list[Result]) -> str:
             outs = ", ".join(w["outputs"])
             lines.append(f"{head} the contract accepts two different results")
             lines.append(f"  {'':8} {'':{width}}  input  : {args}")
-            is_answer = w.get("method_returns", w["result_a"]) == w["result_a"]
+            returned = w.get("method_returns", w["result_a"])
+            is_answer = returned is not None and returned == w["result_a"]
             label_a = "(what the method returns)" if is_answer else "(satisfies every ensures)"
             lines.append(f"  {'':8} {'':{width}}  {outs} = {_fmt(w['result_a'])}   {label_a}")
             lines.append(f"  {'':8} {'':{width}}  {outs} = {_fmt(w['result_b'])}   (also satisfies every ensures)")
-            if not is_answer:
-                lines.append(f"  {'':8} {'':{width}}  (the method returns {_fmt(w['method_returns'])})")
+            if returned is not None and not is_answer:
+                lines.append(f"  {'':8} {'':{width}}  (the method returns {_fmt(returned)})")
         else:
             lines.append(f"{head} {r.reason}")
         for n in r.notes:
@@ -78,7 +80,11 @@ def main(argv: list[str] | None = None) -> int:
     results = Checker(a.file.resolve(), a.dafny, a.time_limit, a.keep, a.method).run(
         witness=not a.no_witness)
     if a.json:
-        print(json.dumps([r.__dict__ for r in results], indent=2, ensure_ascii=False))
+        def encode(o):  # datatype values: {"ctor": ..., "args": [...]}
+            if isinstance(o, DVal):
+                return {"ctor": o.ctor, "args": list(o.args)}
+            raise TypeError(type(o).__name__)
+        print(json.dumps([r.__dict__ for r in results], indent=2, ensure_ascii=False, default=encode))
     else:
         try:
             sys.stdout.reconfigure(encoding="utf-8")

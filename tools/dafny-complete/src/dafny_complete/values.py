@@ -1,20 +1,73 @@
 """Dafny value types supported by the witness search: parsing type strings, writing literals,
 generating small inputs and neighbouring outputs, printing values from Dafny and reading them back.
 
-Supported: int, nat, bool, char, string, seq<T>, tuples (T1, ..., Tn).
+Supported: int, nat, bool, char, string, seq<T>, array<T>, tuples (T1, ..., Tn), and the
+datatypes declared in the checked file (see registry()).
 """
 from __future__ import annotations
 
 import itertools
 import re
+import threading
+from dataclasses import dataclass, field
 from typing import Any, Iterator
 
-Type = Any  # 'int' | 'nat' | 'bool' | 'char' | 'string' | ('seq', T) | ('tuple', [T...])
+Type = Any  # 'int' | 'nat' | 'bool' | 'char' | 'string' | ('seq', T) | ('array', T)
+#              | ('tuple', [T...]) | ('dt', written_name, (type arg strings...))
 SCALARS = ("int", "nat", "bool", "char", "string")
 
 
 class Unsupported(Exception):
     pass
+
+
+# --- datatypes ---------------------------------------------------------------------
+
+@dataclass
+class DatatypeInfo:
+    name: str
+    tparams: list[str]
+    ctors: list[tuple[str, list[str]]]  # (constructor, field type strings)
+
+
+_tls = threading.local()  # one registry per thread: several files may be checked in parallel
+
+
+def registry() -> dict[str, DatatypeInfo]:
+    """Datatypes of the file being checked (by this thread)."""
+    if not hasattr(_tls, "dt"):
+        _tls.dt = {}
+    return _tls.dt
+
+
+@dataclass(frozen=True)
+class DVal:
+    """A datatype value: constructor name and arguments."""
+    ctor: str
+    args: tuple = field(default=())
+
+    def __repr__(self) -> str:
+        return self.ctor + (f"({', '.join(map(repr, self.args))})" if self.args else "")
+
+
+def _subst(type_str: str, tparams: list[str], targs: tuple) -> str:
+    if not tparams:
+        return type_str
+    m = dict(zip(tparams, targs))
+    return re.sub(r"\b(" + "|".join(map(re.escape, tparams)) + r")\b", lambda g: m[g.group(1)], type_str)
+
+
+def ctor_fields(t: Type) -> list[tuple[str, list[str]]]:
+    """Constructors of datatype type t, with field types instantiated (as Dafny strings)."""
+    info = registry()[t[1].split(".")[-1]]
+    return [(c, [_subst(f, info.tparams, t[2]) for f in fs]) for c, fs in info.ctors]
+
+
+def _ctor_types(fs: list[str]) -> list[Type] | None:
+    try:
+        return [parse_type(f) for f in fs]
+    except Unsupported:
+        return None
 
 
 def _split_top(s: str) -> list[str]:
@@ -47,7 +100,18 @@ def parse_type(t: str) -> Type:
         if len(parts) == 1:
             return parse_type(parts[0])
         return ("tuple", [parse_type(p) for p in parts])
+    m = re.fullmatch(r"([A-Za-z_][\w.']*)\s*(?:<(.*)>)?", t)
+    if m and m.group(1).split(".")[-1] in registry():
+        info = registry()[m.group(1).split(".")[-1]]
+        targs = tuple(_split_top(m.group(2))) if m.group(2) else ()
+        if len(targs) != len(info.tparams):
+            raise Unsupported(t)
+        return ("dt", m.group(1), targs)
     raise Unsupported(t)
+
+
+def is_dt(t: Type) -> bool:
+    return isinstance(t, tuple) and t[0] == "dt"
 
 
 def is_array(t: Type) -> bool:
@@ -89,6 +153,12 @@ def lit(v: Any, t: Type) -> str:
         if any(is_array(x) for x in iter_types(t)):
             raise Unsupported("array inside a tuple")
         return "(" + ", ".join(lit(x, s) for x, s in zip(v, t[1])) + ")"
+    if t[0] == "dt":
+        fs = dict(ctor_fields(t))[v.ctor]
+        qual = t[1].split("<")[0] + "." + v.ctor  # qualified: avoids clashes with other names
+        if not v.args:
+            return qual
+        return qual + "(" + ", ".join(lit(a, parse_type(f)) for a, f in zip(v.args, fs)) + ")"
     raise Unsupported(t)  # arrays are not expressions: use bind()
 
 
@@ -120,7 +190,7 @@ def bind(vals: list[Any], types: list[Type], dafny_types: list[str], prefix: str
 
 # --- small inputs ----------------------------------------------------------------
 
-def small_values(t: Type) -> list[Any]:
+def small_values(t: Type, depth: int = 0) -> list[Any]:
     if t in ("int", "nat"):
         return [0, 1, 2, -1, 3]
     if t == "bool":
@@ -129,8 +199,12 @@ def small_values(t: Type) -> list[Any]:
         return ["a", "0", " "]
     if t == "string":
         return ["", "a", "ab", "0", "10", "-1", "a/b", "aa"]
+    if t[0] == "dt":
+        return _small_dt(t, depth)
     if t[0] in ("seq", "array"):
-        e = small_values(t[1])
+        e = small_values(t[1], depth)
+        if not e:
+            return [[]]
         e0, e1, e2, e3 = e[0], e[1 % len(e)], e[2 % len(e)], e[3 % len(e)]
         # e3 is a negative int, or a second element of the same size as e2 for sequences:
         # it gives inputs with negatives, and ties (two different elements of equal length).
@@ -138,8 +212,28 @@ def small_values(t: Type) -> list[Any]:
                 [e0, e0, e1]]
     if t[0] == "tuple":
         return [tuple(c) for c in itertools.islice(
-            itertools.product(*(small_values(s)[:3] for s in t[1])), 8)]
+            itertools.product(*(small_values(s, depth)[:3] for s in t[1])), 8)]
     raise Unsupported(t)
+
+
+def _small_dt(t: Type, depth: int) -> list[Any]:
+    """A few values per constructor, round-robin so every constructor shows up early.
+    Recursion (trees, lists) is cut at depth 2 by keeping only constructors whose fields
+    are not datatypes."""
+    per_ctor = []
+    for c, fs in ctor_fields(t):
+        types = _ctor_types(fs)
+        if types is None:
+            continue  # a field type we cannot generate: leave this constructor out
+        if depth >= 2 and any(is_dt(x) or (isinstance(x, tuple) and any(is_dt(y) for y in iter_types(x)))
+                              for x in types):
+            continue
+        pools = [small_values(x, depth + 1)[:2] for x in types]
+        per_ctor.append([DVal(c, tuple(args)) for args in itertools.islice(itertools.product(*pools), 3)])
+    out = []
+    for k in range(3):
+        out.extend(vals[k] for vals in per_ctor if k < len(vals))
+    return out[:8]
 
 
 def input_tuples(types: list[Type], limit: int) -> list[tuple]:
@@ -198,6 +292,14 @@ def neighbours(v: Any, t: Type) -> list[Any]:
             for alt in neighbours(v[i], s)[:2]:
                 out.append(tuple(v[:i]) + (alt,) + tuple(v[i + 1:]))
         return out
+    if t[0] == "dt":
+        out = [x for x in _small_dt(t, 1) if x.ctor != v.ctor]  # another constructor
+        fs = dict(ctor_fields(t)).get(v.ctor, [])
+        types = _ctor_types(fs) or []
+        for i, ft in enumerate(types):  # same constructor, one argument changed
+            for alt in neighbours(v.args[i], ft)[:2]:
+                out.append(DVal(v.ctor, v.args[:i] + (alt,) + v.args[i + 1:]))
+        return out
     raise Unsupported(t)
 
 
@@ -217,6 +319,8 @@ def from_inputs(args: tuple, arg_types: list[Type], out_type: Type) -> list[Any]
 
 
 def canon(v: Any) -> Any:
+    if isinstance(v, DVal):
+        return ("#dt", v.ctor, canon(v.args))
     if isinstance(v, (list, tuple)):
         return tuple(canon(x) for x in v)
     return v
@@ -249,6 +353,24 @@ class Printers:
             inner = self.name(t[1], seq_elem_type(dafny_type))
             body = (f'print "["; for i := 0 to |v| {{ if i > 0 {{ print ", "; }} {inner}(v[i]); }} '
                     f'print "]";')
+        elif t[0] == "dt":
+            cases = []
+            for c, fs in ctor_fields(t):
+                types = _ctor_types(fs)
+                if not fs:
+                    cases.append(f'case {c} => {{ print "{c}"; }}')
+                elif types is None:  # a field we cannot print: the reader will reject "?"
+                    cases.append(f'case {c}({", ".join("_" for _ in fs)}) => {{ print "?"; }}')
+                else:
+                    names = [f"f{k}" for k in range(len(fs))]
+                    calls = []
+                    for k, (ft, fd) in enumerate(zip(types, fs)):
+                        if k:
+                            calls.append('print ", ";')
+                        calls.append(f"{self.name(ft, fd)}({names[k]});")
+                    cases.append(f'case {c}({", ".join(names)}) => {{ print "{c}("; '
+                                 + " ".join(calls) + ' print ")"; }')
+            body = "match v { " + " ".join(cases) + " }"
         else:  # tuple
             comps = tuple_comp_types(dafny_type)
             calls = []
@@ -284,7 +406,8 @@ def tuple_comp_types(dafny_type: str) -> list[str]:
     return _split_top(d[1:-1])
 
 
-_TOKEN = re.compile(r'\s*(-?\d+|true|false|"(?:[^"\\]|\\.|\\U\{\d+\})*"|\'(?:[^\'\\]|\\.|\\U\{\d+\})\'|[\[\](),])')
+_TOKEN = re.compile(r'\s*(-?\d+|"(?:[^"\\]|\\.|\\U\{\d+\})*"|\'(?:[^\'\\]|\\.|\\U\{\d+\})\'|'
+                    r"[A-Za-z_][\w']*|[\[\](),])")
 
 
 def _unescape(body: str) -> str:
@@ -327,6 +450,16 @@ def read_value(text: str) -> Any:
             return (items if tok == "[" else tuple(items)), i + 1
         if tok in ("true", "false"):
             return tok == "true", i + 1
+        if tok[0].isalpha() or tok[0] == "_":  # a datatype constructor, with or without args
+            if i + 1 < len(toks) and toks[i + 1] == "(":
+                args, j = [], i + 2
+                while toks[j] != ")":
+                    v, j = parse(j)
+                    args.append(v)
+                    if toks[j] == ",":
+                        j += 1
+                return DVal(tok, tuple(args)), j + 1
+            return DVal(tok), i + 1
         if tok[0] == '"':
             return _unescape(tok[1:-1]), i + 1
         if tok[0] == "'":
@@ -338,7 +471,8 @@ def read_value(text: str) -> Any:
 
 
 def iter_types(t: Type) -> Iterator[Type]:
+    """t and its component types (not looking inside datatypes, which may be recursive)."""
     yield t
-    if isinstance(t, tuple):
+    if isinstance(t, tuple) and t[0] != "dt":
         for s in (t[1] if t[0] == "tuple" else [t[1]]):
             yield from iter_types(s)

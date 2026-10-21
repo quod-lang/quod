@@ -71,7 +71,7 @@ method Single(x': int) returns (s: set<int>)
   s := {x'};
 }
 
-// bodiless: cannot be run, uniqueness not provable -> inconclusive
+// bodiless: nothing to run, but small output values give a witness -> underspecified
 method Abstract(x: int) returns (y: int)
   ensures y > x
 
