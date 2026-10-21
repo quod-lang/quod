@@ -1,0 +1,29 @@
+// hello.quod: a first Quod program (kernel draft v0 syntax, not compilable yet)
+
+// Pure function: receives no capability, has no effect, result fully specified.
+fn greeting(name: str) -> str
+  requires len(name) > 0
+  ensures result == "Hello, " + name + "!"
+{
+  "Hello, " + name + "!"
+}
+
+// Can only write to the console it is given, and nothing else.
+// The contract covers the effect itself, through the ghost model `written`.
+fn greet(out: Console, name: str)
+  requires len(name) > 0
+  ensures out.written == old(out.written) + [greeting(name) + "\n"]
+{
+  out.write_line(greeting(name))
+}
+
+// The only entry point that receives full authority; it passes on just the console.
+fn main(sys: System) {
+  greet(sys.console, "world")
+}
+
+test greet_writes_one_line {
+  let c = Console.recorder()
+  greet(c, "world")
+  assert c.written == ["Hello, world!\n"]
+}

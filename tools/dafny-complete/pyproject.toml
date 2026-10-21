@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dafny-complete"
+dynamic = ["version"]
+description = "Does your Dafny contract pin down a single result? Spec-completeness checker with concrete witnesses."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Malek Aït Ouaret" }]
+keywords = ["dafny", "formal-verification", "specification", "llm", "ai-agents"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Quality Assurance",
+  "Intended Audience :: Developers",
+]
+
+[project.urls]
+Homepage = "https://github.com/quod-lang/quod"
+
+[project.scripts]
+dafny-complete = "dafny_complete.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "dafny_complete.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
