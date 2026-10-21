@@ -26,6 +26,8 @@ and a human can write Quod too, just more tediously.
 
 ## What we learned so far
 
+*Full story: [Green proofs, empty promises: when AI agents write their own specifications](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf) (dev.to).*
+
 - Asked to write *verified* Dafny, a smaller model produced contracts that verify but barely
   say anything: 5 of 8 only constrained a length, a format or a shape. One of those methods was
   wrong, and the proof did not notice.

@@ -26,6 +26,8 @@ de modèle, et un humain peut écrire du Quod, simplement plus laborieusement.
 
 ## Ce qu'on a appris jusqu'ici
 
+*Le récit complet (en anglais) : [Green proofs, empty promises: when AI agents write their own specifications](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf) (dev.to).*
+
 - Sommé d'écrire du Dafny *vérifié*, un modèle plus petit a produit des contrats qui se prouvent
   mais ne disent presque rien : 5 sur 8 ne contraignaient qu'une longueur, un format ou une forme.
   L'une de ces méthodes était fausse, et la preuve ne l'a pas vu.

@@ -33,7 +33,8 @@ an acyclic graph, a path normalizer allowed to return any non-empty string. Four
 happened to be correct; one was not, and the proof did not notice.
 
 When code is written by agents, a weak specification is worse than none: it produces **false
-confidence**. `dafny-complete` makes that visible.
+confidence**. `dafny-complete` makes that visible. The full story:
+[Green proofs, empty promises](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf).
 
 ## Install
 
