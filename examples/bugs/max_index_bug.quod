@@ -1,0 +1,21 @@
+// A deliberately buggy program: `i = i + 2` skips every other element.
+// `quod check` must reject it (this file is not part of the examples that verify).
+
+fn max_index(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures 0 <= result < len(xs)
+  ensures forall i in 0..len(xs): xs[i] <= xs[result]
+{
+  let mut best = 0;
+  let mut i = 1;
+  while i < len(xs)
+    invariant 1 <= i <= len(xs)
+    invariant 0 <= best < len(xs)
+    invariant forall j in 0..i: xs[j] <= xs[best]
+    decreases len(xs) - i
+  {
+    if xs[i] > xs[best] { best = i; }
+    i = i + 2; // bug: should be i + 1
+  }
+  return best;
+}
