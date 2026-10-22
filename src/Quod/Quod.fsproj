@@ -27,6 +27,7 @@
     <Compile Include="Eval.fs" />
     <Compile Include="Smt.fs" />
     <Compile Include="Vcgen.fs" />
+    <Compile Include="CodegenPython.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

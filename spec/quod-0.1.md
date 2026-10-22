@@ -101,8 +101,9 @@ return e;              // or a final expression at the end of the body
 - Obligations: `requires` of each call, `ensures` at each return, loop `invariant` (on entry and
   preserved), `decreases` (loops and recursion), sequence bounds, non-zero divisors, `nat`
   assignments, `assert`.
-- `--runtime-checks`: instead of failing on an unproved obligation, insert an `assert` in the
-  generated Python, and list it in the report (the ⚠️ status of [principle 2](kernel.md)).
+- `--runtime-checks`: instead of refusing to build when an obligation is not proved, check the
+  contracts of the functions concerned at run time in the generated Python, and list them in the
+  report (the ⚠️ status of [principle 2](kernel.md)).
 
 ## Completeness (pillar 5), built in
 
@@ -142,7 +143,20 @@ quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
 - One Python module per Quod file, one `def` per function, type hints included.
 - `seq<T>` is a Python `list` (accepted as any sequence on input), tuples are tuples, `int`/`nat`
   are `int`, `bool` is `bool`.
-- Proved contracts produce no runtime code; `--runtime-checks` adds `assert`s for unproved ones.
+- `quod build` generates code only for a program that verifies. With `--runtime-checks`, a function
+  whose proofs fail is still built, and its contracts (requires, ensures, invariants before each
+  iteration and after the last one, asserts) are checked at run time. They raise `AssertionError`
+  and are not Python `assert`s, so `python -O` keeps them. An underspecified contract always blocks
+  the build: no run-time check can tell that a result is the intended one.
+- In such a function, indexing and slicing check their bounds (Python would wrap a negative index
+  and clamp a slice), and a division by zero raises `ZeroDivisionError`. A `nat` that would be
+  negative is not checked.
+- Proved contracts produce no runtime code, only the function's docstring.
+- Quod semantics where Python differs: Euclidean `/` and `%` (`_quod_div`, `_quod_mod`), and
+  sequence arguments copied into fresh lists on entry. Builtins are aliased (`_quod_len`...), so a
+  Quod function named `len` or `list` shadows nothing the generated code needs. A name that is a
+  Python keyword gets a trailing `_`.
+- Known limit: recursion is Python recursion (default depth 1000).
 
 ## Example
 

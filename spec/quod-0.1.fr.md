@@ -104,8 +104,9 @@ return e;              // ou une expression finale à la fin du corps
 - Obligations : `requires` de chaque appel, `ensures` à chaque retour, `invariant` de boucle (à
   l'entrée et préservé), `decreases` (boucles et récursion), bornes des séquences, diviseurs non
   nuls, affectations à un `nat`, `assert`.
-- `--runtime-checks` : au lieu d'échouer sur une obligation non prouvée, insérer un `assert` dans le
-  Python généré, et le signaler dans le rapport (le statut ⚠️ du [principe 2](kernel.fr.md)).
+- `--runtime-checks` : au lieu de refuser de compiler quand une obligation n'est pas prouvée,
+  vérifier à l'exécution, dans le Python généré, les contrats des fonctions concernées, et les
+  signaler dans le rapport (le statut ⚠️ du [principe 2](kernel.fr.md)).
 
 ## Complétude (pilier 5), intégrée
 
@@ -146,8 +147,21 @@ quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
 - Un module Python par fichier Quod, une `def` par fonction, avec annotations de type.
 - `seq<T>` devient une `list` Python (n'importe quelle séquence est acceptée en entrée), les tuples
   restent des tuples, `int`/`nat` deviennent `int`, `bool` reste `bool`.
-- Les contrats prouvés ne produisent aucun code à l'exécution ; `--runtime-checks` ajoute des
-  `assert` pour ceux qui ne le sont pas.
+- `quod build` ne génère du code que pour un programme vérifié. Avec `--runtime-checks`, une
+  fonction dont des preuves échouent est tout de même compilée, et ses contrats (requires, ensures,
+  invariants avant chaque itération et après la dernière, assert) sont vérifiés à l'exécution. Ils
+  lèvent `AssertionError` ; ce ne sont pas des `assert` Python, donc `python -O` les conserve. Un
+  contrat sous-spécifié bloque toujours la compilation : aucune vérification à l'exécution ne peut
+  dire qu'un résultat est celui voulu.
+- Dans une telle fonction, l'indexation et les tranches vérifient leurs bornes (Python ferait boucler
+  un indice négatif et tronquerait une tranche), et une division par zéro lève `ZeroDivisionError`.
+  Un `nat` qui deviendrait négatif n'est pas vérifié.
+- Les contrats prouvés ne produisent aucun code à l'exécution, seulement la docstring de la fonction.
+- La sémantique de Quod là où Python diffère : `/` et `%` euclidiens (`_quod_div`, `_quod_mod`), et
+  les séquences reçues en argument copiées dans de nouvelles listes à l'entrée. Les fonctions natives
+  sont aliasées (`_quod_len`...), donc une fonction Quod nommée `len` ou `list` ne masque rien dont le
+  code généré a besoin. Un nom qui est un mot-clé Python reçoit un `_` final.
+- Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).
 
 ## Exemple
 

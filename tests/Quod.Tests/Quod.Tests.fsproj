@@ -10,6 +10,7 @@
     <Compile Include="TypeTests.fs" />
     <Compile Include="VerifyTests.fs" />
     <Compile Include="CompletenessTests.fs" />
+    <Compile Include="CodegenTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
