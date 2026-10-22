@@ -25,3 +25,7 @@ docs/drafts/
 bin/
 obj/
 proto/z3-aot/out/
+artifacts/
+
+# Visual Studio cache
+.vs/
