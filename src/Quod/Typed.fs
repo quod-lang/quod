@@ -85,6 +85,9 @@ type TFn =
       IsExprFn: bool
       /// Part of a recursive cycle (direct or mutual): needs `decreases`.
       IsRecursive: bool
+      /// Identifier of that cycle (-1 when not recursive): a call to a function of the same
+      /// cycle must make the `decreases` measure smaller.
+      Cycle: int
       Span: Span }
 
 type TProgram = { Fns: TFn list }

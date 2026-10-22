@@ -24,6 +24,8 @@
     <Compile Include="Printer.fs" />
     <Compile Include="Typed.fs" />
     <Compile Include="Typecheck.fs" />
+    <Compile Include="Smt.fs" />
+    <Compile Include="Vcgen.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

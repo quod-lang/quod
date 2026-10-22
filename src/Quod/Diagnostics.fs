@@ -21,6 +21,8 @@ type Diagnostic =
       Severity: Severity
       Fn: string option
       Property: string option
+      /// Values of the parameters that make a proof obligation fail (name, Quod value).
+      Counterexample: (string * string) list
       Message: string }
 
 /// Raised by a stage that stops at its first error (the parser does in 0.1).
@@ -29,7 +31,7 @@ exception QuodError of Diagnostic
 let syntaxError (file: string) (span: Span) (message: string) =
     QuodError
         { File = file; Span = span; Kind = "syntax"; Status = "error"; Severity = Error
-          Fn = None; Property = None; Message = message }
+          Fn = None; Property = None; Counterexample = []; Message = message }
 
 let private severityText = function Error -> "error" | Warning -> "warning"
 
@@ -42,6 +44,8 @@ let toText (d: Diagnostic) =
     | Some f -> sb.Append("in ").Append(f).Append(": ") |> ignore
     | None -> ()
     sb.Append(d.Message) |> ignore
+    if not d.Counterexample.IsEmpty then
+        sb.Append("\n    counterexample: ").Append(d.Counterexample |> List.map (fun (n, v) -> n + " = " + v) |> String.concat ", ") |> ignore
     sb.ToString()
 
 let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
@@ -60,6 +64,11 @@ let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
     match d.Property with
     | Some p -> w.WriteString("property", p)
     | None -> ()
+    if not d.Counterexample.IsEmpty then
+        w.WriteStartObject("counterexample")
+        for (n, v) in d.Counterexample do
+            w.WriteString(n, v)
+        w.WriteEndObject()
     w.WriteString("message", d.Message)
     w.WriteEndObject()
 

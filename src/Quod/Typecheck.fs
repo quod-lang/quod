@@ -38,7 +38,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
     member _.Error(span: Span, fn: string, message: string) =
         errors.Add
             { File = file; Span = span; Kind = "type"; Status = "error"; Severity = Error
-              Fn = (if fn = "" then None else Some fn); Property = None; Message = message }
+              Fn = (if fn = "" then None else Some fn); Property = None; Counterexample = []; Message = message }
 
     // --- scopes -------------------------------------------------------------------
 
@@ -361,7 +361,8 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                     c.Error(s.Span, f.Name, "a value can only end the function body (or the branches of its last 'if'); use 'return' here")
                 mk (SReturn(c.Coerce(c.Expr(e, code, Some ret), ret, f.Name, "the returned value"))))
 
-    member c.Function(f: FnDecl, recursive: bool) : TFn =
+    member c.Function(f: FnDecl, cycle: int option) : TFn =
+        let recursive = cycle.IsSome
         let ret = ofSyntax f.Ret
         c.Push()
         let ps =
@@ -396,7 +397,8 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 TStmtBody ts, false
         c.Pop()
         { Name = f.Name; Params = ps; Ret = ret; Requires = req; Ensures = ens; Loose = loose
-          Decreases = dec; Body = body; IsExprFn = isExpr; IsRecursive = recursive; Span = f.Span }
+          Decreases = dec; Body = body; IsExprFn = isExpr; IsRecursive = recursive
+          Cycle = defaultArg cycle -1; Span = f.Span }
 
 /// Names of the functions called in an expression or statement list (bodies only).
 let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
@@ -429,7 +431,7 @@ let rec private callsStmts (acc: HashSet<string>) (ss: Stmt list) =
             callsStmts acc b
 
 /// Functions that belong to a call cycle (direct or mutual recursion), by Tarjan's algorithm.
-let private recursiveFns (fns: FnDecl list) : Set<string> =
+let private recursiveFns (fns: FnDecl list) : Map<string, int> =
     let graph =
         fns |> List.map (fun f ->
             let acc = HashSet<string>()
@@ -443,7 +445,8 @@ let private recursiveFns (fns: FnDecl list) : Set<string> =
     let onStack = HashSet<string>()
     let stack = Stack<string>()
     let mutable counter = 0
-    let mutable result = Set.empty
+    let mutable result = Map.empty
+    let mutable cycles = 0
     let rec strong (v: string) =
         index.[v] <- counter
         low.[v] <- counter
@@ -466,7 +469,9 @@ let private recursiveFns (fns: FnDecl list) : Set<string> =
                 comp.Add w
                 go <- w <> v
             if comp.Count > 1 || graph.[v].Contains v then
-                result <- Set.union result (set comp)
+                for w in comp do
+                    result <- result.Add(w, cycles)
+                cycles <- cycles + 1
     for f in fns do
         if not (index.ContainsKey f.Name) then strong f.Name
     result
@@ -479,14 +484,14 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
         if fns.ContainsKey f.Name then
             dups.Add
                 { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
-                  Property = None; Message = "a function named '" + f.Name + "' is already defined" }
+                  Property = None; Counterexample = []; Message = "a function named '" + f.Name + "' is already defined" }
         elif f.Name = "len" then
             dups.Add
                 { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
-                  Property = None; Message = "'len' is a built-in function and cannot be redefined" }
+                  Property = None; Counterexample = []; Message = "'len' is a built-in function and cannot be redefined" }
         else
             fns <- fns.Add(f.Name, f)
     let recursive = recursiveFns program.Fns
     let checker = Checker(file, fns)
-    let typed = program.Fns |> List.map (fun f -> checker.Function(f, recursive.Contains f.Name))
+    let typed = program.Fns |> List.map (fun f -> checker.Function(f, recursive.TryFind f.Name))
     { Fns = typed }, List.ofSeq dups @ checker.Errors
