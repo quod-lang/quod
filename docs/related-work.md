@@ -1,6 +1,6 @@
 # Related work: checking the strength of (LLM-written) specifications
 
-*Written 2026-10-21 after publishing dafny-complete. Lahiri 2024 was read in its arXiv HTML
+*Written 2026-10-21 after publishing dafny-complete; MutDafny added 2026-10-22. Lahiri 2024 was read in its arXiv HTML
 version; the other entries are summarized from their abstracts and from search results and should
 be read in full before being cited in detail.*
 
@@ -23,6 +23,28 @@ Symbolically tests Dafny specifications against input/output test cases:
 
 **This is the same core idea as dafny-complete's witness step** (mutate an output on a concrete
 input, ask Dafny), published two years earlier. We should have cited it from the start.
+
+**Amaral, Mendes, Campos, "MutDafny: A Mutation-Based Approach to Assess Dafny Specifications"**
+(2025, [arXiv 2511.15403](https://arxiv.org/abs/2511.15403); abstract read, paper not yet).
+Mutation testing applied to Dafny *specifications*: the tool injects faults into the **code** (40
+mutation operators, some synthesized from bug-fix commits in public Dafny projects) and checks
+whether the mutant still verifies; a surviving mutant may reveal a weak specification. Evaluated on
+794 real-world Dafny programs; a manual analysis of a subset of the surviving mutants identified
+five weak specifications (about one every 241 lines of code).
+
+Same goal as dafny-complete, from the other end. The differences, as far as the abstract goes:
+
+- MutDafny mutates the implementation; dafny-complete leaves the code alone and questions the
+  contract directly (can two different results satisfy it?).
+- A surviving mutant is a *possible* weakness, to be confirmed by hand (it may be an equivalent
+  mutant); a dafny-complete witness is two distinct results whose acceptance Dafny has proved.
+- For a mutant to survive, its proof (loop invariants, lemmas) must still go through, which a code
+  change can break for reasons unrelated to the contract; dafny-complete never re-proves the body.
+- MutDafny's operators can reach properties the contract states about intermediate behaviour;
+  dafny-complete only looks at the input/output relation of each method.
+
+The two are complementary, and MutDafny's corpus of real-world programs would be a good shared
+benchmark.
 
 ## Other related work
 
@@ -48,13 +70,13 @@ input, ask Dafny), published two years earlier. We should have cited it from the
 
 ## What dafny-complete adds (modestly)
 
-| | Lahiri 2024 | nl2postcond | dafny-complete |
-|---|---|---|---|
-| Needs tests (input/output pairs) | yes | yes | **no**: runs the method itself |
-| Needs reference code / code mutants | no | yes | no |
-| Universal check over all inputs | no (per test) | no | **yes**: a uniqueness lemma, proved symbolically |
-| Meaning of a "mutant" verdict | verification *failed* ⇒ counted as killed (an unknown is read as a kill) | test-based | witness only when acceptance is **proved** ⇒ an UNDER verdict is certain |
-| Output | a score per specification | a score | per-method verdict with a concrete witness, CLI + JSON for agents |
+| | Lahiri 2024 | nl2postcond | MutDafny 2025 | dafny-complete |
+|---|---|---|---|---|
+| Needs tests (input/output pairs) | yes | yes | no | **no**: runs the method itself |
+| Mutates | expected outputs | reference code | the implementation | nothing (proves uniqueness, then probes outputs) |
+| Universal check over all inputs | no (per test) | no | yes (the mutant must verify) | **yes**: a uniqueness lemma, proved symbolically |
+| Meaning of a weakness verdict | verification *failed* ⇒ counted as killed (an unknown is read as a kill) | test-based | a mutant verifies ⇒ possible weakness, confirmed by hand | witness only when acceptance is **proved** ⇒ an UNDER verdict is certain |
+| Output | a score per specification | a score | surviving mutants | per-method verdict with a concrete witness, CLI + JSON for agents |
 
 The empirical part (agent-written contracts in a Python-vs-Dafny benchmark, with hidden tests) is
 small but, as far as this review goes, a fresh data point: most of a smaller model's contracts
