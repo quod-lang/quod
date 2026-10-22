@@ -20,3 +20,8 @@ bench/runs/smoke2/
 
 # unpublished drafts
 docs/drafts/
+
+# .NET build outputs
+bin/
+obj/
+proto/z3-aot/out/
