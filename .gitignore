@@ -29,3 +29,6 @@ artifacts/
 
 # Visual Studio cache
 .vs/
+*.user
+*.suo
+TestResults/
