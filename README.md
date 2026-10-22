@@ -21,7 +21,7 @@ and a human can write Quod too, just more tediously.
 |---|---|
 | [tools/dafny-complete/](tools/dafny-complete/) | **First building block, usable today**: a spec-completeness checker for Dafny that finds concrete witnesses of underspecified contracts |
 | [bench/](bench/) | **Phase 0, VerifBench**: measuring what verification brings when agents write code (Python vs Dafny, Opus vs Haiku) |
-| [spec/](spec/) | The language design: [kernel draft](spec/kernel.md) |
+| [spec/](spec/) | The language design: [kernel draft](spec/kernel.md), [scope of Quod 0.1](spec/quod-0.1.md) |
 | `src/` | *(to come)* compiler: parser, verifier (Z3), code generation, in C#/.NET |
 
 ## What we learned so far

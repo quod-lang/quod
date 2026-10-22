@@ -21,7 +21,7 @@ de modèle, et un humain peut écrire du Quod, simplement plus laborieusement.
 |---|---|
 | [tools/dafny-complete/](tools/dafny-complete/) | **Première brique, utilisable dès aujourd'hui** : contrôle de spec complète pour Dafny, avec témoins concrets des contrats sous-spécifiés |
 | [bench/](bench/README.fr.md) | **Phase 0, VerifBench** : mesurer l'apport de la vérification quand des agents écrivent le code (Python vs Dafny, Opus vs Haiku) |
-| [spec/](spec/) | Conception du langage : [brouillon du noyau](spec/kernel.fr.md) |
+| [spec/](spec/) | Conception du langage : [brouillon du noyau](spec/kernel.fr.md), [périmètre de Quod 0.1](spec/quod-0.1.fr.md) |
 | `src/` | *(à venir)* compilateur : analyse, vérification (Z3), génération de code, en C#/.NET |
 
 ## Ce qu'on a appris jusqu'ici
