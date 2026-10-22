@@ -19,13 +19,16 @@ let z3Path =
         | Some p -> p
         | None -> failwith "z3 not found: set QUOD_Z3 to the z3 executable to run the verification tests"
 
-/// Parse, type-check and verify; type errors fail the test (these tests are about proofs).
-let verify (src: string) : Diagnostic list =
+/// Parse, type-check and verify; type errors fail the test.
+let verifyAll (src: string) : Diagnostic list =
     let prog = Quod.Parser.parseProgram "test.quod" src
     let typed, errs = Quod.Typecheck.check "test.quod" prog
     Assert.True(errs.IsEmpty, "type errors: " + String.concat " | " (errs |> List.map (fun d -> d.Message)))
     use z3 = new Quod.Smt.Session(z3Path, 10000, None)
     (Quod.Vcgen.verify "test.quod" typed z3).Diagnostics
+
+/// The proof diagnostics only (these tests are about proofs; completeness has its own tests).
+let verify (src: string) : Diagnostic list = verifyAll src |> List.filter (fun d -> d.Kind = "proof")
 
 let assertProved (src: string) =
     let ds = verify src

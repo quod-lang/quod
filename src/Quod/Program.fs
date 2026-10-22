@@ -71,16 +71,20 @@ let private checkCommand (file: string) (o: Options) =
                     use session = new Smt.Session(z3Path, o.Timeout * 1000, log)
                     let result = Vcgen.verify file typed session
                     report o result.Diagnostics
+                    let errors = result.Diagnostics |> List.filter (fun d -> d.Severity = Error)
+                    let proofErrors = errors |> List.filter (fun d -> d.Kind = "proof") |> List.length
+                    let underspecified = errors |> List.filter (fun d -> d.Kind = "completeness") |> List.length
                     if not o.Json then
-                        if result.Diagnostics.IsEmpty then
-                            Console.WriteLine(
-                                "verified: " + string typed.Fns.Length + " function(s), "
-                                + string result.Proved + " proof obligation(s) proved")
-                        else
-                            Console.Error.WriteLine(
-                                string result.Diagnostics.Length + " proof obligation(s) failed, "
-                                + string result.Proved + " proved")
-                    if result.Diagnostics.IsEmpty then 0 else 1
+                        let proofs =
+                            string result.Proved + " proof obligation(s) proved"
+                            + (if proofErrors > 0 then ", " + string proofErrors + " failed" else "")
+                        let complete =
+                            string result.Determined + " of " + string result.WithContract
+                            + " contract(s) determine their result"
+                            + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
+                        let line = (if errors.IsEmpty then "verified: " else "rejected: ") + proofs + "; " + complete
+                        if errors.IsEmpty then Console.WriteLine line else Console.Error.WriteLine line
+                    if errors.IsEmpty then 0 else 1 // inconclusive completeness is a warning only
         with
         | QuodError d ->
             report o [ d ]

@@ -45,7 +45,7 @@ let toText (d: Diagnostic) =
     | None -> ()
     sb.Append(d.Message) |> ignore
     if not d.Counterexample.IsEmpty then
-        sb.Append("\n    counterexample: ").Append(d.Counterexample |> List.map (fun (n, v) -> n + " = " + v) |> String.concat ", ") |> ignore
+        sb.Append(if d.Kind = "completeness" then "\n    witness: " else "\n    counterexample: ").Append(d.Counterexample |> List.map (fun (n, v) -> n + " = " + v) |> String.concat ", ") |> ignore
     sb.ToString()
 
 let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
@@ -65,7 +65,7 @@ let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
     | Some p -> w.WriteString("property", p)
     | None -> ()
     if not d.Counterexample.IsEmpty then
-        w.WriteStartObject("counterexample")
+        w.WriteStartObject(if d.Kind = "completeness" then "witness" else "counterexample")
         for (n, v) in d.Counterexample do
             w.WriteString(n, v)
         w.WriteEndObject()

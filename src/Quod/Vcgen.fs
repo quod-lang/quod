@@ -100,6 +100,32 @@ let rec private renderValue (e: SExpr) : string =
         | None -> sexprText other
 
 /// Variables assigned anywhere in a loop body (the ones a loop must forget).
+/// A Z3 model value as a concrete Quod value, for the evaluator (None if not understood).
+let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
+    let rec seqItems (elem: Ty) (x: SExpr) : Eval.Value list option =
+        match x with
+        | List [ Atom "as"; Atom "seq.empty"; _ ] -> Some []
+        | List [ Atom "seq.unit"; y ] -> valueOf elem y |> Option.map (fun v -> [ v ])
+        | List(Atom "seq.++" :: parts) ->
+            parts |> List.map (seqItems elem) |> List.fold (fun acc p -> Option.map2 (@) acc p) (Some [])
+        | _ -> None
+    match t, e with
+    | (TyInt | TyNat), Atom n ->
+        match bigint.TryParse n with
+        | true, v -> Some(Eval.VInt v)
+        | _ -> None
+    | (TyInt | TyNat), List [ Atom "-"; Atom n ] ->
+        match bigint.TryParse n with
+        | true, v -> Some(Eval.VInt(-v))
+        | _ -> None
+    | TyBool, Atom "true" -> Some(Eval.VBool true)
+    | TyBool, Atom "false" -> Some(Eval.VBool false)
+    | TySeq elem, x -> seqItems elem x |> Option.map Eval.VSeq
+    | TyTuple ts, List(Atom _ :: args) when args.Length = ts.Length ->
+        let parts = List.map2 valueOf ts args
+        if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
+    | _ -> None
+
 let rec private assignedIn (body: TStmt list) : string list =
     body |> List.collect (fun s ->
         match s.Kind with
@@ -537,7 +563,122 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         z3.Pop()
         diags.Count = before
 
-type VerifyResult = { Diagnostics: Diagnostic list; Proved: int }
+    /// Completeness (pillar 5): can two different results satisfy the contract for the same
+    /// valid input (or, with `loose`, two results that the declared relation does not allow)?
+    /// unsat: determined. Otherwise the solver's candidate (input, r1, r2) is *evaluated* on
+    /// concrete values: if the contract really accepts both, the function is underspecified
+    /// (an error, with a certain witness); if not, the verdict is inconclusive (a warning).
+    member v.Completeness(f: TFn) : bool =
+        z3.Push()
+        let silent = Collector()
+        let mutable env = Map.empty
+        let mutable assume = []
+        let ps = ResizeArray<string * Ty>()
+        for p in f.Params do
+            let c = v.Const(p.Name, p.Ty)
+            ps.Add(c, p.Ty)
+            env <- env.Add(p.Name, c)
+            assume <- (typeFacts v.FreshQ p.Ty c |> List.rev) @ assume
+        paramsOf.[f.Name] <- List.ofSeq ps
+        current <- Some { Fn = f; InitialMeasure = None; CheckDecreases = false }
+        for r in f.Requires do
+            assume <- v.Expr(r, env, [], silent) :: assume
+        let r1 = v.Const("result_a", f.Ret)
+        let r2 = v.Const("result_b", f.Ret)
+        assume <- (typeFacts v.FreshQ f.Ret r1 @ typeFacts v.FreshQ f.Ret r2 |> List.rev) @ assume
+        for ens in f.Ensures do
+            assume <- v.Expr(ens, env.Add("result", r1), [], silent) :: v.Expr(ens, env.Add("result", r2), [], silent) :: assume
+        let goal =
+            match f.Loose with
+            | Some l -> v.Expr(l.Relation, env.Add(l.Left, r1).Add(l.Right, r2), [], silent)
+            | None -> "(= " + r1 + " " + r2 + ")"
+        for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
+            z3.Send("(assert " + a + ")")
+        z3.Send("(assert (not " + goal + "))")
+        let answer = z3.Check()
+        let candidate () =
+            let terms = (ps |> Seq.map fst |> List.ofSeq) @ [ r1; r2 ]
+            let values = z3.Values terms
+            let types = (ps |> Seq.map snd |> List.ofSeq) @ [ f.Ret; f.Ret ]
+            if values.Length <> terms.Length then None
+            else
+                let parsed = List.map2 valueOf types values
+                if parsed |> List.forall Option.isSome then Some(parsed |> List.map Option.get) else None
+        let report (status: string) (severity: Severity) (message: string) (witness: (string * string) list) =
+            diags.Add
+                { File = file; Span = f.Span; Kind = "completeness"; Status = status; Severity = severity
+                  Fn = Some f.Name; Property = Some "the contract determines a unique result"
+                  Counterexample = witness; Message = message }
+        /// Evaluate a candidate (inputs, result a, result b) on concrete values: Some witness
+        /// when the contract really accepts both results, None otherwise.
+        let confirm (values: Eval.Value list) : (string * string) list option =
+            let names = f.Params |> List.map (fun p -> p.Name)
+            let inputs = List.zip names (List.take names.Length values)
+            let a, b = values.[names.Length], values.[names.Length + 1]
+            let ev = Eval.Evaluator(fns)
+            let inEnv = Map.ofList inputs
+            let holds e en = ev.Holds(e, en) = Some true
+            let ok =
+                List.forall2 (fun (p: TParam) (_, x) -> ev.Fits(p.Ty, x)) f.Params inputs
+                && ev.Fits(f.Ret, a) && ev.Fits(f.Ret, b)
+                && f.Requires |> List.forall (fun r -> holds r inEnv)
+                && f.Ensures |> List.forall (fun e -> holds e (inEnv.Add("result", a)) && holds e (inEnv.Add("result", b)))
+                && (match f.Loose with
+                    | Some l -> ev.Holds(l.Relation, inEnv.Add(l.Left, a).Add(l.Right, b)) = Some false
+                    | None -> a <> b)
+            if ok then
+                Some((inputs |> List.map (fun (n, x) -> n, Eval.valueText x))
+                     @ [ "result_a", Eval.valueText a; "result_b", Eval.valueText b ])
+            else None
+        let fromCandidate () = candidate () |> Option.bind confirm
+        let witness =
+            match answer with
+            | Unsat -> None
+            | _ ->
+                match fromCandidate () with
+                | Some w -> Some w
+                | None ->
+                    // The fast mode (no model-based quantifier instantiation) gives approximate
+                    // candidates. Ask again with model search on, briefly: it finds exact models
+                    // of sat formulas with quantifiers. The evaluator still confirms everything.
+                    z3.Send "(set-option :smt.mbqi true)"
+                    z3.SetTimeout(min 3000 z3.DefaultTimeout)
+                    let second = z3.Check()
+                    let w = match second with Unsat -> None | _ -> fromCandidate ()
+                    z3.Send "(set-option :smt.mbqi false)"
+                    z3.SetTimeout z3.DefaultTimeout
+                    w
+        let determined =
+            match answer, witness with
+            | Unsat, _ -> true
+            | _, Some w ->
+                let message =
+                    match f.Loose with
+                    | Some l ->
+                        "the contract accepts two results that the 'loose' relation does not allow ("
+                        + l.Left + " and " + l.Right + " below): strengthen the ensures clauses, or widen 'loose' if that freedom is intended"
+                    | None ->
+                        "the contract accepts two different results for the same input: add ensures clauses until "
+                        + "only the intended result is allowed, or declare the freedom with 'loose'"
+                report "underspecified" Error message w
+                false
+            | Unknown "timeout", None ->
+                report "inconclusive" Warning "completeness not decided within the time limit (the contract may well be complete)" []
+                false
+            | _, None ->
+                report "inconclusive" Warning "completeness not decided: no confirmed witness, no uniqueness proof (the contract may well be complete; a lemma may be needed)" []
+                false
+        current <- None
+        z3.Pop()
+        determined
+
+type VerifyResult =
+    { Diagnostics: Diagnostic list
+      Proved: int
+      /// Functions whose contract was proved to determine a unique result (or its loose relation)
+      Determined: int
+      /// Functions with at least one ensures clause (the ones the completeness check applies to)
+      WithContract: int }
 
 /// Verify every function of a well-typed program with one Z3 session:
 /// 1. declarations; definitions of the non-recursive expression functions;
@@ -557,4 +698,6 @@ let verify (file: string) (prog: TProgram) (z3: Session) : VerifyResult =
         v.Define f
     for f in prog.Fns do
         v.Function f
-    { Diagnostics = v.Diagnostics; Proved = v.Proved }
+    let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty)
+    let determined = withContract |> List.filter v.Completeness |> List.length
+    { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length }
