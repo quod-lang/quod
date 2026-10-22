@@ -71,26 +71,43 @@ Un contrat peut donc être **scellé** : l'agent peut le lire, pas le modifier.
     "code": "sealed_contract_changed",
     "fn": "lru_cache",
     "change": "ensures #2 removed",
-    "hint": "sealed contracts can only be strengthened; ask a human to re-seal"
+    "hint": "a sealed contract cannot be changed by the agent; propose a stronger one instead"
   }
   ```
 
-- **Renforcer reste permis.** L'agent peut encore transformer un contrat scellé en un contrat
-  *prouvé plus fort* : une précondition plus faible ou égale (`ancien requires ⇒ nouveau requires`)
-  et une postcondition plus forte ou égale (`nouvel ensures ⇒ ancien ensures`, sous l'ancienne
-  précondition). Le solveur vérifie les deux implications ; tout autre changement demande un
-  nouveau scellement par un humain. L'agent peut resserrer un contrat qu'il trouve trop lâche,
-  jamais desserrer un contrat qu'il trouve trop difficile.
+- **Tout le chemin de vérification est scellé, pas seulement les contrats.** Si l'agent peut
+  changer *ce qui est vérifié*, il peut contourner un contrat scellé en faisant pointer la
+  vérification ailleurs. Quod n'a donc pas d'interrupteur de vérification : chaque fonction est
+  toujours vérifiée (pas de `{:verify false}`, pas d'`assume`, pas d'axiome hors des fichiers
+  scellés), et ce qui reste configurable (liste des modules, points d'entrée, limites du solveur)
+  est lui aussi enregistré dans le verrou. Une différence est une erreur (`sealed_build_changed`),
+  comme un contrat modifié.
+- **Renforcer passe par des propositions.** L'agent peut proposer une version plus forte d'un
+  contrat scellé dans un fichier de propositions, à côté des fichiers scellés mais en dehors. Pour
+  chaque proposition, le compilateur prouve qu'il s'agit d'un raffinement (une précondition plus
+  faible ou égale, `ancien requires ⇒ nouveau requires`, et une postcondition plus forte ou égale,
+  `nouvel ensures ⇒ ancien ensures` sous l'ancienne précondition), et lui applique le contrôle de
+  complétude du pilier 5. Un humain l'accepte ensuite avec `quod seal --accept`, ce qui garde les
+  modifications du fichier scellé petites et délibérées. L'agent peut aider à resserrer un contrat
+  trop lâche, jamais desserrer un contrat trop difficile.
+- **Un contrat rédigé par un agent est sondé, pas seulement relu.** Une postcondition plausible qui
+  ne contraint rien ressemble, à l'œil humain, à une postcondition solide. Avant qu'une proposition
+  puisse être acceptée, son verdict de complétude et ses témoins (pilier 5) sont affichés à côté :
+  la relecture s'appuie sur une sonde, pas seulement sur la lecture.
 - **C'est le contrat que l'on relit.** Le rapport du compilateur liste, pour chaque fonction, le
   contrat et s'il a changé depuis le dernier scellement : la relecture porte sur le contrat, pas
   sur une coche verte.
 
-*Crédit : le scellement et la relecture centrée sur le contrat viennent de pratiques décrites par
-[piekwerk](https://dev.to/piekwerk) dans un
-[commentaire sur l'article de la Phase 0](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0) :
-des fichiers de spec et de vérification placés hors de tout dossier où l'agent peut écrire, et un
-modèle de pull request qui recopie le vrai bloc `requires` / `ensures`. « Renforcer reste permis »
-est notre extension.*
+*Crédit : ces règles viennent de pratiques décrites par [piekwerk](https://dev.to/piekwerk) dans
+des commentaires sur l'article de la Phase 0
+([le premier](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0)) : des fichiers de spec et de
+vérification placés hors de tout dossier où l'agent peut écrire ; un modèle de pull request qui
+recopie le vrai bloc `requires` / `ensures` ; des invariants essentiels écrits à la main et gelés,
+les contrats rédigés par l'agent passant par un fichier de propositions dont un humain reprend les
+lignes ; la mise en garde selon laquelle la lecture seule doit couvrir tout le chemin de
+vérification, point d'entrée et liste de fichiers compris ; et le constat que, sur un contrat
+rédigé par un agent, une sonde par témoins vaut mieux qu'une relecture humaine. Prouver qu'une
+proposition est un raffinement est notre extension.*
 
 ### 2. Effets par capacités
 

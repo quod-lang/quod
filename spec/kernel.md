@@ -70,24 +70,40 @@ A contract can therefore be **sealed**: the agent can read it, not change it.
     "code": "sealed_contract_changed",
     "fn": "lru_cache",
     "change": "ensures #2 removed",
-    "hint": "sealed contracts can only be strengthened; ask a human to re-seal"
+    "hint": "a sealed contract cannot be changed by the agent; propose a stronger one instead"
   }
   ```
 
-- **Strengthening is allowed.** An agent may still change a sealed contract into a provably
-  stronger one: a weaker or equal precondition (`old requires ⇒ new requires`) and a stronger or
-  equal postcondition (`new ensures ⇒ old ensures`, under the old precondition). The solver checks
-  both implications; any other change needs a human re-seal. An agent can tighten a contract it
-  finds too loose, never loosen one it finds too hard.
+- **The whole verification path is sealed, not just the contracts.** If the agent can change *what*
+  gets verified, it can route around a sealed contract by pointing the check elsewhere. So Quod
+  has no verification switch to flip: every function is always verified (no `{:verify false}`,
+  no `assume`, no axioms outside sealed files), and what remains configurable (the module list,
+  the entry points, solver limits) is recorded in the lock as well. A difference is an error
+  (`sealed_build_changed`), exactly like a changed contract.
+- **Strengthening goes through proposals.** An agent may propose a stronger version of a sealed
+  contract in a proposal file, next to the sealed ones but outside them. For each proposal the
+  compiler proves that it is a refinement (a weaker or equal precondition, `old requires ⇒ new
+  requires`, and a stronger or equal postcondition, `new ensures ⇒ old ensures` under the old
+  precondition) and runs the completeness check of pillar 5 on it. A human then accepts it with
+  `quod seal --accept`, which keeps the sealed file's changes small and deliberate. An agent can
+  help tighten a contract it finds too loose, never loosen one it finds too hard.
+- **Agent-drafted contracts get a probe, not just a read.** A postcondition that reads plausibly
+  but pins nothing looks like a strong one to a human eye. Before a proposal can be accepted, its
+  completeness verdict and witnesses (pillar 5) are shown next to it: the review rests on a probe,
+  not only on reading.
 - **Contracts are what reviewers read.** The compiler report lists, per function, the contract
   and whether it changed since the last seal, so a review reads the contract instead of trusting a
   checkmark.
 
-*Credit: sealing and contract-first review come from practices described by
-[piekwerk](https://dev.to/piekwerk) in a
-[comment on the Phase 0 write-up](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0): spec and
-verification files kept out of every directory the agent can write to, and a pull-request template
-that pastes the actual `requires` / `ensures` block. "Strengthening is allowed" is our extension.*
+*Credit: these rules come from practices described by [piekwerk](https://dev.to/piekwerk) in
+comments on the Phase 0 write-up
+([first](https://dev.to/malek_aitouaret_f026758c/comment/3ieh0)): spec and verification files kept
+out of every directory the agent can write to; a pull-request template that pastes the actual
+`requires` / `ensures` block; hand-written frozen invariants, with agent-drafted contracts going
+through a proposal file that a human lifts lines from; the caution that read-only must cover the
+whole verification path, entry point and file list included; and the observation that on
+agent-drafted contracts a witness probe is worth more than a human read. Proving that a proposal
+is a refinement is our extension.*
 
 ### 2. Effects through capabilities
 
