@@ -145,6 +145,9 @@ as a `note` in the JSON (`"kind": "contract"`):
 - **restated**: `result == e` where `e` is, word for word, a value the body returns. A **warning**:
   the proof then shows little more than the absence of errors. A small formula that is its own
   specification can stay as it is.
+- **none**: a statement function without `ensures`. A **warning**: nothing is proved about its
+  result, and its callers, who know it by its contract only, know nothing about it. (An expression
+  function without `ensures` is not classified: the verifier knows its definition.)
 
 ## Diagnostics
 

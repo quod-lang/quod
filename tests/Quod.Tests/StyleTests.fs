@@ -54,3 +54,10 @@ let ``returning the model itself is a restatement`` () =
 let ``a variable or a literal is no restatement`` () =
     let s = styles "fn id(xs: seq<int>) -> seq<int> ensures result == xs { xs }"
     Assert.Equal(Properties, s.["id"])
+
+[<Fact>]
+let ``a statement function without ensures has no contract (Haiku's rle_encode)`` () =
+    let s = styles "fn f(xs: seq<int>) -> int { let mut n = 0; let mut i = 0; while i < len(xs) invariant 0 <= i <= len(xs) decreases len(xs) - i { n = n + 1; i = i + 1; } return n; }"
+    Assert.Equal(NoContract, s.["f"])
+    // an expression function without ensures is known by its definition: not classified
+    Assert.False((styles "fn g(x: int) -> int { x + 1 }").ContainsKey "g")

@@ -149,6 +149,10 @@ dans le JSON (`"kind": "contract"`) :
 - **recopie** (`restated`) : `result == e` où `e` est, mot pour mot, une valeur que le corps
   renvoie. Un **avertissement** : la preuve ne montre alors guère plus que l'absence d'erreurs. Une
   petite formule qui est sa propre spécification peut rester telle quelle.
+- **aucun** (`none`) : une fonction à instructions sans `ensures`. Un **avertissement** : rien n'est
+  prouvé sur son résultat, et ses appelants, qui ne la connaissent que par son contrat, n'en savent
+  rien. (Une fonction-expression sans `ensures` n'est pas classée : le vérificateur connaît sa
+  définition.)
 
 ## Diagnostics
 

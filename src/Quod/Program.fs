@@ -105,11 +105,12 @@ let rec private summary (r: Vcgen.VerifyResult) =
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
     + styleSummary r
 
-/// "; contracts: 2 by properties, 1 by a model, 1 restating the body" (the styles present).
+/// "; contracts: 2 by properties, 1 by a model, 1 restating the body, 1 missing" (the styles present).
 and private styleSummary (r: Vcgen.VerifyResult) =
     let count status = r.Diagnostics |> List.filter (fun d -> d.Kind = "contract" && d.Status = status) |> List.length
     let parts =
-        [ count "properties", " by properties"; count "model", " by a model"; count "restated", " restating the body" ]
+        [ count "properties", " by properties"; count "model", " by a model"; count "restated", " restating the body"
+          count "none", " missing (no ensures)" ]
         |> List.filter (fun (n, _) -> n > 0)
         |> List.map (fun (n, text) -> string n + text)
     if parts.IsEmpty then "" else "; contracts: " + String.Join(", ", parts)

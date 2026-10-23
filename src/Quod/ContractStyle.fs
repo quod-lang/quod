@@ -7,7 +7,11 @@
 /// - properties: what the result is (bounds, order, membership...), not how to compute it;
 /// - model: `result == f(...)` with f a function of the program, a model or reference
 ///   implementation, proved to compute the same thing as the code: the model is what to review;
-/// - restated: `result == e` where e is, word for word, a value the body returns.
+/// - restated: `result == e` where e is, word for word, a value the body returns;
+/// - none: a statement function without ensures (a warning). Its callers know it by its contract
+///   only, so they know nothing, and nothing is proved about its result. An expression function
+///   without ensures is not classified: the verifier knows its definition. (A Haiku agent's
+///   rle_encode, VerifBench run quod2-haiku, had no ensures at all and passed the check.)
 module Quod.ContractStyle
 
 open Quod.Typed
@@ -17,6 +21,7 @@ type Style =
     | Properties
     | Model
     | Restated
+    | NoContract
 
 /// An expression as text, whatever its positions: two expressions with the same key are the same.
 let private key (e: TExpr) = Printer.exprText (toSyntax e)
@@ -56,7 +61,7 @@ let rec private compound (e: TExpr) =
     | _ -> true
 
 let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
-    if f.Ensures.IsEmpty then None
+    if f.Ensures.IsEmpty then (if f.IsExprFn then None else Some NoContract)
     else
         let values =
             match f.Body with
@@ -68,8 +73,8 @@ let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
         elif cs |> List.exists (fun c -> match c.Kind with ECall(g, _) -> fnNames.Contains g | _ -> false) then Some Model
         else Some Properties
 
-/// One diagnostic per function with ensures: a note for properties and models, a warning for a
-/// restated body.
+/// One diagnostic per classified function: a note for properties and models, a warning for a
+/// restated body or a missing contract.
 let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
     let names = prog.Fns |> List.map (fun f -> f.Name) |> Set.ofList
     prog.Fns
@@ -85,5 +90,8 @@ let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
                 | Restated ->
                     "restated", Warning,
                     "the ensures restates what the body returns: the proof shows little more than the absence of errors. State properties of the result, or define it by a simpler model (a small formula that is its own specification can stay as it is)"
+                | NoContract ->
+                    "none", Warning,
+                    "no ensures: nothing is proved about the result, and callers know nothing about it (a function with statements is known by its contract only). State what the result is"
             { File = file; Span = f.Span; Kind = "contract"; Status = status; Severity = severity
               Fn = Some f.Name; Property = Some "contract style"; Counterexample = []; Message = message }))
