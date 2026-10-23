@@ -1,0 +1,115 @@
+// VerifBench task merge_intervals: the union of closed integer intervals (a, b), a <= b, in any
+// order, as disjoint intervals sorted by start. Intervals that overlap or touch at an endpoint
+// are merged; (1, 2) and (3, 4) are not.
+//
+// Points are counted in doubled coordinates, so that half-integers exist: 2.5 is between
+// (1, 2) and (3, 4), which is why they stay apart. The contract says that the result covers
+// exactly the points the input covers, within the hull of the input.
+
+// Does interval x contain the doubled point p?
+fn inside(x: (int, int), p: int) -> bool { 2 * x.0 <= p && p <= 2 * x.1 }
+
+// Does one of the intervals of s contain p?
+fn covered(s: seq<(int, int)>, p: int) -> bool
+  decreases len(s)
+{
+  if len(s) == 0 { false } else { inside(s[0], p) || covered(s[1..], p) }
+}
+
+// The smallest start and the largest end (0 for no interval).
+fn lo_of(s: seq<(int, int)>) -> int
+  decreases len(s)
+{
+  if len(s) == 0 { 0 } else if len(s) == 1 || s[0].0 <= lo_of(s[1..]) { s[0].0 } else { lo_of(s[1..]) }
+}
+
+fn hi_of(s: seq<(int, int)>) -> int
+  decreases len(s)
+{
+  if len(s) == 0 { 0 } else if len(s) == 1 || s[0].1 >= hi_of(s[1..]) { s[0].1 } else { hi_of(s[1..]) }
+}
+
+// Lemma: every interval of s lies within [lo_of(s), hi_of(s)].
+fn bounds(s: seq<(int, int)>) -> bool
+  ensures result
+  ensures forall i in 0..len(s): lo_of(s) <= s[i].0 && s[i].1 <= hi_of(s)
+  decreases len(s)
+{
+  if len(s) <= 1 { return true; }
+  let ih = bounds(s[1..]);
+  assert forall i in 1..len(s): s[i] == s[1..][i - 1];
+  return true;
+}
+
+// Lemma: covering s + [x] is covering s or x.
+fn covered_snoc(s: seq<(int, int)>, x: (int, int), lo: int, hi: int) -> bool
+  ensures result
+  ensures forall p in lo..hi: covered(s + [x], p) == (covered(s, p) || inside(x, p))
+  decreases len(s)
+{
+  if len(s) == 0 { return true; }
+  let ih = covered_snoc(s[1..], x, lo, hi);
+  assert (s + [x])[1..] == s[1..] + [x];
+  return true;
+}
+
+// Insert x into r, which is sorted and separated (each interval ends before the next one
+// starts), merging what x overlaps. Proved alongside: the result is sorted and separated, it
+// starts no later than r and x, stays within [l, h], and covers what r and x cover there.
+fn insert(r: seq<(int, int)>, x: (int, int), l: int, h: int) -> seq<(int, int)>
+  requires x.0 <= x.1 && l <= x.0 && x.1 <= h
+  requires forall i in 0..len(r): r[i].0 <= r[i].1 && l <= r[i].0 && r[i].1 <= h
+  requires forall i in 0..len(r) - 1: r[i].1 < r[i + 1].0
+  ensures len(result) > 0
+  ensures forall i in 0..len(result): result[i].0 <= result[i].1 && l <= result[i].0 && result[i].1 <= h
+  ensures forall i in 0..len(result) - 1: result[i].1 < result[i + 1].0
+  ensures result[0].0 >= (if len(r) > 0 && r[0].0 < x.0 { r[0].0 } else { x.0 })
+  ensures forall p in 2 * l..2 * h + 1: covered(result, p) == (covered(r, p) || inside(x, p))
+  decreases len(r)
+{
+  if len(r) == 0 { return [x]; }
+  if r[0].1 < x.0 {
+    // r[0] is left of x: keep it
+    let rest = insert(r[1..], x, l, h);
+    let res = [r[0]] + rest;
+    assert res[1..] == rest;
+    return res;
+  }
+  if x.1 < r[0].0 {
+    // x is left of r[0]: x goes first
+    let res = [x] + r;
+    assert res[1..] == r;
+    return res;
+  }
+  // x overlaps r[0]: merge them, and go on with the merged interval
+  let m = (if x.0 < r[0].0 { x.0 } else { r[0].0 }, if x.1 > r[0].1 { x.1 } else { r[0].1 });
+  return insert(r[1..], m, l, h);
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall j in 0..len(iv): iv[j].0 <= iv[j].1
+  ensures forall i in 0..len(result): result[i].0 <= result[i].1
+  ensures forall i in 0..len(result) - 1: result[i].1 < result[i + 1].0
+  ensures forall i in 0..len(result): lo_of(iv) <= result[i].0 && result[i].1 <= hi_of(iv)
+  ensures forall p in 2 * lo_of(iv)..2 * hi_of(iv) + 1: covered(result, p) == covered(iv, p)
+{
+  let lo = 2 * lo_of(iv);
+  let hi = 2 * hi_of(iv) + 1;
+  let b = bounds(iv);
+  let mut r: seq<(int, int)> = [];
+  let mut k = 0;
+  while k < len(iv)
+    invariant 0 <= k <= len(iv)
+    invariant forall i in 0..len(r): r[i].0 <= r[i].1 && lo_of(iv) <= r[i].0 && r[i].1 <= hi_of(iv)
+    invariant forall i in 0..len(r) - 1: r[i].1 < r[i + 1].0
+    invariant forall p in lo..hi: covered(r, p) == covered(iv[..k], p)
+    decreases len(iv) - k
+  {
+    let c = covered_snoc(iv[..k], iv[k], lo, hi);
+    assert iv[..k + 1] == iv[..k] + [iv[k]];
+    r = insert(r, iv[k], lo_of(iv), hi_of(iv));
+    k = k + 1;
+  }
+  assert iv[..k] == iv;
+  return r;
+}

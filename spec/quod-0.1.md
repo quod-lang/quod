@@ -105,6 +105,22 @@ return e;              // or a final expression at the end of the body
   contracts of the functions concerned at run time in the generated Python, and list them in the
   report (the ⚠️ status of [principle 2](kernel.md)).
 
+### Hints and lemmas
+
+What a proof needs beyond the contracts is written in the code, and checked like the rest:
+
+- `assert P;` proves P, then assumes it. It is the way to name a fact the solver does not find
+  alone, typically about slices: `assert xs[..k + 1] == xs[..k] + [xs[k]];`.
+- A **lemma** is a statement function whose `ensures` is the fact, usually returning `bool` with
+  `ensures result`. Callers know a statement function by its contract only, so calling it gives
+  the fact for its arguments: `let ih = sum_cat(a, b[..len(b) - 1]);`. A recursive lemma is a
+  proof by induction: the recursive call is the induction hypothesis, and `decreases` makes it
+  well-founded.
+- An `exists` invariant needs its witness kept in a variable (the start of the best slice in
+  Kadane's algorithm), because the solver does not invent witnesses.
+- `%` by a value the solver does not know (`(i - k) % n`) is beyond Z3, even on its own: keep the
+  argument of `%` within a known range (`(i + n - k % n) % n`, which is in `0..2n`).
+
 ## Completeness (pillar 5), built in
 
 - For every function with `ensures`, the compiler asks Z3 whether two different results can both

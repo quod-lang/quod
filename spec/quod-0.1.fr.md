@@ -108,6 +108,21 @@ return e;              // ou une expression finale à la fin du corps
   vérifier à l'exécution, dans le Python généré, les contrats des fonctions concernées, et les
   signaler dans le rapport (le statut ⚠️ du [principe 2](kernel.fr.md)).
 
+### Indications et lemmes
+
+Ce dont une preuve a besoin au-delà des contrats s'écrit dans le code, et se vérifie comme le reste :
+
+- `assert P;` prouve P, puis le suppose. C'est la manière de nommer un fait que le solveur ne trouve
+  pas seul, typiquement sur les tranches : `assert xs[..k + 1] == xs[..k] + [xs[k]];`.
+- Un **lemme** est une fonction à instructions dont l'`ensures` est le fait, renvoyant en général un
+  `bool` avec `ensures result`. Les appelants ne connaissent une fonction à instructions que par son
+  contrat : l'appeler donne donc le fait pour ses arguments : `let ih = sum_cat(a, b[..len(b) - 1]);`.
+  Un lemme récursif est une preuve par récurrence : l'appel récursif est l'hypothèse de récurrence,
+  et `decreases` la rend bien fondée.
+- Un invariant en `exists` demande que son témoin soit gardé dans une variable (le début de la
+  meilleure tranche dans l'algorithme de Kadane), car le solveur n'invente pas de témoins.
+- `%` par une valeur que le solveur ne connaît pas (`(i - k) % n`) dépasse Z3, même seul : garder
+  l'argument de `%` dans un intervalle connu (`(i + n - k % n) % n`, qui est dans `0..2n`).
 ## Complétude (pilier 5), intégrée
 
 - Pour chaque fonction avec `ensures`, le compilateur demande à Z3 si deux résultats différents
