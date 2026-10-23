@@ -10,13 +10,15 @@ open Quod.Syntax
 type Severity =
     | Error
     | Warning
+    /// Information for the report (contract style): not printed with the findings in text mode.
+    | Info
 
 type Diagnostic =
     { File: string
       Span: Span
-      /// syntax | type | proof | completeness
+      /// syntax | type | proof | completeness | contract
       Kind: string
-      /// error | refuted | underspecified | inconclusive
+      /// error | refuted | underspecified | inconclusive; for contract: properties | model | restated
       Status: string
       Severity: Severity
       Fn: string option
@@ -33,7 +35,7 @@ let syntaxError (file: string) (span: Span) (message: string) =
         { File = file; Span = span; Kind = "syntax"; Status = "error"; Severity = Error
           Fn = None; Property = None; Counterexample = []; Message = message }
 
-let private severityText = function Error -> "error" | Warning -> "warning"
+let private severityText = function Error -> "error" | Warning -> "warning" | Info -> "note"
 
 /// `file(line,col): error: message`, the format editors and agents already recognise.
 let toText (d: Diagnostic) =

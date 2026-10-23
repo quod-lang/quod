@@ -30,6 +30,28 @@ cd bench
 python -m verifbench.hidden --task rotate --arm python --dir ../out/rotate
 ```
 
+## An agent writes them
+
+Run [quod1](../runs/quod1): the default model of Claude Code, one trial per task, with only the
+[language reference](../runs/quod1/work/rotate__quod__default__0/QUOD.md) (the language part of
+the 0.1 scope, without its example) and the task's specification.
+
+| Task | Time | Turns | Contract style | Hidden tests |
+|---|---|---|---|---|
+| binary_search | 26 s | 6 | properties, `loose` found by the agent | 510/510 |
+| merge_intervals | 18 min | 26 | model (recursive insertion) | 508/508 |
+| rle_encode | 25 s | 4 | model (recursive encoding) | 506/506 |
+| bounded_queue | 23 s | 4 | model (the queue, step by step) | 505/505 |
+| max_subarray | 48 s | 7 | properties | 506/506 |
+| rotate | 17 s | 4 | restated (the ensures is the body) | 508/508 |
+
+All six verify and pass the hidden tests (about 1.70 USD in all). No weak contract got through:
+the completeness check rejects them. But the shortest determined contract is
+`result == <the body>`, or `result == f(...)` for a recursive `f` that computes the same thing:
+four of six contracts say how to compute the result, not what it is. Hence the
+[contract style](../../spec/quod-0.1.md#contract-style) that `quod check` now reports, with a
+warning for a restated body.
+
 ## What writing them changed in the verifier
 
 - **Sequences are axiomatized** (as Dafny does), instead of using Z3's sequence theory, which

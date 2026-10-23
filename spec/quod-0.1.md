@@ -132,6 +132,20 @@ What a proof needs beyond the contracts is written in the code, and checked like
   not an error).
 - An underspecified function does not compile, unless its freedom is declared with `loose`.
 
+### Contract style
+
+A determined contract can still say little: the shortest one is `ensures result == <the body>`,
+and agents write it. Every contract is therefore classified, in the summary of `quod check` and
+as a `note` in the JSON (`"kind": "contract"`):
+
+- **properties**: what the result is (bounds, order, membership...), not how to compute it;
+- **model**: `result == f(...)`, with `f` a function of the program (a model, or a reference
+  implementation): the proof shows that the code computes what the model computes, so the model
+  is what a reviewer reads;
+- **restated**: `result == e` where `e` is, word for word, a value the body returns. A **warning**:
+  the proof then shows little more than the absence of errors. A small formula that is its own
+  specification can stay as it is.
+
 ## Diagnostics
 
 Human-readable by default, JSON with `--json`. One entry per finding:

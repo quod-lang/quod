@@ -26,6 +26,7 @@
     <Compile Include="Typecheck.fs" />
     <Compile Include="Eval.fs" />
     <Compile Include="Smt.fs" />
+    <Compile Include="ContractStyle.fs" />
     <Compile Include="Vcgen.fs" />
     <Compile Include="CodegenPython.fs" />
     <Compile Include="Program.fs" />

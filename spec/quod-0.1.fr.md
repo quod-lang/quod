@@ -135,6 +135,21 @@ Ce dont une preuve a besoin au-delà des contrats s'écrit dans le code, et se v
   avertissement, pas une erreur).
 - Une fonction sous-spécifiée ne compile pas, sauf liberté déclarée avec `loose`.
 
+### Style des contrats
+
+Un contrat déterminé peut encore dire peu : le plus court est `ensures result == <le corps>`, et les
+agents l'écrivent. Chaque contrat est donc classé, dans le résumé de `quod check` et comme `note`
+dans le JSON (`"kind": "contract"`) :
+
+- **propriétés** (`properties`) : ce qu'est le résultat (bornes, ordre, appartenance...), pas
+  comment le calculer ;
+- **modèle** (`model`) : `result == f(...)`, avec `f` une fonction du programme (un modèle, ou une
+  implémentation de référence) : la preuve montre que le code calcule ce que calcule le modèle,
+  c'est donc le modèle que relit un relecteur ;
+- **recopie** (`restated`) : `result == e` où `e` est, mot pour mot, une valeur que le corps
+  renvoie. Un **avertissement** : la preuve ne montre alors guère plus que l'absence d'erreurs. Une
+  petite formule qui est sa propre spécification peut rester telle quelle.
+
 ## Diagnostics
 
 Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par constat :

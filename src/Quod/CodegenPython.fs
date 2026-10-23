@@ -65,39 +65,6 @@ def _quod_slice(xs, lo: int, hi: int):
     return xs[lo:hi]
 """
 
-/// A typed expression back as a syntax tree, to print contracts in docstrings.
-let rec private untyped (e: TExpr) : Syntax.Expr =
-    let mk k : Syntax.Expr = { Kind = k; Span = e.Span }
-    let u = untyped
-    match e.Kind with
-    | EInt n -> mk (Syntax.IntLit n)
-    | EBool b -> mk (Syntax.BoolLit b)
-    | EVar n -> mk (Syntax.Var n)
-    | EResult -> mk Syntax.Result
-    | ESeq xs -> mk (Syntax.SeqLit(List.map u xs))
-    | ETuple xs -> mk (Syntax.TupleLit(List.map u xs))
-    | EIndex(s, i) -> mk (Syntax.Index(u s, u i))
-    | ESlice(s, a, b) -> mk (Syntax.Slice(u s, Option.map u a, Option.map u b))
-    | EProj(t, k) -> mk (Syntax.Proj(u t, k))
-    | ELen s -> mk (Syntax.Call("len", [ u s ]))
-    | ECall(f, args) -> mk (Syntax.Call(f, List.map u args))
-    | ENeg x -> mk (Syntax.Unary(Syntax.Neg, u x))
-    | ENot x -> mk (Syntax.Unary(Syntax.Not, u x))
-    | EArith(op, a, b) ->
-        let o = match op with OAdd -> Syntax.Add | OSub -> Syntax.Sub | OMul -> Syntax.Mul | ODiv -> Syntax.Div | OMod -> Syntax.Mod
-        mk (Syntax.Binary(o, u a, u b))
-    | EConcat(a, b) -> mk (Syntax.Binary(Syntax.Add, u a, u b))
-    | ECmp(op, a, b) ->
-        let o = match op with OLt -> Syntax.Lt | OLe -> Syntax.Le | OGt -> Syntax.Gt | OGe -> Syntax.Ge
-        mk (Syntax.Binary(o, u a, u b))
-    | EEq(a, b) -> mk (Syntax.Binary(Syntax.Eq, u a, u b))
-    | ELogic(op, a, b) ->
-        let o = match op with OAnd -> Syntax.And | OOr -> Syntax.Or | OImplies -> Syntax.Implies | OIff -> Syntax.Iff
-        mk (Syntax.Binary(o, u a, u b))
-    | EIf(c, a, b) -> mk (Syntax.IfExpr(u c, u a, u b))
-    | EQuant(q, v, lo, hi, body) -> mk (Syntax.Quant(q, v, u lo, u hi, u body))
-    | EToNat x -> u x
-
 type private Gen(checks: Set<string>) =
     let mutable counter = 0
     /// Is the function being generated checked at run time (--runtime-checks)?
@@ -205,8 +172,8 @@ type private Gen(checks: Set<string>) =
         let ps = f.Params |> List.map (fun p -> pyName p.Name + ": " + pyType p.Ty) |> String.concat ", "
         sb.Append("def ").Append(pyName f.Name).Append("(").Append(ps).Append(") -> ").Append(pyType f.Ret).Append(":\n") |> ignore
         let doc = ResizeArray<string>()
-        for r in f.Requires do doc.Add("requires " + Printer.exprText (untyped r))
-        for e in f.Ensures do doc.Add("ensures " + Printer.exprText (untyped e))
+        for r in f.Requires do doc.Add("requires " + Printer.exprText (toSyntax r))
+        for e in f.Ensures do doc.Add("ensures " + Printer.exprText (toSyntax e))
         if not (checks.Contains f.Name) && doc.Count > 0 then doc.Add("(proved by quod)")
         elif checks.Contains f.Name then doc.Add("(NOT fully proved: contracts are checked at run time)")
         if doc.Count > 0 then

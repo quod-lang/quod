@@ -45,7 +45,7 @@ let private parseOptions (args: string list) : Options * string list =
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
-    else for d in ds do Console.Error.WriteLine(toText d)
+    else for d in ds do if d.Severity <> Info then Console.Error.WriteLine(toText d) // notes: in the summary
 
 let private withFile (file: string) (action: string -> int) =
     if File.Exists file then action (File.ReadAllText file)
@@ -81,7 +81,8 @@ let private verifyFile (file: string) (src: string) (o: Options) : Result<Typed.
                 use logWriter = (match o.SmtLog with Some p -> new StreamWriter(p) | None -> null)
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, o.Timeout * 1000, log)
-                let result = Vcgen.verify file typed session
+                let verified = Vcgen.verify file typed session
+                let result = { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed }
                 report o result.Diagnostics
                 Ok(typed, result)
     with
@@ -94,7 +95,7 @@ let private verifyFile (file: string) (src: string) (o: Options) : Result<Typed.
 
 let private errorsOf (r: Vcgen.VerifyResult) = r.Diagnostics |> List.filter (fun d -> d.Severity = Error)
 
-let private summary (r: Vcgen.VerifyResult) =
+let rec private summary (r: Vcgen.VerifyResult) =
     let errors = errorsOf r
     let proofErrors = errors |> List.filter (fun d -> d.Kind = "proof") |> List.length
     let underspecified = errors |> List.filter (fun d -> d.Kind = "completeness") |> List.length
@@ -102,6 +103,16 @@ let private summary (r: Vcgen.VerifyResult) =
     + (if proofErrors > 0 then ", " + string proofErrors + " failed" else "")
     + "; " + string r.Determined + " of " + string r.WithContract + " contract(s) determine their result"
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
+    + styleSummary r
+
+/// "; contracts: 2 by properties, 1 by a model, 1 restating the body" (the styles present).
+and private styleSummary (r: Vcgen.VerifyResult) =
+    let count status = r.Diagnostics |> List.filter (fun d -> d.Kind = "contract" && d.Status = status) |> List.length
+    let parts =
+        [ count "properties", " by properties"; count "model", " by a model"; count "restated", " restating the body" ]
+        |> List.filter (fun (n, _) -> n > 0)
+        |> List.map (fun (n, text) -> string n + text)
+    if parts.IsEmpty then "" else "; contracts: " + String.Join(", ", parts)
 
 let private checkCommand (file: string) (o: Options) =
     withFile file (fun src ->

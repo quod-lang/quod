@@ -108,3 +108,37 @@ let rec ofSyntax (t: TypeExpr) =
     | TypeExpr.TBool -> TyBool
     | TypeExpr.TSeq e -> TySeq(ofSyntax e)
     | TypeExpr.TTuple ts -> TyTuple(List.map ofSyntax ts)
+
+/// A typed expression back as a syntax tree: to print it (docstrings), or to compare two
+/// expressions by their text, whatever their positions (contract style).
+let rec toSyntax (e: TExpr) : Syntax.Expr =
+    let mk k : Syntax.Expr = { Kind = k; Span = e.Span }
+    let u = toSyntax
+    match e.Kind with
+    | EInt n -> mk (Syntax.IntLit n)
+    | EBool b -> mk (Syntax.BoolLit b)
+    | EVar n -> mk (Syntax.Var n)
+    | EResult -> mk Syntax.Result
+    | ESeq xs -> mk (Syntax.SeqLit(List.map u xs))
+    | ETuple xs -> mk (Syntax.TupleLit(List.map u xs))
+    | EIndex(s, i) -> mk (Syntax.Index(u s, u i))
+    | ESlice(s, a, b) -> mk (Syntax.Slice(u s, Option.map u a, Option.map u b))
+    | EProj(t, k) -> mk (Syntax.Proj(u t, k))
+    | ELen s -> mk (Syntax.Call("len", [ u s ]))
+    | ECall(f, args) -> mk (Syntax.Call(f, List.map u args))
+    | ENeg x -> mk (Syntax.Unary(Syntax.Neg, u x))
+    | ENot x -> mk (Syntax.Unary(Syntax.Not, u x))
+    | EArith(op, a, b) ->
+        let o = match op with OAdd -> Syntax.Add | OSub -> Syntax.Sub | OMul -> Syntax.Mul | ODiv -> Syntax.Div | OMod -> Syntax.Mod
+        mk (Syntax.Binary(o, u a, u b))
+    | EConcat(a, b) -> mk (Syntax.Binary(Syntax.Add, u a, u b))
+    | ECmp(op, a, b) ->
+        let o = match op with OLt -> Syntax.Lt | OLe -> Syntax.Le | OGt -> Syntax.Gt | OGe -> Syntax.Ge
+        mk (Syntax.Binary(o, u a, u b))
+    | EEq(a, b) -> mk (Syntax.Binary(Syntax.Eq, u a, u b))
+    | ELogic(op, a, b) ->
+        let o = match op with OAnd -> Syntax.And | OOr -> Syntax.Or | OImplies -> Syntax.Implies | OIff -> Syntax.Iff
+        mk (Syntax.Binary(o, u a, u b))
+    | EIf(c, a, b) -> mk (Syntax.IfExpr(u c, u a, u b))
+    | EQuant(q, v, lo, hi, body) -> mk (Syntax.Quant(q, v, u lo, u hi, u body))
+    | EToNat x -> u x

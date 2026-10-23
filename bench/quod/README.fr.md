@@ -31,6 +31,28 @@ cd bench
 python -m verifbench.hidden --task rotate --arm python --dir ../out/rotate
 ```
 
+## Un agent les écrit
+
+Passage [quod1](../runs/quod1) : le modèle par défaut de Claude Code, un essai par tâche, avec pour
+seuls documents la [référence du langage](../runs/quod1/work/rotate__quod__default__0/QUOD.md) (la
+partie langage du périmètre 0.1, sans son exemple) et l'énoncé de la tâche.
+
+| Tâche | Temps | Tours | Style du contrat | Tests cachés |
+|---|---|---|---|---|
+| binary_search | 26 s | 6 | propriétés, `loose` trouvé par l'agent | 510/510 |
+| merge_intervals | 18 min | 26 | modèle (insertion récursive) | 508/508 |
+| rle_encode | 25 s | 4 | modèle (codage récursif) | 506/506 |
+| bounded_queue | 23 s | 4 | modèle (la file, pas à pas) | 505/505 |
+| max_subarray | 48 s | 7 | propriétés | 506/506 |
+| rotate | 17 s | 4 | recopie (l'ensures est le corps) | 508/508 |
+
+Les six sont vérifiées et passent les tests cachés (environ 1,70 USD en tout). Aucun contrat faible
+n'est passé : la vérification de complétude les rejette. Mais le contrat déterminé le plus court est
+`result == <le corps>`, ou `result == f(...)` pour un `f` récursif qui calcule la même chose : quatre
+contrats sur six disent comment calculer le résultat, pas ce qu'il est. D'où le
+[style des contrats](../../spec/quod-0.1.fr.md#style-des-contrats) que `quod check` signale désormais,
+avec un avertissement pour un corps recopié.
+
 ## Ce que leur écriture a changé dans le vérificateur
 
 - **Les séquences sont axiomatisées** (comme le fait Dafny), au lieu d'utiliser la théorie des

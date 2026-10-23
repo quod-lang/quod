@@ -11,6 +11,7 @@
     <Compile Include="VerifyTests.fs" />
     <Compile Include="CompletenessTests.fs" />
     <Compile Include="CodegenTests.fs" />
+    <Compile Include="StyleTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
