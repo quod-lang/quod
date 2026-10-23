@@ -1,0 +1,31 @@
+// Prepend one occurrence of x to an encoding, merging with the first run if equal.
+fn cons_run(x: int, r: seq<(int, int)>) -> seq<(int, int)>
+{
+  if len(r) > 0 && r[0].0 == x { [(x, r[0].1 + 1)] + r[1..] } else { [(x, 1)] + r }
+}
+
+// Reference run-length encoding, defined from the right.
+fn rle(xs: seq<int>) -> seq<(int, int)>
+  decreases len(xs)
+{
+  if len(xs) == 0 { [] } else { cons_run(xs[0], rle(xs[1..])) }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures result == rle(xs)
+{
+  let mut acc: seq<(int, int)> = [];
+  let mut i = len(xs);
+  while i > 0
+    invariant 0 <= i <= len(xs)
+    invariant acc == rle(xs[i..])
+    decreases i
+  {
+    assert xs[i - 1..][1..] == xs[i..];
+    assert xs[i - 1..][0] == xs[i - 1];
+    acc = cons_run(xs[i - 1], acc);
+    i = i - 1;
+  }
+  assert xs[0..] == xs;
+  acc
+}

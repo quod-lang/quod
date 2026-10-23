@@ -1,0 +1,64 @@
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall j in 0..len(iv): iv[j].0 <= iv[j].1
+  ensures forall k in 0..len(result) - 1: result[k].1 < result[k+1].0
+{
+  if len(iv) == 0 {
+    return [];
+  }
+
+  let sorted = sort_intervals(iv);
+
+  let mut merged: seq<(int, int)> = [sorted[0]];
+  let mut idx = 1;
+
+  while idx < len(sorted)
+    invariant 0 < len(merged)
+    invariant 0 <= idx <= len(sorted)
+    invariant forall k in 0..len(merged) - 1: merged[k].1 < merged[k+1].0
+    decreases len(sorted) - idx
+  {
+    let last_len = len(merged);
+    let last_interval = merged[last_len - 1];
+
+    if sorted[idx].0 <= last_interval.1 {
+      let new_end = if sorted[idx].1 > last_interval.1 { sorted[idx].1 } else { last_interval.1 };
+      merged = merged[..last_len - 1] + [(last_interval.0, new_end)];
+    } else {
+      merged = merged + [sorted[idx]];
+    }
+    idx = idx + 1;
+  }
+
+  return merged;
+}
+
+fn sort_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall m in 0..len(iv): iv[m].0 <= iv[m].1
+  ensures len(result) == len(iv)
+         && (len(result) == 0 || forall m in 0..len(result) - 1: result[m].0 <= result[m+1].0)
+  loose (r1, r2) => len(r1) == len(r2) && len(r1) == len(iv)
+{
+  let mut sorted: seq<(int, int)> = [];
+  let mut i = 0;
+
+  while i < len(iv)
+    invariant len(sorted) == i
+    invariant 0 <= i <= len(iv)
+    invariant forall m in 0..len(sorted) - 1: sorted[m].0 <= sorted[m+1].0
+    decreases len(iv) - i
+  {
+    let item = iv[i];
+    let mut j = 0;
+    while j < len(sorted) && sorted[j].0 < item.0
+      invariant 0 <= j <= len(sorted)
+      invariant forall m in 0..j: sorted[m].0 <= item.0
+      decreases len(sorted) - j
+    {
+      j = j + 1;
+    }
+    sorted = sorted[..j] + [item] + sorted[j..];
+    i = i + 1;
+  }
+
+  return sorted;
+}

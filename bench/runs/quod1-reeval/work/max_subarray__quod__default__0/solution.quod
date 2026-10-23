@@ -1,0 +1,50 @@
+fn rsum(xs: seq<int>, a: int, b: int) -> int
+  requires 0 <= a <= b <= len(xs)
+  decreases b - a
+{
+  if a == b { 0 } else { rsum(xs, a, b - 1) + xs[b - 1] }
+}
+
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures forall a in 0..len(xs): forall b in a + 1..len(xs) + 1: rsum(xs, a, b) <= result
+  ensures exists a in 0..len(xs): exists b in a + 1..len(xs) + 1: rsum(xs, a, b) == result
+{
+  let n = len(xs);
+  let mut i = 1;
+  let mut cur = xs[0];
+  let mut best = xs[0];
+  let mut ci = 0;
+  let mut bi = 0;
+  let mut bj = 1;
+  assert rsum(xs, 0, 1) == xs[0];
+  while i < n
+    invariant 1 <= i <= n
+    invariant 0 <= ci < i
+    invariant rsum(xs, ci, i) == cur
+    invariant forall a in 0..i: rsum(xs, a, i) <= cur
+    invariant 0 <= bi < bj <= i
+    invariant rsum(xs, bi, bj) == best
+    invariant forall b in 1..i + 1: forall a in 0..b: rsum(xs, a, b) <= best
+    decreases n - i
+  {
+    let x = xs[i];
+    assert rsum(xs, i, i + 1) == x;
+    assert forall a in 0..i: rsum(xs, a, i + 1) == rsum(xs, a, i) + x;
+    if cur > 0 {
+      cur = cur + x;
+    } else {
+      cur = x;
+      ci = i;
+    }
+    assert rsum(xs, ci, i + 1) == cur;
+    assert forall a in 0..i + 1: rsum(xs, a, i + 1) <= cur;
+    if cur > best {
+      best = cur;
+      bi = ci;
+      bj = i + 1;
+    }
+    i = i + 1;
+  }
+  best
+}

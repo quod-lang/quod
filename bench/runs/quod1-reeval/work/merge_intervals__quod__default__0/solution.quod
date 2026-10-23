@@ -1,0 +1,78 @@
+// Reference semantics: insert the closed interval (a, b) into a list of
+// disjoint intervals sorted by start (r[k].1 < r[k+1].0), merging every
+// interval that overlaps or touches it.
+fn ins(r: seq<(int, int)>, a: int, b: int) -> seq<(int, int)>
+  decreases len(r)
+{
+  if len(r) == 0 {
+    [(a, b)]
+  } else if r[0].1 < a {
+    [r[0]] + ins(r[1..], a, b)
+  } else if b < r[0].0 {
+    [(a, b)] + r
+  } else {
+    ins(r[1..], if r[0].0 < a { r[0].0 } else { a }, if r[0].1 > b { r[0].1 } else { b })
+  }
+}
+
+// Reference semantics: the union of the intervals, as disjoint intervals
+// sorted by start, obtained by inserting them one by one.
+fn merged(iv: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(iv)
+{
+  if len(iv) == 0 {
+    []
+  } else {
+    ins(merged(iv[..len(iv) - 1]), iv[len(iv) - 1].0, iv[len(iv) - 1].1)
+  }
+}
+
+fn insert_impl(r: seq<(int, int)>, a: int, b: int) -> seq<(int, int)>
+  ensures result == ins(r, a, b)
+{
+  let target = ins(r, a, b);
+  let mut acc: seq<(int, int)> = [];
+  let mut rest = r;
+  let mut ca = a;
+  let mut cb = b;
+  while len(rest) > 0
+    invariant acc + ins(rest, ca, cb) == target
+    decreases len(rest)
+  {
+    let x = rest[0];
+    let tail = rest[1..];
+    if x.1 < ca {
+      let t = ins(tail, ca, cb);
+      assert acc + ([x] + t) == (acc + [x]) + t;
+      acc = acc + [x];
+      rest = tail;
+    } else if cb < x.0 {
+      return acc + ([(ca, cb)] + rest);
+    } else {
+      ca = if x.0 < ca { x.0 } else { ca };
+      cb = if x.1 > cb { x.1 } else { cb };
+      rest = tail;
+    }
+  }
+  acc + [(ca, cb)]
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures result == merged(iv)
+{
+  let mut r: seq<(int, int)> = [];
+  let mut i = 0;
+  while i < len(iv)
+    invariant 0 <= i <= len(iv)
+    invariant r == merged(iv[..i])
+    decreases len(iv) - i
+  {
+    assert iv[..i + 1][..i] == iv[..i];
+    assert iv[..i + 1][i] == iv[i];
+    r = insert_impl(r, iv[i].0, iv[i].1);
+    i = i + 1;
+  }
+  assert iv[..i] == iv;
+  r
+}

@@ -1,0 +1,37 @@
+fn repeat_value(v: int, c: int) -> seq<int>
+  decreases c
+{
+  if c <= 0 { [] } else { [v] + repeat_value(v, c - 1) }
+}
+
+fn reconstruct(runs: seq<(int, int)>) -> seq<int>
+  decreases len(runs)
+{
+  if len(runs) == 0 { [] } else { repeat_value(runs[0].0, runs[0].1) + reconstruct(runs[1..]) }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+{
+  let mut runs: seq<(int, int)> = [];
+  let mut i = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant forall j in 0..len(runs): runs[j].1 >= 1
+    decreases len(xs) - i
+  {
+    let current = xs[i];
+    let mut count = 1;
+    let mut j = i + 1;
+    while j < len(xs) && xs[j] == current
+      invariant i + 1 <= j && j <= len(xs)
+      invariant count >= 1
+      decreases len(xs) - j
+    {
+      count = count + 1;
+      j = j + 1;
+    }
+    runs = runs + [(current, count)];
+    i = j;
+  }
+  runs
+}

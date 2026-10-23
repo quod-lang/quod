@@ -1,0 +1,62 @@
+fn all_less(xs: seq<int>, n: int, target: int) -> bool
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= n < len(xs)
+  requires xs[n] < target
+  ensures forall i in 0..n + 1: xs[i] < target
+  loose (r1, r2) => true
+  decreases n
+{
+  if n == 0 {
+    true
+  } else {
+    let _ = all_less(xs, n - 1, target);
+    true
+  }
+}
+
+fn all_greater(xs: seq<int>, n: int, m: int, target: int) -> bool
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= n <= m < len(xs)
+  requires xs[n] > target
+  ensures forall i in n..m + 1: xs[i] > target
+  loose (r1, r2) => true
+  decreases m - n
+{
+  if n == m {
+    true
+  } else {
+    let _ = all_greater(xs, n, m - 1, target);
+    true
+  }
+}
+
+fn binary_search_helper(xs: seq<int>, target: int, left: int, right: int) -> int
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= left <= right <= len(xs)
+  requires forall i in 0..left: xs[i] < target
+  requires forall i in right..len(xs): xs[i] > target
+  ensures (result >= 0 && result < len(xs) && xs[result] == target) || (result == -1 && forall i in 0..len(xs): xs[i] != target)
+  decreases right - left
+{
+  if left >= right {
+    return -1;
+  }
+
+  let mid = (left + right) / 2;
+  if xs[mid] == target {
+    return mid;
+  } else if xs[mid] < target {
+    let _ = all_less(xs, mid, target);
+    return binary_search_helper(xs, target, mid + 1, right);
+  } else {
+    let _ = all_greater(xs, mid, right - 1, target);
+    return binary_search_helper(xs, target, left, mid);
+  }
+}
+
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  ensures (result >= 0 && result < len(xs) && xs[result] == target) || (result == -1 && forall i in 0..len(xs): xs[i] != target)
+{
+  binary_search_helper(xs, target, 0, len(xs))
+}

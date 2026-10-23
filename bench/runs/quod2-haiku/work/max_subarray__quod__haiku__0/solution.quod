@@ -1,0 +1,43 @@
+fn sum_range(xs: seq<int>, i: nat, j: nat) -> int
+  requires i <= j && j <= len(xs)
+  decreases j - i
+{
+  if i == j { 0 } else { xs[i] + sum_range(xs, i + 1, j) }
+}
+
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: result == sum_range(xs, i, j)
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: sum_range(xs, i, j) <= result
+{
+  let mut best = xs[0];
+  let mut best_start = 0;
+  let mut best_end = 1;
+  let mut current = xs[0];
+  let mut current_start = 0;
+  let mut i = 1;
+
+  while i < len(xs)
+    invariant 1 <= i && i <= len(xs)
+    invariant 0 <= best_start && best_start < best_end
+    invariant 0 <= current_start && current_start <= i
+    decreases len(xs) - i
+  {
+    if xs[i] > current + xs[i] {
+      current = xs[i];
+      current_start = i;
+    } else {
+      current = current + xs[i];
+    }
+
+    if current > best {
+      best = current;
+      best_start = current_start;
+      best_end = i + 1;
+    }
+
+    i = i + 1;
+  }
+
+  best
+}

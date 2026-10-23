@@ -1,0 +1,17 @@
+fn rotate_spec(xs: seq<int>, k: int) -> seq<int>
+{
+  if len(xs) == 0 { [] }
+  else { xs[len(xs) - (k % len(xs))..] + xs[..len(xs) - (k % len(xs))] }
+}
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures result == rotate_spec(xs, k)
+{
+  if len(xs) == 0 {
+    []
+  } else {
+    let n = len(xs);
+    let k_norm = k % n;
+    xs[n - k_norm..] + xs[..n - k_norm]
+  }
+}

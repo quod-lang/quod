@@ -1,0 +1,50 @@
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  ensures result == proc_ops(capacity, ops, [], [], 0)
+{
+  let mut queue: seq<int> = [];
+  let mut output: seq<int> = [];
+  let mut i = 0;
+
+  while i < len(ops)
+    invariant 0 <= i <= len(ops)
+    invariant len(queue) <= capacity
+    decreases len(ops) - i
+  {
+    let op = ops[i];
+
+    if op > 0 {
+      if len(queue) == capacity {
+        queue = queue[1..];
+      }
+      queue = queue + [op];
+    } else {
+      let output_val = if len(queue) == 0 { -1 } else { queue[0] };
+      output = output + [output_val];
+      if len(queue) > 0 {
+        queue = queue[1..];
+      }
+    }
+    i = i + 1;
+  }
+
+  output
+}
+
+fn proc_ops(capacity: int, ops: seq<int>, queue: seq<int>, output: seq<int>, index: int) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  requires 0 <= index <= len(ops)
+  requires len(queue) <= capacity
+  decreases len(ops) - index
+{
+  if index == len(ops) { output }
+  else if ops[index] > 0 { proc_ops(capacity, ops,
+      if len(queue) == capacity { queue[1..] + [ops[index]] } else { queue + [ops[index]] },
+      output, index + 1) }
+  else { proc_ops(capacity, ops,
+      if len(queue) == 0 { queue } else { queue[1..] },
+      output + [(if len(queue) == 0 { -1 } else { queue[0] })],
+      index + 1) }
+}
