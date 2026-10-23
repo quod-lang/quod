@@ -1,0 +1,64 @@
+fn step_q(capacity: int, q: seq<int>, x: int) -> seq<int> {
+  if x > 0 {
+    if len(q) >= capacity && len(q) > 0 { q[1..] + [x] } else { q + [x] }
+  } else {
+    if len(q) == 0 { q } else { q[1..] }
+  }
+}
+
+fn step_o(q: seq<int>, x: int) -> seq<int> {
+  if x > 0 { [] } else if len(q) == 0 { [-1] } else { [q[0]] }
+}
+
+fn qstate(capacity: int, ops: seq<int>) -> seq<int>
+  decreases len(ops)
+{
+  if len(ops) == 0 { [] } else {
+    step_q(capacity, qstate(capacity, ops[..len(ops) - 1]), ops[len(ops) - 1])
+  }
+}
+
+fn outs(capacity: int, ops: seq<int>) -> seq<int>
+  decreases len(ops)
+{
+  if len(ops) == 0 { [] } else {
+    outs(capacity, ops[..len(ops) - 1]) + step_o(qstate(capacity, ops[..len(ops) - 1]), ops[len(ops) - 1])
+  }
+}
+
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  ensures result == outs(capacity, ops)
+{
+  let mut q: seq<int> = [];
+  let mut res: seq<int> = [];
+  let mut i = 0;
+  while i < len(ops)
+    invariant 0 <= i <= len(ops)
+    invariant q == qstate(capacity, ops[..i])
+    invariant res == outs(capacity, ops[..i])
+    decreases len(ops) - i
+  {
+    assert ops[..i + 1][..i] == ops[..i];
+    assert ops[..i + 1][i] == ops[i];
+    let x = ops[i];
+    if x > 0 {
+      if len(q) >= capacity {
+        q = q[1..] + [x];
+      } else {
+        q = q + [x];
+      }
+    } else {
+      if len(q) == 0 {
+        res = res + [-1];
+      } else {
+        res = res + [q[0]];
+        q = q[1..];
+      }
+    }
+    i = i + 1;
+  }
+  assert ops[..len(ops)] == ops;
+  res
+}

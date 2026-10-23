@@ -15,8 +15,7 @@ _build/
 bench/completeness/
 
 # early smoke tests, not part of the reported results
-bench/runs/smoke/
-bench/runs/smoke2/
+bench/runs/smoke*/
 
 # unpublished drafts
 docs/drafts/

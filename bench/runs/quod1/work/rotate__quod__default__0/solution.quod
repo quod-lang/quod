@@ -1,0 +1,10 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(xs) == 0 ==> result == xs
+  ensures len(xs) > 0 ==> result == xs[len(xs) - k % len(xs)..] + xs[..len(xs) - k % len(xs)]
+{
+  if len(xs) == 0 {
+    xs
+  } else {
+    xs[len(xs) - k % len(xs)..] + xs[..len(xs) - k % len(xs)]
+  }
+}

@@ -1,0 +1,26 @@
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires forall i in 0..len(xs): forall j in i..len(xs): xs[i] <= xs[j]
+  ensures -1 <= result < len(xs)
+  ensures result >= 0 ==> xs[result] == target
+  ensures result == -1 ==> forall i in 0..len(xs): xs[i] != target
+  loose (r1, r2) => r1 == r2 || (r1 >= 0 && r2 >= 0)
+{
+  let mut lo = 0;
+  let mut hi = len(xs);
+  while lo < hi
+    invariant 0 <= lo <= hi <= len(xs)
+    invariant forall i in 0..lo: xs[i] < target
+    invariant forall i in hi..len(xs): xs[i] > target
+    decreases hi - lo
+  {
+    let mid = lo + (hi - lo) / 2;
+    if xs[mid] == target {
+      return mid;
+    } else if xs[mid] < target {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return -1;
+}
