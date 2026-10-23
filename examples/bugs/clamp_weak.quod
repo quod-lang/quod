@@ -1,0 +1,9 @@
+// A deliberately weak contract: it says the result is in [lo, hi], not which value it is.
+// `quod check` must reject it, with a witness: one input, two results the contract accepts.
+
+fn clamp(x: int, lo: int, hi: int) -> int
+  requires lo <= hi
+  ensures lo <= result <= hi
+{
+  if x < lo { lo } else if x > hi { hi } else { x }
+}
