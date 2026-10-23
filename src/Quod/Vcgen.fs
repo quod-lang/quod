@@ -357,7 +357,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         for a in List.rev st.Assume do
             z3.Send("(assert " + a + ")")
         z3.Send("(assert (not " + o.Goal + "))")
-        match z3.Check() with
+        match z3.CheckBoth() with
         | Unsat -> proved <- proved + 1
         | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample())
         | Unknown "timeout" ->

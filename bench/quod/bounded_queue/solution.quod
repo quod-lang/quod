@@ -1,0 +1,63 @@
+// VerifBench task bounded_queue: a FIFO queue of fixed capacity over a list of operations.
+// x > 0 pushes x (dropping the oldest element first when full); 0 pops the oldest element to
+// the output, or outputs -1 when the queue is empty.
+//
+// The contract is a model: the queue and the output after the first operations, defined from
+// the end so that one more operation unfolds once. The implementation does not copy the
+// queue: it keeps every pushed value in buf and the start of the live queue in h.
+
+// The queue after ops.
+fn queue_after(cap: nat, ops: seq<int>) -> seq<int>
+  decreases len(ops)
+{
+  if len(ops) == 0 { [] }
+  else if ops[len(ops) - 1] == 0 {
+    if len(queue_after(cap, ops[..len(ops) - 1])) == 0 { [] } else { queue_after(cap, ops[..len(ops) - 1])[1..] }
+  }
+  else if cap > 0 && len(queue_after(cap, ops[..len(ops) - 1])) == cap { queue_after(cap, ops[..len(ops) - 1])[1..] + [ops[len(ops) - 1]] }
+  else { queue_after(cap, ops[..len(ops) - 1]) + [ops[len(ops) - 1]] }
+}
+
+// The output after ops.
+fn output_after(cap: nat, ops: seq<int>) -> seq<int>
+  decreases len(ops)
+{
+  if len(ops) == 0 { [] }
+  else if ops[len(ops) - 1] == 0 {
+    if len(queue_after(cap, ops[..len(ops) - 1])) == 0 { output_after(cap, ops[..len(ops) - 1]) + [-1] }
+    else { output_after(cap, ops[..len(ops) - 1]) + [queue_after(cap, ops[..len(ops) - 1])[0]] }
+  }
+  else { output_after(cap, ops[..len(ops) - 1]) }
+}
+
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  ensures result == output_after(capacity, ops)
+{
+  let mut buf: seq<int> = [];
+  let mut h = 0;
+  let mut out: seq<int> = [];
+  let mut k = 0;
+  while k < len(ops)
+    invariant 0 <= k <= len(ops)
+    invariant 0 <= h <= len(buf)
+    invariant buf[h..] == queue_after(capacity, ops[..k])
+    invariant out == output_after(capacity, ops[..k])
+    decreases len(ops) - k
+  {
+    // the model after one more operation is the model after k, unfolded once
+    assert ops[..k + 1][..k] == ops[..k];
+    // dropping the oldest element of the model is moving h
+    assert h < len(buf) ==> buf[h..][1..] == buf[h + 1..];
+    if ops[k] == 0 {
+      if h == len(buf) { out = out + [-1]; } else { out = out + [buf[h]]; h = h + 1; }
+    } else {
+      if len(buf) - h == capacity { h = h + 1; }
+      assert (buf + [ops[k]])[h..] == buf[h..] + [ops[k]];
+      buf = buf + [ops[k]];
+    }
+    k = k + 1;
+  }
+  return out;
+}

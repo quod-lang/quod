@@ -128,9 +128,45 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     do
         input.AutoFlush <- false
 
+    /// The commands of the current context, one list per push level, kept to replay it. A check
+    /// that fails in incremental mode is tried again on a fresh solver: (reset), then the whole
+    /// context. The two modes succeed on different queries: in incremental mode (after a push)
+    /// Z3 skips part of its preprocessing, and some quantified proofs that take 1.8 s on a fresh
+    /// query answer "unknown"; others are found only incrementally. Trying both proves the union.
+    let frames = ResizeArray<ResizeArray<string>>([ ResizeArray<string>() ])
+    /// After a fresh retry, z3 holds the flat context: rebuild the push levels before going on
+    /// (lazily, so that the model of the retry can still be read).
+    let mutable dirty = false
+
+    let raw (command: string) = input.WriteLine command
+
+    let restore () =
+        if dirty then
+            raw "(reset)"
+            for k in 0 .. frames.Count - 1 do
+                if k > 0 then raw "(push 1)"
+                for command in frames.[k] do raw command
+            dirty <- false
+
+    let readResult () =
+        input.Flush()
+        match readAnswer () with
+        | "sat" -> Sat
+        | "unsat" -> Unsat
+        | "unknown" ->
+            raw "(get-info :reason-unknown)"
+            input.Flush()
+            let r = readAnswer ()
+            Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
+        | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+
     member _.Send(command: string) =
+        restore ()
         log |> Option.iter (fun w -> w.WriteLine command)
-        input.WriteLine command
+        frames.[frames.Count - 1].Add command
+        raw command
+
+    member private _.Raw(command: string) = raw command
 
     member s.Init() =
         s.Send "(set-option :print-success false)"
@@ -148,27 +184,44 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     /// The time limit given at start, to restore after a temporary change.
     member _.DefaultTimeout = timeoutMs
 
-    member s.Push() = s.Send "(push 1)"
-    member s.Pop() = s.Send "(pop 1)"
+    member _.Push() =
+        restore ()
+        log |> Option.iter (fun w -> w.WriteLine "(push 1)")
+        frames.Add(ResizeArray<string>())
+        raw "(push 1)"
+
+    member _.Pop() =
+        restore ()
+        log |> Option.iter (fun w -> w.WriteLine "(pop 1)")
+        if frames.Count > 1 then
+            frames.RemoveAt(frames.Count - 1)
+            raw "(pop 1)"
 
     member s.Check() : CheckResult =
-        s.Send "(check-sat)"
-        input.Flush()
-        match readAnswer () with
-        | "sat" -> Sat
-        | "unsat" -> Unsat
-        | "unknown" ->
-            s.Send "(get-info :reason-unknown)"
-            input.Flush()
-            let r = readAnswer ()
-            Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
-        | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+        restore ()
+        log |> Option.iter (fun w -> w.WriteLine "(check-sat)")
+        raw "(check-sat)"
+        readResult ()
+
+    /// Check, and when the answer is unknown, check again on a fresh solver (see frames). For
+    /// proof obligations only: a search for a model (completeness) wants the first, quick
+    /// "unknown" and its candidate model.
+    member s.CheckBoth() : CheckResult =
+        match s.Check() with
+        | Unknown _ ->
+            raw "(reset)"
+            for frame in frames do
+                for command in frame do raw command
+            raw "(check-sat)"
+            dirty <- true
+            readResult ()
+        | r -> r
 
     /// Values of terms in the current model, as S-expressions.
     member s.Values(terms: string list) : SExpr list =
         if terms.IsEmpty then []
         else
-            s.Send("(get-value (" + String.Join(" ", terms) + "))")
+            s.Raw("(get-value (" + String.Join(" ", terms) + "))")
             input.Flush()
             try
                 match parseSExprs (readAnswer ()) with
@@ -179,7 +232,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     interface IDisposable with
         member s.Dispose() =
             try
-                s.Send "(exit)"
+                s.Raw "(exit)"
                 input.Flush()
                 if not (proc.WaitForExit 2000) then proc.Kill()
             with _ -> ()
