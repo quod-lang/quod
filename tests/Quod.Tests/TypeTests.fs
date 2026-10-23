@@ -140,3 +140,10 @@ let ``duplicate functions and len`` () =
 let ``several errors are reported at once, without cascades`` () =
     let errs = errorsOf "fn f(x: int) -> int { let a = y + 1; let b = z + a; return a + b; }"
     Assert.Equal(2, errs.Length) // y and z: nothing about a, b or the return
+
+[<Fact>]
+let ``int parts of literals are accepted as nat, with a proof obligation`` () =
+    assertOk "fn f(c: nat) -> (int, nat) { (1, c + 1) }"
+    assertOk "fn f(c: nat) -> seq<nat> { [c, c + 1] }"
+    assertOk "fn f(b: bool, c: nat) -> (int, nat) { if b { (0, c + 1) } else { (1, 1) } }"
+    assertError "but (int, nat) is expected" "fn f(p: (int, int)) -> (int, nat) { p }"

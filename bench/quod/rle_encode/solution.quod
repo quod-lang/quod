@@ -1,0 +1,46 @@
+// VerifBench task rle_encode: one (value, count) pair per maximal run of equal consecutive
+// values, in order; counts >= 1.
+
+// [v, v, ..., v], c times
+fn repeat(v: int, c: nat) -> seq<int>
+  ensures len(result) == c
+  ensures forall i in 0..c: result[i] == v
+  decreases c
+{
+  if c == 0 { [] } else { repeat(v, c - 1) + [v] }
+}
+
+// The sequence a run-length encoding stands for, defined from the end like repeat.
+fn decode(r: seq<(int, nat)>) -> seq<int>
+  decreases len(r)
+{
+  if len(r) == 0 { [] } else { decode(r[..len(r) - 1]) + repeat(r[len(r) - 1].0, r[len(r) - 1].1) }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, nat)>
+  ensures forall i in 0..len(result): result[i].1 >= 1
+  ensures forall i in 0..len(result) - 1: result[i].0 != result[i + 1].0
+  ensures decode(result) == xs
+{
+  let mut r: seq<(int, nat)> = [];
+  let mut k = 0;
+  while k < len(xs)
+    invariant 0 <= k <= len(xs)
+    invariant forall i in 0..len(r): r[i].1 >= 1
+    invariant forall i in 0..len(r) - 1: r[i].0 != r[i + 1].0
+    invariant decode(r) == xs[..k]
+    invariant (k > 0) == (len(r) > 0)
+    invariant k > 0 ==> r[len(r) - 1].0 == xs[k - 1]
+    decreases len(xs) - k
+  {
+    if len(r) > 0 && r[len(r) - 1].0 == xs[k] {
+      let c = r[len(r) - 1].1;
+      let p = r[..len(r) - 1];
+      r = p + [(xs[k], c + 1)];
+    } else {
+      r = r + [(xs[k], 1)];
+    }
+    k = k + 1;
+  }
+  return r;
+}

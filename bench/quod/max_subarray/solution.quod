@@ -1,0 +1,38 @@
+// VerifBench task max_subarray: the maximum sum over all non-empty contiguous slices of a
+// non-empty sequence, in O(n) (Kadane).
+
+// Sum of a slice, defined from the end so that extending a slice by one element unfolds once.
+fn sum(xs: seq<int>, i: nat, j: nat) -> int
+  requires i <= j <= len(xs)
+  decreases j - i
+{
+  if i == j { 0 } else { sum(xs, i, j - 1) + xs[j - 1] }
+}
+
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: sum(xs, i, j) <= result
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: sum(xs, i, j) == result
+{
+  // here: the best sum of a slice ending at k, which starts at h;
+  // best: the best sum of a slice within xs[..k], which is xs[bi..bj]
+  let mut here = xs[0];
+  let mut h = 0;
+  let mut best = xs[0];
+  let mut bi = 0;
+  let mut bj = 1;
+  let mut k = 1;
+  while k < len(xs)
+    invariant 1 <= k <= len(xs)
+    invariant 0 <= h < k && sum(xs, h, k) == here
+    invariant forall i in 0..k: sum(xs, i, k) <= here
+    invariant 0 <= bi < bj <= k && sum(xs, bi, bj) == best
+    invariant forall i in 0..k: forall j in i + 1..k + 1: sum(xs, i, j) <= best
+    decreases len(xs) - k
+  {
+    if here > 0 { here = here + xs[k]; } else { here = xs[k]; h = k; }
+    if here > best { best = here; bi = h; bj = k + 1; }
+    k = k + 1;
+  }
+  return best;
+}

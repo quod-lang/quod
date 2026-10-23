@@ -83,8 +83,20 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         if fits e.Ty expected then e
         elif e.Ty = TyInt && expected = TyNat then { Kind = EToNat e; Ty = TyNat; Span = e.Span }
         else
-            c.Error(e.Span, fn, what + " has type " + tyText e.Ty + ", but " + tyText expected + " is expected")
-            { e with Ty = TyError }
+            // a literal (or an if) is coerced part by part: (x, n + 1) as (int, nat) proves n + 1 >= 0
+            match e.Kind, expected with
+            | ETuple xs, TyTuple ts when xs.Length = ts.Length ->
+                let parts = List.map2 (fun x t -> c.Coerce(x, t, fn, what)) xs ts
+                { e with Kind = ETuple parts; Ty = TyTuple(parts |> List.map (fun p -> p.Ty)) }
+            | ESeq xs, TySeq t when not xs.IsEmpty ->
+                let parts = xs |> List.map (fun x -> c.Coerce(x, t, fn, what))
+                { e with Kind = ESeq parts; Ty = TySeq t }
+            | EIf(cond, a, b), _ ->
+                let ta, tb = c.Coerce(a, expected, fn, what), c.Coerce(b, expected, fn, what)
+                { e with Kind = EIf(cond, ta, tb); Ty = (if ta.Ty = TyError || tb.Ty = TyError then TyError else expected) }
+            | _ ->
+                c.Error(e.Span, fn, what + " has type " + tyText e.Ty + ", but " + tyText expected + " is expected")
+                { e with Ty = TyError }
 
     member c.ExpectBool(e: TExpr, ctx: Ctx, what: string) =
         if e.Ty <> TyBool && e.Ty <> TyError then

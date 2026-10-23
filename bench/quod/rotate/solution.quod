@@ -1,0 +1,14 @@
+// VerifBench task rotate: rotate xs right by k positions; k may be negative (rotate left) or
+// larger than the length (wraps around).
+//
+// Element i of the result is element (i - k) mod n of xs. The contract says it as
+// (i + n - k % n) % n, the same index, written so that % only ever sees a value in 0..2n:
+// Euclidean k % n is in 0..n for any k. Z3 cannot prove facts about (i - k) % n for an
+// unknown n (nonlinear arithmetic), even on its own.
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i + len(xs) - k % len(xs)) % len(xs)]
+{
+  if len(xs) == 0 { xs } else { xs[len(xs) - k % len(xs)..] + xs[..len(xs) - k % len(xs)] }
+}

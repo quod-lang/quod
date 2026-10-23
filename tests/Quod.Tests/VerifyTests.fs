@@ -50,6 +50,17 @@ let ``the examples verify`` () =
         assertProved (File.ReadAllText f)
 
 [<Fact>]
+let ``the VerifBench solutions written in Quod verify`` () =
+    let rec up (d: DirectoryInfo) =
+        if Directory.Exists(Path.Combine(d.FullName, "bench", "quod")) then Path.Combine(d.FullName, "bench", "quod")
+        else up d.Parent
+    let files = Directory.GetFiles(up (DirectoryInfo AppContext.BaseDirectory), "solution.quod", SearchOption.AllDirectories)
+    Assert.NotEmpty(files)
+    for f in files do
+        let ds = verifyAll (File.ReadAllText f) |> List.filter (fun d -> d.Severity = Error)
+        Assert.True(ds.IsEmpty, f + ": " + String.concat " | " (ds |> List.map toText))
+
+[<Fact>]
 let ``assert false is refuted, with a counterexample on the parameters`` () =
     let d = assertRefuted "assertion" "fn f(x: int) -> int { assert false; return x; }"
     Assert.Equal("refuted", d.Status)
@@ -134,3 +145,21 @@ let ``tuples`` () =
 let ``an impossible precondition is rejected`` () =
     let ds = verify "fn f(x: int) -> int requires x > 0 && x < 0 ensures result == 42 { 0 }"
     Assert.True(ds |> List.exists (fun d -> d.Property = Some "precondition is satisfiable"))
+
+[<Fact>]
+let ``quantified facts carry over sequence operations (reverse by a loop)`` () =
+    // Z3's own sequence theory times out on these: see the sequence axioms in Vcgen
+    let reverse (step: string) (inv: string) =
+        "fn rev(xs: seq<int>) -> seq<int> ensures len(result) == len(xs) ensures forall i in 0..len(xs): result[i] == xs[len(xs) - 1 - i] {\n"
+        + "  let mut r: seq<int> = []; let mut i = 0;\n"
+        + "  while i < len(xs) invariant 0 <= i <= len(xs) invariant len(r) == i invariant forall j in 0..i: r[j] == " + inv + " decreases len(xs) - i\n"
+        + "  { r = " + step + "; i = i + 1; }\n"
+        + "  return r; }"
+    assertProved (reverse "r + [xs[len(xs) - 1 - i]]" "xs[len(xs) - 1 - j]")
+    assertProved (reverse "[xs[i]] + r" "xs[i - 1 - j]")
+
+[<Fact>]
+let ``a run-length step keeps a quantified property of the prefix`` () =
+    assertProved
+        ("fn step(r: seq<(int, nat)>, x: int) -> seq<(int, nat)> requires forall i in 0..len(r): r[i].1 >= 1 ensures forall i in 0..len(result): result[i].1 >= 1 "
+         + "{ if len(r) > 0 && r[len(r) - 1].0 == x { r[..len(r) - 1] + [(x, r[len(r) - 1].1 + 1)] } else { r + [(x, 1)] } }")

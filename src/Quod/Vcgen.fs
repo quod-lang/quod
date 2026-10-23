@@ -36,6 +36,65 @@ let rec sortOf (t: Ty) =
 
 let private fnSym (name: string) = "f_" + name
 
+/// Sequences are axiomatized, as Dafny does: uninterpreted functions, one set per element sort
+/// (q.len.i, q.nth.i, q.cat.TiiE...), described by triggered axioms. Z3's sequence theory is not
+/// used. It does not carry a quantified fact about r over to r[..n] + [x] (it never creates the
+/// term r[i] that would trigger the fact), and even bridged to the axioms it made proofs
+/// unstable: each small change of the encoding fixed one program and broke another. The sort
+/// stays Z3's Seq, but only as a carrier; models are read through q.len and q.nth.
+let private seqOp (op: string) (seqTy: Ty) =
+    match seqTy with
+    | TySeq e -> "q." + op + "." + tySig e
+    | _ -> "q." + op + ".i"
+
+/// Declarations and axioms of the wrappers for sequences of `elem`.
+let private seqAxioms (elem: Ty) : string list =
+    let s = sortOf (TySeq elem)
+    let e = sortOf elem
+    let f op = seqOp op (TySeq elem)
+    let len, nth, cat, ext, unit, eq, empty = f "len", f "nth", f "cat", f "ext", f "unit", f "eq", f "empty"
+    let forall (binders: string) (body: string) (pattern: string) =
+        "(assert (forall (" + binders + ") (! " + body + " :pattern (" + pattern + "))))"
+    [ "(declare-fun " + len + " (" + s + ") Int)"
+      "(declare-fun " + nth + " (" + s + " Int) " + e + ")"
+      "(declare-fun " + cat + " (" + s + " " + s + ") " + s + ")"
+      "(declare-fun " + ext + " (" + s + " Int Int) " + s + ")"
+      "(declare-fun " + unit + " (" + e + ") " + s + ")"
+      "(declare-fun " + eq + " (" + s + " " + s + ") Bool)"
+      // equality, written q.eq in the program's formulas: extensional, so that two sequences
+      // with the same length and elements are known to be equal (Dafny's Seq#Equal)
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(and (= (" + eq + " a b) (= a b)) (= (" + eq + " a b) (and (= (" + len + " a) (" + len + " b)) (forall ((i Int)) (=> (and (<= 0 i) (< i (" + len + " a))) (= (" + nth + " a i) (" + nth + " b i)))))))")
+          ("(" + eq + " a b)")
+      "(declare-fun " + empty + " () " + s + ")"
+      "(assert (= (" + len + " " + empty + ") 0))"
+      forall ("(a " + s + ")") ("(and (>= (" + len + " a) 0) (=> (= (" + len + " a) 0) (= a " + empty + ")))") ("(" + len + " a)")
+      // concatenation: associative (oriented to the right, so it cannot loop), [] is neutral
+      forall ("(a " + s + ") (b " + s + ") (c " + s + ")") ("(= (" + cat + " (" + cat + " a b) c) (" + cat + " a (" + cat + " b c)))") ("(" + cat + " (" + cat + " a b) c)")
+      forall ("(a " + s + ") (b " + s + ")") ("(and (=> (= (" + len + " b) 0) (= (" + cat + " a b) a)) (=> (= (" + len + " a) 0) (= (" + cat + " a b) b)))") ("(" + cat + " a b)")      // lengths and elements of the results, in terms of the operands
+      forall ("(a " + s + ") (b " + s + ")") ("(= (" + len + " (" + cat + " a b)) (+ (" + len + " a) (" + len + " b)))") ("(" + len + " (" + cat + " a b))")
+      forall ("(a " + s + ") (b " + s + ") (i Int)")
+          ("(=> (and (<= 0 i) (< i (+ (" + len + " a) (" + len + " b)))) (= (" + nth + " (" + cat + " a b) i) (ite (< i (" + len + " a)) (" + nth + " a i) (" + nth + " b (- i (" + len + " a))))))")
+          ("(" + nth + " (" + cat + " a b) i)")
+      forall ("(a " + s + ") (lo Int) (n Int)") ("(=> (and (<= 0 lo) (<= 0 n) (<= (+ lo n) (" + len + " a))) (= (" + len + " (" + ext + " a lo n)) n))") ("(" + len + " (" + ext + " a lo n))")
+      forall ("(a " + s + ") (lo Int) (n Int) (i Int)")
+          ("(=> (and (<= 0 lo) (<= 0 i) (< i n) (<= (+ lo n) (" + len + " a))) (= (" + nth + " (" + ext + " a lo n) i) (" + nth + " a (+ lo i))))")
+          ("(" + nth + " (" + ext + " a lo n) i)")
+      forall ("(x " + e + ")") ("(and (= (" + len + " (" + unit + " x)) 1) (= (" + nth + " (" + unit + " x) 0) x))") ("(" + unit + " x)")
+      // slices of a concatenation, and the whole slice, as terms: decode(r + [p]) unfolds into
+      // decode((r + [p])[..len(r)]), which these make decode(r) without an assert
+      forall ("(a " + s + ") (b " + s + ") (lo Int) (n Int)")
+          ("(and (=> (and (<= 0 lo) (<= 0 n) (<= (+ lo n) (" + len + " a))) (= (" + ext + " (" + cat + " a b) lo n) (" + ext + " a lo n))) "
+           + "(=> (and (<= (" + len + " a) lo) (<= 0 n) (<= (+ lo n) (+ (" + len + " a) (" + len + " b)))) (= (" + ext + " (" + cat + " a b) lo n) (" + ext + " b (- lo (" + len + " a)) n))))")
+          ("(" + ext + " (" + cat + " a b) lo n)")
+      forall ("(a " + s + ") (lo Int) (n Int)") ("(=> (and (= lo 0) (= n (" + len + " a))) (= (" + ext + " a lo n) a))") ("(" + ext + " a lo n)")
+      // a slice one element longer than another slice already present: xs[..k + 1] is
+      // xs[..k] + [xs[k]], the step of every loop that walks a prefix. Triggered only by two
+      // existing slices, so it creates no new slice and cannot loop.
+      forall ("(a " + s + ") (lo Int) (m Int) (n Int)")
+          ("(=> (and (<= 0 lo) (<= 0 m) (= n (+ m 1)) (<= (+ lo n) (" + len + " a))) (= (" + ext + " a lo n) (" + cat + " (" + ext + " a lo m) (" + unit + " (" + nth + " a (+ lo m))))))")
+          ("(" + ext + " a lo m) (" + ext + " a lo n)") ]
+
 let private app (f: string) (args: string list) =
     if args.IsEmpty then f else "(" + f + " " + String.Join(" ", args) + ")"
 
@@ -56,9 +115,9 @@ let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : strin
     | TyNat -> [ "(>= " + term + " 0)" ]
     | TySeq e ->
         let q = fresh ()
-        match typeFacts fresh e ("(seq.nth " + term + " " + q + ")") with
+        match typeFacts fresh e ("(" + seqOp "nth" t + " " + term + " " + q + ")") with
         | [] -> []
-        | fs -> [ "(forall ((" + q + " Int)) (=> (and (<= 0 " + q + ") (< " + q + " (seq.len " + term + "))) " + conj fs + "))" ]
+        | fs -> [ "(forall ((" + q + " Int)) (=> (and (<= 0 " + q + ") (< " + q + " (" + seqOp "len" t + " " + term + "))) " + conj fs + "))" ]
     | TyTuple ts ->
         ts |> List.mapi (fun k ct -> typeFacts fresh ct ("(" + tupleName ts + "_" + string k + " " + term + ")")) |> List.concat
     | _ -> []
@@ -81,23 +140,33 @@ type private FnInfo =
 
 type private State = { Env: Map<string, string>; Assume: string list; Alive: bool }
 
-/// A Z3 model value printed as a Quod value: numbers, booleans, sequences, tuples.
-let rec private renderValue (e: SExpr) : string =
-    let rec items (x: SExpr) : string list option =
-        match x with
-        | List [ Atom "as"; Atom "seq.empty"; _ ] -> Some []
-        | List [ Atom "seq.unit"; y ] -> Some [ renderValue y ]
-        | List(Atom "seq.++" :: parts) ->
-            parts |> List.map items |> List.fold (fun acc p -> Option.map2 (@) acc p) (Some [])
-        | _ -> None
-    match e with
-    | Atom a -> a
-    | List [ Atom "-"; Atom n ] -> "-" + n
-    | List(Atom ctor :: args) when ctor.StartsWith "mk_Tup_" -> "(" + (args |> List.map renderValue |> String.concat ", ") + ")"
-    | other ->
-        match items other with
-        | Some xs -> "[" + String.concat ", " xs + "]"
-        | None -> sexprText other
+let private constRx = Text.RegularExpressions.Regex(@"[A-Za-z_][A-Za-z0-9_]*@[0-9]+")
+let private boundRx = Text.RegularExpressions.Regex(@"\(\(([A-Za-z_][A-Za-z0-9_]*@[0-9]+) ")
+
+/// Inside a loop, the facts about constants no longer in use (r@1 = [], i@2 = 0: the versions
+/// before the loop of the variables it modifies, and older ones) are useless, and they mislead
+/// Z3: removing r@1 = [] turned a timeout of the rle_encode invariant into a proof in 0.1 s. A
+/// fact about a dead constant is kept only when it leads, through dead constants, to a local
+/// variable still in use (let n = len(r) before the loop keeps r@1 = [] and n == 0); facts
+/// about live constants only are all kept. Parameters do not count as links: every invariant
+/// mentions them. Dropping facts is always sound.
+let private relevantFacts (live: Set<string>) (roots: Set<string>) (facts: string list) : string list =
+    let constsOf (fact: string) =
+        let bound = boundRx.Matches fact |> Seq.map (fun m -> m.Groups.[1].Value) |> Set.ofSeq
+        constRx.Matches fact |> Seq.map (fun m -> m.Value) |> Seq.filter (fun c -> not (bound.Contains c)) |> Set.ofSeq
+    let withConsts = facts |> List.map (fun f -> f, constsOf f, constsOf f |> Set.filter (fun c -> not (live.Contains c)))
+    let needed = HashSet<string>(roots)
+    let kept = HashSet<string>()
+    let mutable changed = true
+    while changed do
+        changed <- false
+        for (fact, cs, dead) in withConsts do
+            if not (kept.Contains fact) && (dead.IsEmpty || cs |> Set.exists needed.Contains) then
+                kept.Add fact |> ignore
+                for c in dead do
+                    if needed.Add c then changed <- true
+                changed <- true
+    facts |> List.filter kept.Contains
 
 /// Variables assigned anywhere in a loop body (the ones a loop must forget).
 /// A Z3 model value as a concrete Quod value, for the evaluator (None if not understood).
@@ -173,26 +242,28 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             | Some t -> t
             | None -> failwith ("internal: unbound variable " + n)
         | EResult -> env.["result"]
-        | ESeq [] -> "(as seq.empty " + sortOf e.Ty + ")"
-        | ESeq [ x ] -> "(seq.unit " + go x + ")"
-        | ESeq xs -> "(seq.++ " + String.Join(" ", xs |> List.map (fun x -> "(seq.unit " + go x + ")")) + ")"
+        | ESeq [] -> seqOp "empty" e.Ty
+        | ESeq xs ->
+            let units = xs |> List.map (fun x -> "(" + seqOp "unit" e.Ty + " " + go x + ")")
+            List.reduceBack (fun a b -> "(" + seqOp "cat" e.Ty + " " + a + " " + b + ")") units
         | ETuple xs -> app ("mk_" + tupleName (xs |> List.map (fun x -> x.Ty))) (xs |> List.map go)
         | EIndex(s, i) ->
             let ts, ti = go s, go i
-            ob ("(and (<= 0 " + ti + ") (< " + ti + " (seq.len " + ts + ")))") "index in bounds" e.Span
-            "(seq.nth " + ts + " " + ti + ")"
+            ob ("(and (<= 0 " + ti + ") (< " + ti + " (" + seqOp "len" s.Ty + " " + ts + ")))") "index in bounds" e.Span
+            "(" + seqOp "nth" s.Ty + " " + ts + " " + ti + ")"
         | ESlice(s, lo, hi) ->
             let ts = go s
+            let len = "(" + seqOp "len" s.Ty + " " + ts + ")"
             let tlo = lo |> Option.map go |> Option.defaultValue "0"
-            let thi = hi |> Option.map go |> Option.defaultValue ("(seq.len " + ts + ")")
-            ob ("(and (<= 0 " + tlo + ") (<= " + tlo + " " + thi + ") (<= " + thi + " (seq.len " + ts + ")))")
+            let thi = hi |> Option.map go |> Option.defaultValue len
+            ob ("(and (<= 0 " + tlo + ") (<= " + tlo + " " + thi + ") (<= " + thi + " " + len + "))")
                 "slice bounds (0 <= lo <= hi <= len)" e.Span
-            "(seq.extract " + ts + " " + tlo + " (- " + thi + " " + tlo + "))"
+            "(" + seqOp "ext" s.Ty + " " + ts + " " + tlo + " (- " + thi + " " + tlo + "))"
         | EProj(t, k) ->
             match t.Ty with
             | TyTuple ts -> "(" + tupleName ts + "_" + string k + " " + go t + ")"
             | _ -> failwith "internal: projection of a non-tuple"
-        | ELen s -> "(seq.len " + go s + ")"
+        | ELen s -> "(" + seqOp "len" s.Ty + " " + go s + ")"
         | ECall(name, args) -> v.Call(e, name, args |> List.map go, guards, out)
         | ENeg x -> "(- " + go x + ")"
         | ENot x -> "(not " + go x + ")"
@@ -205,11 +276,14 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             | ODiv | OMod ->
                 ob ("(not (= " + tb + " 0))") "divisor is not zero" b.Span
                 (if op = ODiv then "(div " else "(mod ") + ta + " " + tb + ")"
-        | EConcat(a, b) -> "(seq.++ " + go a + " " + go b + ")"
+        | EConcat(a, b) -> "(" + seqOp "cat" e.Ty + " " + go a + " " + go b + ")"
         | ECmp(op, a, b) ->
             let o = match op with OLt -> "<" | OLe -> "<=" | OGt -> ">" | OGe -> ">="
             "(" + o + " " + go a + " " + go b + ")"
-        | EEq(a, b) -> "(= " + go a + " " + go b + ")"
+        | EEq(a, b) ->
+            match a.Ty with
+            | TySeq _ -> "(" + seqOp "eq" a.Ty + " " + go a + " " + go b + ")"
+            | _ -> "(= " + go a + " " + go b + ")"
         | ELogic(op, a, b) ->
             let ta = go a
             match op with
@@ -297,12 +371,30 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         z3.Pop()
         { st with Assume = o.Goal :: st.Assume }
 
+    /// The value of a term in the current model, as a Quod value. Sequences are axiomatized,
+    /// so a sequence is read through its length and its elements (at most 50 of them).
+    member v.ModelValue(term: string, t: Ty) : Eval.Value option =
+        match t with
+        | TySeq e ->
+            match v.ModelValue("(" + seqOp "len" t + " " + term + ")", TyInt) with
+            | Some(Eval.VInt n) when n.Sign >= 0 && n <= bigint 50 ->
+                let items = [ for i in 0 .. int n - 1 -> v.ModelValue("(" + seqOp "nth" t + " " + term + " " + string i + ")", e) ]
+                if items |> List.forall Option.isSome then Some(Eval.VSeq(items |> List.map Option.get)) else None
+            | _ -> None
+        | TyTuple ts ->
+            let parts = ts |> List.mapi (fun k ct -> v.ModelValue("(" + tupleName ts + "_" + string k + " " + term + ")", ct))
+            if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
+        | _ ->
+            match z3.Values [ term ] with
+            | [ x ] -> valueOf t x
+            | _ -> None
+
     /// The parameters' values in the current model (empty when there is none).
     member v.Counterexample() : (string * string) list =
         let ps = paramsOf.[current.Value.Fn.Name]
-        let values = z3.Values(ps |> List.map fst)
-        if values.Length <> ps.Length then []
-        else List.zip ps values |> List.map (fun ((sym, _), value) -> (sym.Substring(0, sym.IndexOf '@'), renderValue value))
+        let values = ps |> List.map (fun (sym, ty) -> v.ModelValue(sym, ty))
+        if values |> List.exists Option.isNone then []
+        else List.zip ps values |> List.map (fun ((sym, _), value) -> (sym.Substring(0, sym.IndexOf '@'), Eval.valueText value.Value))
 
     member v.Report(o: Obligation, status: string, message: string, cex: (string * string) list) =
         diags.Add
@@ -399,6 +491,14 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             loop <- { loop with Env = loop.Env.Add(name, c); Assume = (typeFacts v.FreshQ types.[name] c |> List.rev) @ loop.Assume }
         for (inv, _) in numbered do
             loop <- v.Assume(loop, inv)
+        let constsIn (term: string) = constRx.Matches term |> Seq.map (fun m -> m.Value)
+        let live = loop.Env |> Map.toSeq |> Seq.collect (snd >> constsIn) |> Set.ofSeq
+        let paramNames = f.Params |> List.map (fun p -> p.Name) |> Set.ofList
+        let roots =
+            loop.Env |> Map.toSeq
+            |> Seq.filter (fun (n, _) -> not (paramNames.Contains n) && not (List.contains n modified))
+            |> Seq.collect (snd >> constsIn) |> Set.ofSeq
+        loop <- { loop with Assume = relevantFacts live roots loop.Assume }
         // one arbitrary iteration
         let iter0, tc = v.Eval(loop, cond)
         let iter1 = { iter0 with Assume = tc :: iter0.Assume }
@@ -469,9 +569,12 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     /// their contract only), and expression functions (known by their definition).
     member v.Prelude() =
         let tuples = ResizeArray<Ty list>()
+        let elems = ResizeArray<Ty>()
         let rec visit (t: Ty) =
             match t with
-            | TySeq e -> visit e
+            | TySeq e ->
+                visit e
+                if not (elems |> Seq.exists (fun x -> tySig x = tySig e)) then elems.Add e
             | TyTuple ts ->
                 List.iter visit ts
                 let key = ts |> List.map tySig
@@ -503,6 +606,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             let n = tupleName ts
             let fields = ts |> List.mapi (fun k t -> "(" + n + "_" + string k + " " + sortOf t + ")") |> String.concat " "
             z3.Send("(declare-datatypes ((" + n + " 0)) (((mk_" + n + " " + fields + "))))")
+        for e in elems do
+            for line in seqAxioms e do z3.Send line
         // Every function is an SMT function symbol. A pure function returns the same result for
         // the same arguments, so this is sound even for statement functions, which callers know
         // through their contract only.
@@ -591,19 +696,18 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         let goal =
             match f.Loose with
             | Some l -> v.Expr(l.Relation, env.Add(l.Left, r1).Add(l.Right, r2), [], silent)
-            | None -> "(= " + r1 + " " + r2 + ")"
+            | None ->
+                match f.Ret with
+                | TySeq _ -> "(" + seqOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
+                | _ -> "(= " + r1 + " " + r2 + ")"
         for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
             z3.Send("(assert " + a + ")")
         z3.Send("(assert (not " + goal + "))")
         let answer = z3.Check()
         let candidate () =
-            let terms = (ps |> Seq.map fst |> List.ofSeq) @ [ r1; r2 ]
-            let values = z3.Values terms
-            let types = (ps |> Seq.map snd |> List.ofSeq) @ [ f.Ret; f.Ret ]
-            if values.Length <> terms.Length then None
-            else
-                let parsed = List.map2 valueOf types values
-                if parsed |> List.forall Option.isSome then Some(parsed |> List.map Option.get) else None
+            let terms = (ps |> List.ofSeq) @ [ r1, f.Ret; r2, f.Ret ]
+            let parsed = terms |> List.map (fun (term, ty) -> v.ModelValue(term, ty))
+            if parsed |> List.forall Option.isSome then Some(parsed |> List.map Option.get) else None
         let report (status: string) (severity: Severity) (message: string) (witness: (string * string) list) =
             diags.Add
                 { File = file; Span = f.Span; Kind = "completeness"; Status = status; Severity = severity

@@ -88,3 +88,12 @@ let ``functions without ensures are not checked`` () =
 let ``an underspecified contract is an error, an inconclusive one only a warning`` () =
     let ds = verifyAll "fn f(x: int) -> int ensures result > x { x + 1 }"
     Assert.True(ds |> List.exists (fun d -> d.Kind = "completeness" && d.Severity = Error))
+
+[<Fact>]
+let ``a sequence built by a loop is determined (extensional equality)`` () =
+    assertDetermined
+        ("fn rev(xs: seq<int>) -> seq<int> ensures len(result) == len(xs) ensures forall i in 0..len(xs): result[i] == xs[len(xs) - 1 - i] {\n"
+         + "  let mut r: seq<int> = []; let mut i = 0;\n"
+         + "  while i < len(xs) invariant 0 <= i <= len(xs) invariant len(r) == i invariant forall j in 0..i: r[j] == xs[len(xs) - 1 - j] decreases len(xs) - i\n"
+         + "  { r = r + [xs[len(xs) - 1 - i]]; i = i + 1; }\n"
+         + "  return r; }")
