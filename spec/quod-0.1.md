@@ -82,9 +82,11 @@ return e;              // or a final expression at the end of the body
 - Arithmetic: `+ - *`, and `/`, `%` with a proof that the divisor is not zero. **Division is
   Euclidean** (the remainder is always `>= 0`), as in SMT-LIB; the Python backend emits a helper,
   since Python's `//` rounds differently for negative divisors.
-- Comparisons `== != < <= > >=`, logic `&& || !`, implications `==>` `<==>`.
-- Sequences: `s[i]` (with a proof that `0 <= i < len(s)`), `len(s)`, slices `s[a..b]`,
-  concatenation `s + t`.
+- Comparisons `== != < <= > >=`, which chain (`0 <= i < n`), logic `&& || !`, implications `==>`
+  `<==>`, conditional `if c { a } else { b }` (an expression, `else if` allowed).
+- Sequences: `s[i]` (with a proof that `0 <= i < len(s)`), `len(s)`, slices `s[a..b]`, `s[a..]`,
+  `s[..b]` (from `a` included to `b` excluded, with a proof of the bounds), concatenation `s + t`,
+  equality `s == t` (same length, same elements).
 - Calls to other functions (with a proof of their `requires`).
 - In contracts and assertions: `result`, and bounded quantifiers
   `forall i in a..b: P`, `exists i in a..b: P` (`a` included, `b` excluded).
@@ -116,10 +118,10 @@ What a proof needs beyond the contracts is written in the code, and checked like
   the fact for its arguments: `let ih = sum_cat(a, b[..len(b) - 1]);`. A recursive lemma is a
   proof by induction: the recursive call is the induction hypothesis, and `decreases` makes it
   well-founded.
-- An `exists` invariant needs its witness kept in a variable (the start of the best slice in
-  Kadane's algorithm), because the solver does not invent witnesses.
-- `%` by a value the solver does not know (`(i - k) % n`) is beyond Z3, even on its own: keep the
-  argument of `%` within a known range (`(i + n - k % n) % n`, which is in `0..2n`).
+- An `exists` in an invariant or an `ensures` needs its witness: keep, in a variable, the index
+  that makes it true, and state the fact for that index; the solver does not invent witnesses.
+- Facts about `a % n` for an `n` the solver does not know are mostly beyond Z3 (nonlinear
+  arithmetic); facts where `a` is known to lie in `0..2 * n` are within reach.
 
 ## Completeness (pillar 5), built in
 
@@ -136,11 +138,11 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 
 ```json
 {
-  "file": "search.quod", "fn": "binary_search", "line": 7, "col": 3,
+  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3,
   "kind": "proof | completeness | type | syntax",
   "status": "refuted | underspecified | inconclusive | error",
   "property": "invariant #2 preserved",
-  "counterexample": { "xs": [0, 2], "target": 1 },
+  "counterexample": { "n": 2 },
   "message": "..."
 }
 ```

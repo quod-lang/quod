@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 import shutil
+import os
 import subprocess
 import sys
 import tempfile
@@ -26,9 +27,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_AGENT_CMD = (
     'claude -p --output-format json --permission-mode acceptEdits '
-    '--allowedTools "Read,Write,Edit,Glob,Grep,Bash(python *),Bash(dafny *),'
-    'PowerShell(python *),PowerShell(dafny *)"'
+    '--allowedTools "Read,Write,Edit,Glob,Grep,Bash(python *),Bash(dafny *),Bash(quod *),'
+    'PowerShell(python *),PowerShell(dafny *),PowerShell(quod *)"'
 )
+
+# The quod compiler: QUOD_EXE, else the AOT build of this repository, else `quod` on PATH.
+QUOD_EXE = os.environ.get("QUOD_EXE") or next(
+    (str(p) for p in [ROOT.parent / "artifacts" / "aot" / ("quod.exe" if os.name == "nt" else "quod")]
+     if p.exists()), "quod")
 
 # Same for both arms: tells the agent how to run its tool without tripping the permission rules.
 SHELL_HINT = "Run commands directly in the current directory (no `cd`, no chained commands)."
@@ -74,12 +80,57 @@ inside `module Solution {{ ... }}`.
   It will be compiled to Python and evaluated against hidden tests.
 """
 
+PROMPT_QD = """\
+Implement the function below in Quod, in the file `solution.quod` in the current directory.
+
+Quod is a new verified programming language. Its reference is in `QUOD.md`, in the current
+directory: it is all there is to know about Quod (there are no other documents or examples).
+
+## Specification
+{spec}
+
+## Required signature (add the contracts yourself)
+```rust
+{sig}
+```
+
+## Rules
+- Add `requires` clauses expressing ONLY the input guarantees stated in the specification,
+  and `ensures` clauses that fully capture the specified result: `quod check` rejects a contract
+  that accepts two different results for the same input, unless that freedom is intended and
+  declared with `loose`. Add loop invariants, `decreases` clauses and helper functions as needed.
+- The file must pass `quod check solution.quod`. {hint}
+- When it passes and you are confident it is correct, stop.
+  It will be compiled to Python (`quod build`) and evaluated against hidden tests.
+"""
+
+QUOD_SIGNATURES = {
+    "binary_search": "fn binary_search(xs: seq<int>, target: int) -> int",
+    "merge_intervals": "fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>",
+    "rle_encode": "fn rle_encode(xs: seq<int>) -> seq<(int, int)>",
+    "bounded_queue": "fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>",
+    "max_subarray": "fn max_subarray(xs: seq<int>) -> int",
+    "rotate": "fn rotate(xs: seq<int>, k: int) -> seq<int>",
+}
+
+
+def quod_reference() -> str:
+    """The language part of the Quod 0.1 scope, from 'The language' to 'Command line': no
+    example program and no roadmap (the example of the scope is one of the tasks)."""
+    spec = (ROOT.parent / "spec" / "quod-0.1.md").read_text(encoding="utf-8")
+    body = spec[spec.index("## The language"):spec.index("## Python backend")]
+    body = body.replace("](kernel.md)", "](https://github.com/quod-lang/quod/blob/main/spec/kernel.md)")
+    return "# Quod 0.1 reference\n\n" + body.rstrip() + "\n"
+
+
 CHEATS = [r"\bassume\b", r"\{:\s*axiom", r"\{:\s*verify\s+false", r"\{:\s*extern"]
 
 
 def build_prompt(task: Task, arm: str) -> str:
     if arm == "python":
         return PROMPT_PY.format(spec=task.spec, sig=task.py_signature, hint=SHELL_HINT)
+    if arm == "quod":
+        return PROMPT_QD.format(spec=task.spec, sig=QUOD_SIGNATURES[task.id], hint=SHELL_HINT)
     return PROMPT_DFY.format(spec=task.spec, sig=task.dfy_signature, hint=SHELL_HINT)
 
 
@@ -138,6 +189,9 @@ def evaluate(task: Task, arm: str, workdir: Path) -> dict[str, Any]:
             res["hidden"] = hidden(task.id, arm, workdir)
         return res
 
+    if arm == "quod":
+        return evaluate_quod(task, workdir)
+
     src = workdir / "solution.dfy"
     res["submitted"] = src.exists()
     if not res["submitted"]:
@@ -157,6 +211,37 @@ def evaluate(task: Task, arm: str, workdir: Path) -> dict[str, Any]:
         res["hidden"] = {"loaded": False, "error": "translate failed: " + (t["out"] + t["err"])[-600:]}
         return res
     res["hidden"] = hidden(task.id, arm, pydirs[0])
+    return res
+
+
+def evaluate_quod(task: Task, workdir: Path) -> dict[str, Any]:
+    res: dict[str, Any] = {}
+    src = workdir / "solution.quod"
+    res["submitted"] = src.exists()
+    if not res["submitted"]:
+        return res
+    text = src.read_text(encoding="utf-8", errors="replace")
+    res["cheats"] = []  # Quod has no assume, axiom or verification switch
+    res["ensures_count"] = len(re.findall(r"\bensures\b", text))
+    res["loose_count"] = len(re.findall(r"\bloose\b", text))
+    v = _sh([QUOD_EXE, "check", "solution.quod", "--json"], workdir, 600)
+    try:
+        diags = json.loads(v["out"]) if v["out"].strip() else []
+    except json.JSONDecodeError:
+        diags = []
+    res["verified"] = v["code"] == 0
+    res["diagnostics"] = {}
+    for d in diags:
+        key = f"{d.get('kind')}/{d.get('status')}"
+        res["diagnostics"][key] = res["diagnostics"].get(key, 0) + 1
+    res["verify_tail"] = (v["out"] + v["err"])[-600:]
+    build = workdir / "_build"
+    shutil.rmtree(build, ignore_errors=True)
+    b = _sh([QUOD_EXE, "build", "solution.quod", "-o", str(build)], workdir, 600)
+    if b["code"] != 0 or not (build / "solution.py").exists():
+        res["hidden"] = {"loaded": False, "error": "build failed: " + (b["out"] + b["err"])[-600:]}
+        return res
+    res["hidden"] = hidden(task.id, "python", build)
     return res
 
 
@@ -213,6 +298,8 @@ def main() -> None:
                                "trial": trial, "workdir": str(wd)}
         if not a.evaluate_only:
             wd.mkdir(parents=True)
+            if arm == "quod":
+                (wd / "QUOD.md").write_text(quod_reference(), encoding="utf-8")
             prompt = build_prompt(task, arm)
             (wd / "PROMPT.md").write_text(prompt, encoding="utf-8")
             print(f"[agent] {task.id} / {arm} / {model} / #{trial} ...", flush=True)

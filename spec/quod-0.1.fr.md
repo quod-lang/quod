@@ -84,9 +84,11 @@ return e;              // ou une expression finale à la fin du corps
 - Arithmétique : `+ - *`, et `/`, `%` avec preuve que le diviseur est non nul. **La division est
   euclidienne** (le reste est toujours `>= 0`), comme en SMT-LIB ; le backend Python émet une
   fonction d'aide, car le `//` de Python arrondit différemment pour les diviseurs négatifs.
-- Comparaisons `== != < <= > >=`, logique `&& || !`, implications `==>` `<==>`.
-- Séquences : `s[i]` (avec preuve que `0 <= i < len(s)`), `len(s)`, tranches `s[a..b]`,
-  concaténation `s + t`.
+- Comparaisons `== != < <= > >=`, qui s'enchaînent (`0 <= i < n`), logique `&& || !`, implications
+  `==>` `<==>`, conditionnelle `if c { a } else { b }` (une expression, `else if` permis).
+- Séquences : `s[i]` (avec preuve que `0 <= i < len(s)`), `len(s)`, tranches `s[a..b]`, `s[a..]`,
+  `s[..b]` (de `a` inclus à `b` exclu, avec preuve des bornes), concaténation `s + t`, égalité
+  `s == t` (même longueur, mêmes éléments).
 - Appels d'autres fonctions (avec preuve de leurs `requires`).
 - Dans les contrats et assertions : `result`, et des quantificateurs bornés
   `forall i in a..b: P`, `exists i in a..b: P` (`a` inclus, `b` exclu).
@@ -119,10 +121,10 @@ Ce dont une preuve a besoin au-delà des contrats s'écrit dans le code, et se v
   contrat : l'appeler donne donc le fait pour ses arguments : `let ih = sum_cat(a, b[..len(b) - 1]);`.
   Un lemme récursif est une preuve par récurrence : l'appel récursif est l'hypothèse de récurrence,
   et `decreases` la rend bien fondée.
-- Un invariant en `exists` demande que son témoin soit gardé dans une variable (le début de la
-  meilleure tranche dans l'algorithme de Kadane), car le solveur n'invente pas de témoins.
-- `%` par une valeur que le solveur ne connaît pas (`(i - k) % n`) dépasse Z3, même seul : garder
-  l'argument de `%` dans un intervalle connu (`(i + n - k % n) % n`, qui est dans `0..2n`).
+- Un `exists` dans un invariant ou un `ensures` demande son témoin : garder, dans une variable,
+  l'indice qui le rend vrai, et énoncer le fait pour cet indice ; le solveur n'invente pas de témoins.
+- Les faits sur `a % n` pour un `n` que le solveur ne connaît pas dépassent le plus souvent Z3
+  (arithmétique non linéaire) ; ceux où `a` est connu dans `0..2 * n` sont à sa portée.
 ## Complétude (pilier 5), intégrée
 
 - Pour chaque fonction avec `ensures`, le compilateur demande à Z3 si deux résultats différents
@@ -139,11 +141,11 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 
 ```json
 {
-  "file": "search.quod", "fn": "binary_search", "line": 7, "col": 3,
+  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3,
   "kind": "proof | completeness | type | syntax",
   "status": "refuted | underspecified | inconclusive | error",
   "property": "invariant #2 preserved",
-  "counterexample": { "xs": [0, 2], "target": 1 },
+  "counterexample": { "n": 2 },
   "message": "..."
 }
 ```
