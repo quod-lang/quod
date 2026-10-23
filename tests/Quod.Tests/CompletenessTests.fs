@@ -97,3 +97,32 @@ let ``a sequence built by a loop is determined (extensional equality)`` () =
          + "  while i < len(xs) invariant 0 <= i <= len(xs) invariant len(r) == i invariant forall j in 0..i: r[j] == xs[len(xs) - 1 - j] decreases len(xs) - i\n"
          + "  { r = r + [xs[len(xs) - 1 - i]]; i = i + 1; }\n"
          + "  return r; }")
+[<Fact>]
+let ``a weak contract of a statement function over tuples is caught (Haiku's merge_intervals)`` () =
+    // No expression function, so no concrete sequence for Z3 to build a model from: the witness
+    // comes from the concrete search (small inputs and results, checked by the evaluator).
+    let w =
+        assertUnderspecified
+            ("fn merge(iv: seq<(int, int)>) -> seq<(int, int)>\n"
+             + "  requires forall j in 0..len(iv): iv[j].0 <= iv[j].1\n"
+             + "  ensures forall k in 0..len(result) - 1: result[k].1 < result[k + 1].0\n"
+             + "{ let r: seq<(int, int)> = []; return r; }")
+    Assert.True(w.ContainsKey "iv")
+
+[<Fact>]
+let ``duplicates without loose: the witness of a statement binary search`` () =
+    let w =
+        assertUnderspecified
+            ("fn find(xs: seq<int>, t: int) -> int\n"
+             + "  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]\n"
+             + "  ensures (0 <= result < len(xs) && xs[result] == t) || (result == -1 && forall i in 0..len(xs): xs[i] != t)\n"
+             + "{ let mut i = 0; while i < len(xs) invariant 0 <= i <= len(xs) invariant forall j in 0..i: xs[j] != t decreases len(xs) - i\n"
+             + "  { if xs[i] == t { return i; } i = i + 1; } return -1; }")
+    Assert.True(w.ContainsKey "xs")
+
+[<Fact>]
+let ``a loose relation that accepts any two results is reported`` () =
+    let ds = verifyAll "fn f(x: int) -> int ensures result > x loose (a, b) => true { x + 1 }"
+    Assert.True(ds |> List.exists (fun d -> d.Status = "loose-accepts-all" && d.Severity = Warning))
+    let legit = verifyAll (firstIndex "  loose (r1, r2) => (r1 == -1) == (r2 == -1)\n")
+    Assert.False(legit |> List.exists (fun d -> d.Status = "loose-accepts-all"))

@@ -195,6 +195,32 @@ let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
         if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
     | _ -> None
 
+// --- concrete witness search ------------------------------------------------------------
+
+/// Small values of a type, for candidate results: [], singletons, pairs of small elements.
+let rec private smallValues (t: Ty) : Eval.Value list =
+    match t with
+    | TyInt | TyError -> [ 0; 1; -1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
+    | TyNat -> [ 0; 1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
+    | TyBool -> [ Eval.VBool false; Eval.VBool true ]
+    | TyTuple ts ->
+        ts
+        |> List.fold (fun acc ct -> [ for prefix in acc do for v in smallValues ct -> prefix @ [ v ] ]) [ [] ]
+        |> List.truncate 30
+        |> List.map Eval.VTuple
+    | TySeq e ->
+        let elems = smallValues e |> List.truncate 12
+        [ Eval.VSeq [] ] @ [ for x in elems -> Eval.VSeq [ x ] ] @ ([ for x in elems do for y in elems -> Eval.VSeq [ x; y ] ] |> List.truncate 20)
+
+/// A random small value of a type, for inputs (ints in -6..6, sequences of length 0..5).
+let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
+    match t with
+    | TyInt | TyError -> Eval.VInt(bigint (rnd.Next(-6, 7)))
+    | TyNat -> Eval.VInt(bigint (rnd.Next(0, 7)))
+    | TyBool -> Eval.VBool(rnd.Next 2 = 0)
+    | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
+    | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
+
 let rec private assignedIn (body: TStmt list) : string list =
     body |> List.collect (fun s ->
         match s.Kind with
@@ -691,6 +717,29 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         let r1 = v.Const("result_a", f.Ret)
         let r2 = v.Const("result_b", f.Ret)
         assume <- (typeFacts v.FreshQ f.Ret r1 @ typeFacts v.FreshQ f.Ret r2 |> List.rev) @ assume
+        // A loose relation that holds for any two values of the result type, without the ensures
+        // (`loose (r1, r2) => true`), declares every result acceptable: the check below would then
+        // prove nothing. A VerifBench agent wrote it to silence the check.
+        match f.Loose with
+        | Some l ->
+            let rel = v.Expr(l.Relation, env.Add(l.Left, r1).Add(l.Right, r2), [], silent)
+            z3.Push()
+            for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
+                z3.Send("(assert " + a + ")")
+            z3.Send("(assert (not " + rel + "))")
+            z3.SetTimeout(min 1000 z3.DefaultTimeout)
+            let total = z3.Check() = Unsat
+            z3.SetTimeout z3.DefaultTimeout
+            z3.Pop()
+            if total then
+                diags.Add
+                    { File = file; Span = f.Span; Kind = "completeness"; Status = "loose-accepts-all"; Severity = Warning
+                      Fn = Some f.Name; Property = Some "the 'loose' relation restricts the results"
+                      Counterexample = []
+                      Message =
+                        "the 'loose' relation holds for any two results, whatever the ensures say: it declares every result acceptable, "
+                        + "so the completeness check proves nothing. Say what two acceptable results have in common, or remove 'loose'" }
+        | None -> ()
         for ens in f.Ensures do
             assume <- v.Expr(ens, env.Add("result", r1), [], silent) :: v.Expr(ens, env.Add("result", r2), [], silent) :: assume
         let goal =
@@ -735,6 +784,31 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                      @ [ "result_a", Eval.valueText a; "result_b", Eval.valueText b ])
             else None
         let fromCandidate () = candidate () |> Option.bind confirm
+        /// When Z3 gives no usable model (sequences are axiomatized: a formula with no concrete
+        /// sequence term is often "unknown"), search concretely: small inputs that satisfy the
+        /// requires, small candidate results (and the parameters of the result type), checked
+        /// against the ensures by the evaluator. Two accepted results are a confirmed witness.
+        let concrete () : (string * string) list option =
+            let rnd = Random 5
+            let ev = Eval.Evaluator(fns)
+            let mutable found = None
+            let mutable tries = 0
+            let mutable inputs = 0
+            while found.IsNone && tries < 3000 && inputs < 60 do
+                tries <- tries + 1
+                let values = f.Params |> List.map (fun p -> randomValue rnd p.Ty)
+                let env = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
+                if f.Requires |> List.forall (fun r -> ev.Holds(r, env) = Some true) then
+                    inputs <- inputs + 1
+                    let sameType = List.zip f.Params values |> List.filter (fun (p, _) -> p.Ty = f.Ret) |> List.map snd
+                    let accepted =
+                        (sameType @ smallValues f.Ret)
+                        |> List.distinct
+                        |> List.filter (fun r -> ev.Fits(f.Ret, r) && f.Ensures |> List.forall (fun e -> ev.Holds(e, env.Add("result", r)) = Some true))
+                    found <-
+                        [ for a in accepted do for b in accepted -> a, b ]
+                        |> List.tryPick (fun (a, b) -> if a = b then None else confirm (values @ [ a; b ]))
+            found
         let witness =
             match answer with
             | Unsat -> None
@@ -751,7 +825,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                     let w = match second with Unsat -> None | _ -> fromCandidate ()
                     z3.Send "(set-option :smt.mbqi false)"
                     z3.SetTimeout z3.DefaultTimeout
-                    w
+                    match w with
+                    | Some _ -> w
+                    | None -> concrete ()
         let determined =
             match answer, witness with
             | Unsat, _ -> true
