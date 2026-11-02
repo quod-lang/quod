@@ -195,14 +195,29 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 
 ```json
 {
-  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3,
-  "kind": "proof | completeness | type | syntax",
-  "status": "refuted | underspecified | inconclusive | error",
-  "property": "invariant #2 preserved",
-  "counterexample": { "n": 2 },
+  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3, "endLine": 7, "endCol": 30,
+  "kind": "proof | completeness | type | syntax | contract | loose | review",
+  "status": "refuted | underspecified | inconclusive | error | ...",
+  "severity": "error | warning | note",
+  "property": "invariant #2 is preserved by the loop body",
+  "counterexample": { "n": "2" },
+  "evidence": "run | solver | unconfirmed",
+  "reason": "timeout | incomplete quantifiers | ...",
   "message": "..."
 }
 ```
+
+- `evidence`, with a counterexample: `run` (the function was run on these inputs and the
+  obligation broke: certain), `solver` (a model of the negated obligation), `unconfirmed` (a
+  candidate model the solver could not confirm).
+- `reason`, when the solver gave no verdict: `timeout`, or what it says (`incomplete
+  quantifiers`, `incomplete (theory arithmetic)`...). In text mode, shown after `solver:`.
+- Notes (`severity: note`, not printed in text mode) tell a reviewer what the proofs cannot vouch
+  for: the style of each contract (`contract`), each `loose` and its relation (`loose`), and each
+  function the contracts are stated with, directly or through the expression functions they call
+  (`review`, with `property: "used by the contracts of f, g"`): a determined contract can still
+  describe the wrong function. The summary line lists them:
+  `...; loose: binary_search; to review with the contracts: sum (prefix_sums, range_sum)`.
 
 ## Command line
 

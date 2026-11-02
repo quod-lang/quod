@@ -201,14 +201,29 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 
 ```json
 {
-  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3,
-  "kind": "proof | completeness | type | syntax",
-  "status": "refuted | underspecified | inconclusive | error",
-  "property": "invariant #2 preserved",
-  "counterexample": { "n": 2 },
+  "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3, "endLine": 7, "endCol": 30,
+  "kind": "proof | completeness | type | syntax | contract | loose | review",
+  "status": "refuted | underspecified | inconclusive | error | ...",
+  "severity": "error | warning | note",
+  "property": "invariant #2 is preserved by the loop body",
+  "counterexample": { "n": "2" },
+  "evidence": "run | solver | unconfirmed",
+  "reason": "timeout | incomplete quantifiers | ...",
   "message": "..."
 }
 ```
+
+- `evidence`, avec un contre-exemple : `run` (la fonction a été exécutée sur ces entrées et
+  l'obligation a été violée : c'est certain), `solver` (un modèle de l'obligation niée),
+  `unconfirmed` (un modèle candidat que le solveur n'a pas pu confirmer).
+- `reason`, quand le solveur n'a pas conclu : `timeout`, ou ce qu'il en dit (`incomplete
+  quantifiers`, `incomplete (theory arithmetic)`...). En mode texte, affichée après `solver:`.
+- Des notes (`severity: note`, non affichées en mode texte) disent à un relecteur ce dont les
+  preuves ne répondent pas : le style de chaque contrat (`contract`), chaque `loose` et sa relation
+  (`loose`), et chaque fonction avec laquelle les contrats sont énoncés, directement ou à travers
+  les fonctions-expressions qu'ils appellent (`review`, avec `property: "used by the contracts of
+  f, g"`) : un contrat déterminé peut encore décrire la mauvaise fonction. La ligne de résumé les
+  liste : `...; loose: binary_search; to review with the contracts: sum (prefix_sums, range_sum)`.
 
 ## Ligne de commande
 

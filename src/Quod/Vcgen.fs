@@ -195,6 +195,14 @@ let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
         if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
     | _ -> None
 
+/// z3's reason-unknown answer, `(:reason-unknown "(incomplete quantifiers)")`, as its text:
+/// `incomplete quantifiers`.
+let private reasonText (answer: string) =
+    let a, b = answer.IndexOf '"', answer.LastIndexOf '"'
+    let text = if a >= 0 && b > a then answer.Substring(a + 1, b - a - 1).Trim() else ""
+    let text = if text.StartsWith "(" && text.EndsWith ")" then text.Substring(1, text.Length - 2).Trim() else text
+    if text = "" then "unknown" else text
+
 // --- concrete witness search ------------------------------------------------------------
 
 /// Small values of a type, for candidate results: [], singletons, pairs of small elements.
@@ -469,7 +477,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     member v.Check(st: State, o: Obligation) : State =
         match concrete.TryGetValue((o.Label, o.Span)) with
         | true, cex ->
-            v.Report(o, "refuted", "cannot prove: " + o.Label + ": it fails when the function runs on the inputs below", cex)
+            v.Report(o, "refuted", "cannot prove: " + o.Label + ": it fails when the function runs on the inputs below", cex, evidence = "run")
             { st with Assume = o.Goal :: st.Assume }
         | _ ->
         z3.Push()
@@ -478,15 +486,18 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         z3.Send("(assert (not " + o.Goal + "))")
         match z3.CheckBoth() with
         | Unsat -> proved <- proved + 1
-        | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample())
+        | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample(), evidence = "solver")
         | Unknown "timeout" ->
-            v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [])
-        | Unknown _ ->
+            v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [], reason = "timeout")
+        | Unknown why ->
             // Quantifiers make Z3 incomplete: it stops with a candidate model it cannot confirm.
             // Shown as a *possible* counterexample: it often is the real one.
+            let reason = reasonText why
             match v.Counterexample() with
-            | [] -> v.Report(o, "inconclusive", "could not prove " + o.Label + v.NoCounterexample(), [])
-            | cex -> v.Report(o, "inconclusive", "cannot prove: " + o.Label + " (possible counterexample, not confirmed by the solver)", cex)
+            | [] -> v.Report(o, "inconclusive", "could not prove " + o.Label + v.NoCounterexample(), [], reason = reason)
+            | cex ->
+                v.Report(o, "inconclusive", "cannot prove: " + o.Label + " (possible counterexample, not confirmed by the solver)", cex,
+                         reason = reason, evidence = "unconfirmed")
         z3.Pop()
         { st with Assume = o.Goal :: st.Assume }
 
@@ -523,10 +534,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         if values |> List.exists Option.isNone then []
         else List.zip ps values |> List.map (fun ((sym, _), value) -> (sym.Substring(0, sym.IndexOf '@'), Eval.valueText value.Value))
 
-    member v.Report(o: Obligation, status: string, message: string, cex: (string * string) list) =
+    member v.Report(o: Obligation, status: string, message: string, cex: (string * string) list, ?reason: string, ?evidence: string) =
         diags.Add
             { File = file; Span = o.Span; Kind = "proof"; Status = status; Severity = Error
-              Fn = Some current.Value.Fn.Name; Property = Some o.Label; Counterexample = cex; Message = message }
+              Fn = Some current.Value.Fn.Name; Property = Some o.Label; Counterexample = cex
+              Reason = reason; Evidence = (if cex.IsEmpty then None else evidence); Message = message }
 
     /// Translate e on the current path: check its obligations, assume its facts.
     member v.Eval(st: State, e: TExpr) : State * string =
@@ -676,7 +688,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                 diags.Add
                     { File = file; Span = f.Span; Kind = "proof"; Status = "error"; Severity = Error
                       Fn = Some f.Name; Property = Some "precondition is satisfiable"; Counterexample = []
-                      Message = "the 'requires' clauses can never all hold, so this function could never be called and every proof about it would be empty" }
+                      Reason = None; Evidence = None; Message = "the 'requires' clauses can never all hold, so this function could never be called and every proof about it would be empty" }
             | _ -> ()
             z3.Pop()
         let measure =
@@ -843,7 +855,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                     { File = file; Span = f.Span; Kind = "completeness"; Status = "loose-accepts-all"; Severity = Warning
                       Fn = Some f.Name; Property = Some "the 'loose' relation restricts the results"
                       Counterexample = []
-                      Message =
+                      Reason = None; Evidence = None; Message =
                         "the 'loose' relation holds for any two results, whatever the ensures say: it declares every result acceptable, "
                         + "so the completeness check proves nothing. Say what two acceptable results have in common, or remove 'loose'" }
         | None -> ()
@@ -868,7 +880,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             diags.Add
                 { File = file; Span = f.Span; Kind = "completeness"; Status = status; Severity = severity
                   Fn = Some f.Name; Property = Some "the contract determines a unique result"
-                  Counterexample = witness; Message = message }
+                  Counterexample = witness; Reason = None; Evidence = None; Message = message }
         /// Evaluate a candidate (inputs, result a, result b) on concrete values: Some witness
         /// when the contract really accepts both results, None otherwise.
         let confirm (values: Eval.Value list) : (string * string) list option =

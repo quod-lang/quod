@@ -202,3 +202,20 @@ let ``a lemma whose recursive call does not decrease gets a counterexample from 
             ("fn down(n: nat) -> bool ensures result decreases n {\n"
              + "  if n == 0 { return true; } let ih = down(n); return ih; }")
     Assert.NotEmpty(d.Counterexample)
+
+[<Fact>]
+let ``a counterexample says where it comes from: a run, or the solver`` () =
+    // random small inputs never satisfy x > 1000: the counterexample comes from the solver
+    let solver = assertRefuted "postcondition" "fn f(x: int) -> int requires x > 1000 ensures result > 0 { x - 2000 }"
+    Assert.Equal(Some "solver", solver.Evidence)
+    let run = assertRefuted "postcondition" "fn g(x: int) -> int ensures result > 0 { x }"
+    Assert.Equal(Some "run", run.Evidence)
+
+[<Fact>]
+let ``an inconclusive proof gives the solver's reason`` () =
+    // a^3 + b^3 = c^3 has no solution in positive integers: nonlinear, beyond the solver
+    let ds =
+        verify "fn fermat(a: int, b: int, c: int) -> int requires a > 0 && b > 0 && c > 0 ensures result != 0 { a * a * a + b * b * b - c * c * c }"
+    let d = ds |> List.exactlyOne
+    Assert.Equal("inconclusive", d.Status)
+    Assert.True(d.Reason.IsSome)

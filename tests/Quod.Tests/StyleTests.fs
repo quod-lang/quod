@@ -74,3 +74,26 @@ let ``a statement function that always returns true is a lemma written as a func
     Assert.Equal(LemmaAsFunction, s.["split"])
     Assert.Equal(LemmaAsFunction, s.["split2"])
     Assert.Equal(Properties, s.["nonneg"])
+
+let private reviewOf (src: string) =
+    let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
+    Assert.True(errs.IsEmpty)
+    review "test.quod" typed
+
+[<Fact>]
+let ``every loose is noted, with its relation`` () =
+    let ds = reviewOf "fn idx(xs: seq<int>) -> int requires len(xs) > 0 ensures 0 <= result < len(xs) loose (a, b) => xs[a] == xs[b] { 0 }"
+    let d = ds |> List.find (fun d -> d.Kind = "loose")
+    Assert.Equal(Some "idx", d.Fn)
+    Assert.Contains("loose (a, b) => xs[a] == xs[b]", d.Message)
+
+[<Fact>]
+let ``the functions the contracts are stated with are listed for review, through expression functions`` () =
+    let src =
+        "fn sq(x: int) -> int { x * x }\n"
+        + "fn sum_sq(xs: seq<int>, j: nat) -> int requires j <= len(xs) decreases j { if j == 0 { 0 } else { sum_sq(xs, j - 1) + sq(xs[j - 1]) } }\n"
+        + "fn energy(xs: seq<int>) -> int ensures result == sum_sq(xs, len(xs)) { sum_sq(xs, len(xs)) }\n"
+        + "fn unused(x: int) -> int { x }\n"
+    let ds = reviewOf src |> List.filter (fun d -> d.Kind = "review")
+    Assert.Equal<string list>([ "sq"; "sum_sq" ], ds |> List.choose (fun d -> d.Fn))
+    Assert.All(ds, fun d -> Assert.Equal(Some(reviewProperty + "energy"), d.Property))

@@ -82,7 +82,7 @@ let private verifyFile (file: string) (src: string) (o: Options) : Result<Typed.
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, o.Timeout * 1000, log)
                 let verified = Vcgen.verify file typed session
-                let result = { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed }
+                let result = { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed @ ContractStyle.review file typed }
                 report o result.Diagnostics
                 Ok(typed, result)
     with
@@ -105,6 +105,19 @@ let rec private summary (r: Vcgen.VerifyResult) =
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
     + styleSummary r
     + (if r.Lemmas > 0 then "; " + string r.Lemmas + " lemma(s)" else "")
+    + reviewSummary r
+
+/// "; loose: binary_search; to review with the contracts: sum (prefix_sums, range_sum)": what
+/// the proofs cannot vouch for, a reviewer reads.
+and private reviewSummary (r: Vcgen.VerifyResult) =
+    let names kind = r.Diagnostics |> List.filter (fun d -> d.Kind = kind) |> List.choose (fun d -> d.Fn)
+    let loose = names "loose"
+    let models =
+        r.Diagnostics
+        |> List.filter (fun d -> d.Kind = "review")
+        |> List.map (fun d -> d.Fn.Value + " (" + d.Property.Value.Substring(ContractStyle.reviewProperty.Length) + ")")
+    (if loose.IsEmpty then "" else "; loose: " + String.Join(", ", loose))
+    + (if models.IsEmpty then "" else "; to review with the contracts: " + String.Join(", ", models))
 
 /// "; contracts: 2 by properties, 1 by a model, 1 restating the body, 1 missing" (the styles present).
 and private styleSummary (r: Vcgen.VerifyResult) =

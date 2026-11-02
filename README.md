@@ -49,7 +49,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 ```
 $ quod check binary_search.quod
-verified: 29 proof obligation(s) proved; 1 of 1 contract(s) determine their result; contracts: 1 by properties
+verified: 29 proof obligation(s) proved; 1 of 1 contract(s) determine their result; contracts: 1 by properties; loose: binary_search
 ```
 
 Every index, every invariant, termination and the postconditions are proved. And the contract

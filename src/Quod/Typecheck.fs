@@ -40,7 +40,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
     member _.Error(span: Span, fn: string, message: string) =
         errors.Add
             { File = file; Span = span; Kind = "type"; Status = "error"; Severity = Error
-              Fn = (if fn = "" then None else Some fn); Property = None; Counterexample = []; Message = message }
+              Fn = (if fn = "" then None else Some fn); Property = None; Counterexample = []; Reason = None; Evidence = None; Message = message }
 
     // --- scopes -------------------------------------------------------------------
 
@@ -534,11 +534,11 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
         if fns.ContainsKey f.Name then
             dups.Add
                 { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
-                  Property = None; Counterexample = []; Message = "a function named '" + f.Name + "' is already defined" }
+                  Property = None; Counterexample = []; Reason = None; Evidence = None; Message = "a function named '" + f.Name + "' is already defined" }
         elif f.Name = "len" then
             dups.Add
                 { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
-                  Property = None; Counterexample = []; Message = "'len' is a built-in function and cannot be redefined" }
+                  Property = None; Counterexample = []; Reason = None; Evidence = None; Message = "'len' is a built-in function and cannot be redefined" }
         else
             fns <- fns.Add(f.Name, f)
     let recursive = recursiveFns program.Fns

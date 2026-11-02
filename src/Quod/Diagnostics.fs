@@ -25,6 +25,11 @@ type Diagnostic =
       Property: string option
       /// Values of the parameters that make a proof obligation fail (name, Quod value).
       Counterexample: (string * string) list
+      /// Why the solver gave no verdict (inconclusive): timeout, or its reason-unknown text.
+      Reason: string option
+      /// Where a counterexample comes from: run (the function was run on it, a certain
+      /// failure), solver (a model of the negated obligation), unconfirmed (a candidate model).
+      Evidence: string option
       Message: string }
 
 /// Raised by a stage that stops at its first error (the parser does in 0.1).
@@ -33,7 +38,7 @@ exception QuodError of Diagnostic
 let syntaxError (file: string) (span: Span) (message: string) =
     QuodError
         { File = file; Span = span; Kind = "syntax"; Status = "error"; Severity = Error
-          Fn = None; Property = None; Counterexample = []; Message = message }
+          Fn = None; Property = None; Counterexample = []; Reason = None; Evidence = None; Message = message }
 
 let private severityText = function Error -> "error" | Warning -> "warning" | Info -> "note"
 
@@ -48,6 +53,9 @@ let toText (d: Diagnostic) =
     sb.Append(d.Message) |> ignore
     if not d.Counterexample.IsEmpty then
         sb.Append(if d.Kind = "completeness" then "\n    witness: " else "\n    counterexample: ").Append(d.Counterexample |> List.map (fun (n, v) -> n + " = " + v) |> String.concat ", ") |> ignore
+    match d.Reason with
+    | Some r when r <> "timeout" -> sb.Append("\n    solver: ").Append(r) |> ignore // the message says "time limit"
+    | _ -> ()
     sb.ToString()
 
 let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
@@ -71,6 +79,8 @@ let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
         for (n, v) in d.Counterexample do
             w.WriteString(n, v)
         w.WriteEndObject()
+    d.Evidence |> Option.iter (fun e -> w.WriteString("evidence", e))
+    d.Reason |> Option.iter (fun r -> w.WriteString("reason", r))
     w.WriteString("message", d.Message)
     w.WriteEndObject()
 

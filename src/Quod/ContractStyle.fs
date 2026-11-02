@@ -108,4 +108,60 @@ let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
                     "lemma-as-function", Warning,
                     "'" + f.Name + "' always returns true and states facts in its ensures: it is a lemma written as a function, so the generated code runs it at every call (a recursive one costs its depth, and can overflow the stack). Write it 'lemma " + f.Name + "(...)', without result type and 'ensures result', and call it as a statement, '" + f.Name + "(...);': it is then erased"
             { File = file; Span = f.Span; Kind = "contract"; Status = status; Severity = severity
-              Fn = Some f.Name; Property = Some "contract style"; Counterexample = []; Message = message }))
+              Fn = Some f.Name; Property = Some "contract style"; Counterexample = []; Reason = None; Evidence = None; Message = message }))
+
+/// The functions called in an expression.
+let rec private calls (e: TExpr) : string list =
+    match e.Kind with
+    | ECall(g, args) -> g :: List.collect calls args
+    | ESeq xs | ETuple xs -> List.collect calls xs
+    | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> calls a @ calls b
+    | ESlice(a, b, c) -> calls a @ (Option.toList b |> List.collect calls) @ (Option.toList c |> List.collect calls)
+    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> calls a
+    | EIf(a, b, c) | EQuant(_, _, a, b, c) -> calls a @ calls b @ calls c
+    | EInt _ | EBool _ | EVar _ | EResult -> []
+
+/// The property of a review note, followed by the functions whose contracts use the model.
+let reviewProperty = "used by the contracts of "
+
+/// What a reviewer must read besides the proofs, as notes:
+/// - each `loose`: the freedom it declares is accepted as stated, the proof cannot tell whether
+///   it is intended;
+/// - each function the contracts are stated with (directly, or through the expression functions
+///   they call): a determined contract can still describe the wrong function, and a model is
+///   only as right as its definition.
+let review (file: string) (prog: TProgram) : Diagnostic list =
+    let byName = prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+    let note (f: TFn) kind status property message =
+        { File = file; Span = f.Span; Kind = kind; Status = status; Severity = Info; Fn = Some f.Name
+          Property = Some property; Counterexample = []; Reason = None; Evidence = None; Message = message }
+    let looseNotes =
+        prog.Fns |> List.choose (fun f ->
+            f.Loose |> Option.map (fun l ->
+                note f "loose" "declared" "declared freedom"
+                    ("the contract accepts any two results related by 'loose (" + l.Left + ", " + l.Right + ") => "
+                     + Printer.exprText (toSyntax l.Relation) + "': check that this freedom is intended")))
+    // the functions a contract relies on, through the bodies of expression functions
+    let rec closure (seen: Set<string>) (todo: string list) =
+        match todo with
+        | [] -> seen
+        | g :: rest when seen.Contains g || not (byName.ContainsKey g) -> closure seen rest
+        | g :: rest ->
+            let inner = match byName.[g].Body with TExprBody b -> calls b | TStmtBody _ -> []
+            closure (seen.Add g) (inner @ rest)
+    let users =
+        prog.Fns
+        |> List.filter (fun f -> not f.IsLemma && not f.Ensures.IsEmpty)
+        |> List.collect (fun f ->
+            let direct = (f.Ensures |> List.collect calls) @ (f.Loose |> Option.toList |> List.collect (fun l -> calls l.Relation))
+            closure Set.empty direct |> Set.remove f.Name |> Set.toList |> List.map (fun g -> g, f.Name))
+    let reviewNotes =
+        prog.Fns |> List.choose (fun g ->
+            match users |> List.filter (fun (m, _) -> m = g.Name) |> List.map snd with
+            | [] -> None
+            | fs ->
+                Some(
+                    note g "review" "model" (reviewProperty + String.concat ", " fs)
+                        ("the contracts of " + String.concat ", " fs + " are stated with '" + g.Name
+                         + "': the proofs show that the code agrees with it, not that it says what was meant, so read it")))
+    looseNotes @ reviewNotes
