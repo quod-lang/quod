@@ -335,6 +335,125 @@ let rec private assignedIn (body: TStmt list) : string list =
         | SWhile(_, _, _, b) -> assignedIn b
         | _ -> [])
 
+// --- inputs from the solver, at a fixed length -------------------------------------------
+
+/// A value in a bounded problem: sequences have a known length, so a quantifier over a known
+/// range unfolds into a conjunction and `len` is a number. Scalars are SMT terms, or numbers
+/// and booleans when known (so that ranges and lengths stay known).
+type private BVal =
+    | BInt of bigint
+    | BBool of bool
+    | BTerm of string
+    | BSeq of BVal list
+    | BTup of BVal list
+
+/// What the bounded translation does not cover (a call, a slice with unknown bounds...): the
+/// conjunct is left out. Inputs are checked by the evaluator anyway.
+exception private Unbounded
+
+let private bterm (b: BVal) : string =
+    match b with
+    | BInt n -> if n.Sign < 0 then "(- " + (-n).ToString() + ")" else n.ToString()
+    | BBool v -> if v then "true" else "false"
+    | BTerm t -> t
+    | BSeq _ | BTup _ -> raise Unbounded
+
+let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
+    let go = bexpr env
+    let known (x: BVal) = match x with BInt n -> n | _ -> raise Unbounded
+    let items (x: BVal) = match x with BSeq l -> l | _ -> raise Unbounded
+    let rec equal (a: BVal) (b: BVal) : BVal =
+        match a, b with
+        | BSeq l1, BSeq l2 -> if l1.Length <> l2.Length then BBool false else conjB (List.map2 equal l1 l2)
+        | BTup l1, BTup l2 -> conjB (List.map2 equal l1 l2)
+        | BInt x, BInt y -> BBool(x = y)
+        | BBool x, BBool y -> BBool(x = y)
+        | _ -> BTerm("(= " + bterm a + " " + bterm b + ")")
+    and conjB (parts: BVal list) =
+        if parts |> List.exists (fun p -> p = BBool false) then BBool false
+        else
+            match parts |> List.filter (fun p -> p <> BBool true) with
+            | [] -> BBool true
+            | [ p ] -> p
+            | ps -> BTerm("(and " + String.Join(" ", ps |> List.map bterm) + ")")
+    let disjB (parts: BVal list) =
+        if parts |> List.exists (fun p -> p = BBool true) then BBool true
+        else
+            match parts |> List.filter (fun p -> p <> BBool false) with
+            | [] -> BBool false
+            | [ p ] -> p
+            | ps -> BTerm("(or " + String.Join(" ", ps |> List.map bterm) + ")")
+    match e.Kind with
+    | EInt n -> BInt n
+    | EBool b -> BBool b
+    | EVar n -> (match env.TryFind n with Some v -> v | None -> raise Unbounded)
+    | ESeq xs -> BSeq(List.map go xs)
+    | ETuple xs -> BTup(List.map go xs)
+    | ELen s -> BInt(bigint (items (go s)).Length)
+    | EIndex(s, i) ->
+        let l = items (go s)
+        match go i with
+        | BInt k -> if k.Sign >= 0 && k < bigint l.Length then l.[int k] else raise Unbounded
+        | idx when not l.IsEmpty && l |> List.forall (fun x -> match x with BSeq _ | BTup _ -> false | _ -> true) ->
+            // an unknown index: the element it picks (out of bounds, the last one: such an
+            // input fails the evaluator's check of the requires)
+            let t = bterm idx
+            let last = bterm (List.last l)
+            BTerm(List.foldBack (fun (k, x) acc -> "(ite (= " + t + " " + string k + ") " + bterm x + " " + acc + ")") (List.indexed l |> List.take (l.Length - 1)) last)
+        | _ -> raise Unbounded
+    | ESlice(s, lo, hi) ->
+        let l = items (go s)
+        let a = lo |> Option.map (go >> known) |> Option.defaultValue 0I
+        let b = hi |> Option.map (go >> known) |> Option.defaultValue (bigint l.Length)
+        if a.Sign < 0 || a > b || b > bigint l.Length then raise Unbounded
+        BSeq(l |> List.skip (int a) |> List.take (int (b - a)))
+    | EProj(t, k) -> (match go t with BTup l -> l.[k] | _ -> raise Unbounded)
+    | ECall _ | EResult -> raise Unbounded
+    | ENeg x -> (match go x with BInt n -> BInt(-n) | v -> BTerm("(- " + bterm v + ")"))
+    | ENot x -> (match go x with BBool b -> BBool(not b) | v -> BTerm("(not " + bterm v + ")"))
+    | EArith(op, a, b) ->
+        match go a, go b, op with
+        | BInt x, BInt y, OAdd -> BInt(x + y)
+        | BInt x, BInt y, OSub -> BInt(x - y)
+        | BInt x, BInt y, OMul -> BInt(x * y)
+        | BInt x, BInt y, (ODiv | OMod) when not y.IsZero ->
+            let q, r = Eval.euclidDivMod x y
+            BInt(if op = ODiv then q else r)
+        | x, y, _ ->
+            let o = match op with OAdd -> "+" | OSub -> "-" | OMul -> "*" | ODiv -> "div" | OMod -> "mod"
+            BTerm("(" + o + " " + bterm x + " " + bterm y + ")")
+    | EConcat(a, b) -> BSeq(items (go a) @ items (go b))
+    | ECmp(op, a, b) ->
+        match go a, go b with
+        | BInt x, BInt y -> BBool(match op with OLt -> x < y | OLe -> x <= y | OGt -> x > y | OGe -> x >= y)
+        | x, y ->
+            let o = match op with OLt -> "<" | OLe -> "<=" | OGt -> ">" | OGe -> ">="
+            BTerm("(" + o + " " + bterm x + " " + bterm y + ")")
+    | EEq(a, b) -> equal (go a) (go b)
+    | ELogic(op, a, b) ->
+        match op with
+        | OAnd -> conjB [ go a; go b ]
+        | OOr -> disjB [ go a; go b ]
+        | OImplies ->
+            match go a with
+            | BBool false -> BBool true
+            | BBool true -> go b
+            | x -> BTerm("(=> " + bterm x + " " + bterm (go b) + ")")
+        | OIff -> equal (go a) (go b)
+    | EIf(c, a, b) ->
+        match go c with
+        | BBool true -> go a
+        | BBool false -> go b
+        | cv -> BTerm("(ite " + bterm cv + " " + bterm (go a) + " " + bterm (go b) + ")")
+    | EQuant(q, name, lo, hi, body) ->
+        let a, b = known (go lo), known (go hi)
+        if b - a > 60I then raise Unbounded
+        let parts = [ for i in a .. b - 1I -> bexpr (env.Add(name, BInt i)) body ]
+        match q with
+        | Syntax.Forall -> conjB parts
+        | Syntax.Exists -> disjB parts
+    | EToNat x -> go x
+
 // --- the verifier ---------------------------------------------------------------------
 
 type private Verifier(file: string, prog: TProgram, z3: Session) =
@@ -500,6 +619,86 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         concreteTries <- 0
         Eval.withBigStack (fun () -> v.RunConcreteOnThisThread f)
 
+    /// Inputs that satisfy the requires, found by the solver when random ones rarely do (a
+    /// quantified requires: four strictly increasing values from 10 up). For each length 0..6
+    /// of the sequence parameters, a sequence is that many unknowns, so the requires unfolds
+    /// into a formula without quantifiers, easy for the solver (external counter-review). A
+    /// random bound on one unknown varies the inputs from one try to the next.
+    member private v.SolverInputs(f: TFn, rnd: Random) : Eval.Value list list =
+        let scalar (t: Ty) = match t with TyInt | TyNat | TyBool -> true | _ -> false
+        let supported (t: Ty) =
+            match t with
+            | TyTuple ts -> List.forall scalar ts
+            | TySeq(TyTuple ts) -> List.forall scalar ts
+            | TySeq e -> scalar e
+            | t -> scalar t
+        if f.Requires.IsEmpty || not (f.Params |> List.forall (fun p -> supported p.Ty)) then []
+        else
+            let found = ResizeArray<Eval.Value list>()
+            let seen = HashSet<string>()
+            let bounds = Array.ofList (constants @ [ -10I; 0I; 10I; 50I; 100I ])
+            z3.SetTimeout(min 300 z3.DefaultTimeout)
+            for length in 0 .. 6 do
+                // a length the requires rules out (len(xs) >= 4) is not tried again
+                let mutable feasible = true
+                for attempt in 0 .. 11 do
+                    if found.Count < 40 && feasible then
+                        z3.Push()
+                        let unknowns = ResizeArray<string * Ty>()
+                        let fresh (t: Ty) =
+                            let c = v.Fresh "in"
+                            z3.Send("(declare-const " + c + (if t = TyBool then " Bool)" else " Int)"))
+                            if t = TyNat then z3.Send("(assert (>= " + c + " 0))")
+                            unknowns.Add((c, t))
+                            BTerm c
+                        let one (t: Ty) = match t with TyTuple ts -> BTup(List.map fresh ts) | t -> fresh t
+                        let env =
+                            f.Params
+                            |> List.map (fun p -> p.Name, (match p.Ty with TySeq e -> BSeq [ for _ in 1 .. length -> one e ] | t -> one t))
+                            |> Map.ofList
+                        let mutable stated = false
+                        for r in f.Requires do
+                            try
+                                z3.Send("(assert " + bterm (bexpr env r) + ")")
+                                stated <- true
+                            with Unbounded -> ()
+                        // after the first try, random bounds: on each int parameter one time in two (a
+                        // threshold t against the elements), and on one unknown of any kind
+                        let bound (c: string) =
+                            let b = if rnd.Next 2 = 0 then bounds.[rnd.Next bounds.Length] else bigint (rnd.Next(-100, 101))
+                            z3.Send("(assert (" + (if rnd.Next 2 = 0 then ">=" else "<=") + " " + c + " " + bterm (BInt b) + "))")
+                        let ints = unknowns |> Seq.filter (fun (_, t) -> t <> TyBool) |> Array.ofSeq
+                        if attempt > 0 && ints.Length > 0 then
+                            for p in f.Params do
+                                match p.Ty, env.[p.Name] with
+                                | (TyInt | TyNat), BTerm c when rnd.Next 2 = 0 -> bound c
+                                | _ -> ()
+                            bound (fst ints.[rnd.Next ints.Length])
+                        // unknown too: the axioms of the program are quantified, so a model is only a candidate;
+                        // the evaluator checks the requires on the input anyway
+                        let answer = if stated then z3.Check() else Unsat
+                        if attempt = 0 && answer = Unsat then feasible <- false
+                        if answer <> Unsat then
+                            let names = unknowns |> Seq.map fst |> List.ofSeq
+                            let model =
+                                List.zip (List.ofSeq unknowns) (z3.Values names)
+                                |> List.choose (fun ((c, t), x) -> valueOf t x |> Option.map (fun value -> c, value))
+                                |> Map.ofList
+                            let rec value (b: BVal) : Eval.Value option =
+                                match b with
+                                | BTerm c -> model.TryFind c
+                                | BInt n -> Some(Eval.VInt n)
+                                | BBool x -> Some(Eval.VBool x)
+                                | BSeq l -> l |> List.map value |> (fun vs -> if List.forall Option.isSome vs then Some(Eval.VSeq(List.map Option.get vs)) else None)
+                                | BTup l -> l |> List.map value |> (fun vs -> if List.forall Option.isSome vs then Some(Eval.VTuple(List.map Option.get vs)) else None)
+                            let input = f.Params |> List.map (fun p -> value env.[p.Name])
+                            if input |> List.forall Option.isSome then
+                                let values = input |> List.map Option.get
+                                if seen.Add(String.Join("|", values |> List.map Eval.valueText)) then found.Add values
+                        z3.Pop()
+            z3.SetTimeout z3.DefaultTimeout
+            List.ofSeq found
+
     member private v.RunConcreteOnThisThread(f: TFn) =
         let ev = Eval.Evaluator(fns, true)
         let plain = Eval.Evaluator(fns)
@@ -520,10 +719,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                 for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> inputValue rnd constants p.Ty)
             }
         let define = definedParams f plain
-        use e = candidates.GetEnumerator()
-        while concreteRuns < 200 && e.MoveNext() do
+        let run (input: Eval.Value list) =
             concreteTries <- concreteTries + 1
-            let env = define (List.zip names e.Current |> Map.ofList)
+            let env = define (List.zip names input |> Map.ofList)
             let values = names |> List.map (fun n -> env.[n])
             if f.Requires |> List.forall (fun r -> plain.Holds(r, env) = Some true) then
                 concreteRuns <- concreteRuns + 1
@@ -533,6 +731,13 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                     if not (concrete.ContainsKey((label, span))) then
                         concrete.[(label, span)] <- List.zip names values |> List.map (fun (n, x) -> n, Eval.valueText x)
                 | Eval.CannotEvaluate _ -> ()
+        use e = candidates.GetEnumerator()
+        while concreteRuns < 200 && e.MoveNext() do
+            run e.Current
+        // few random inputs satisfy the requires: ask the solver for some
+        if concreteRuns < 20 then
+            for input in v.SolverInputs(f, rnd) do
+                run input
 
     /// Check one obligation on the current path, report it if it fails, then assume it.
     member v.Check(st: State, o: Obligation) : State =

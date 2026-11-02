@@ -1,0 +1,33 @@
+no hint     20.4s  quantified: line 47: k = k + 1;  ->  k = k + 0;
+no hint     20.9s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k <= len(xs) && xs[k] <= t
+no hint     30.7s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) || xs[k] <= t
+no hint     10.4s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 2
+no hint     10.5s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) && xs[k] < t
+no hint     30.8s  quantified: line 47: k = k + 1;  ->  k = k - 1;
+no hint     12.5s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) && xs[k] <= t
+no hint     10.3s  quantified: line 61: let mut k = 0;  ->  let mut k = 1;
+no hint     10.3s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 0] - xs[k];
+no hint     10.3s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[1] - xs[1];
+no hint     10.3s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[0] - xs[0];
+no hint     10.2s  quantified: line 35: let mut k = 1;  ->  let mut k = 0;
+no hint     20.6s  quantified: line 20: k = k + 1;  ->  k = k + 2;
+no hint     26.6s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 2] - xs[k];
+survived     0.2s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 1] - xs[k] <= best {
+no hint     22.2s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 2] - xs[k] < best {
+no hint     10.3s  quantified: line 67: k = k + 1;  ->  k = k + 0;
+no hint     22.1s  quantified: line 67: k = k + 1;  ->  k = k - 1;
+no hint     10.3s  quantified: line 34: let mut w = 0;  ->  let mut w = 1;
+no hint     10.3s  quantified: line 14: let mut k = 0;  ->  let mut k = 1;
+no hint     21.1s  quantified: line 20: k = k + 1;  ->  k = k - 1;
+no hint     10.5s  quantified: line 36: while k < len(xs) - 1  ->  while k <= len(xs) - 1
+no hint     20.6s  quantified: line 47: k = k + 1;  ->  k = k + 2;
+no hint     10.3s  quantified: line 20: k = k + 1;  ->  k = k + 0;
+no hint     30.7s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) || xs[k] < t
+no hint     20.6s  quantified: line 67: k = k + 1;  ->  k = k + 2;
+no hint     20.6s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k <= len(xs) && xs[k] < t
+no hint     10.3s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k - 1] - xs[k] < best {
+no hint     10.3s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 0
+no hint     10.7s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 0] - xs[k] < best {
+
+30 mutants (0 invalid ones left out): 0 refuted with a counterexample, 29 rejected without a hint, 1 survived, 0 hung
+time to reject: median 10.7s, max 30.8s

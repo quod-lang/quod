@@ -206,8 +206,11 @@ let ``a lemma whose recursive call does not decrease gets a counterexample from 
 [<Fact>]
 let ``a counterexample says where it comes from: a run, or the solver`` () =
     // no small input or constant of the program satisfies the requires (x > 56 with y = 8 at
-    // least): the counterexample comes from the solver
-    let solver = assertRefuted "postcondition" "fn f(x: int, y: int) -> int requires y > 7 && x > 7 * y ensures result > 0 { x - 7 * y - 5 }"
+    // least), and the inputs found by the solver cannot see through the call to big: the
+    // counterexample comes from the solver
+    let solver =
+        assertRefuted "postcondition"
+            "fn big(y: int) -> bool { y > 7 }\nfn f(x: int, y: int) -> int requires big(y) && x > 7 * y ensures result > 0 { x - 7 * y - 5 }"
     Assert.Equal(Some "solver", solver.Evidence)
     let run = assertRefuted "postcondition" "fn g(x: int) -> int ensures result > 0 { x }"
     Assert.Equal(Some "run", run.Evidence)
@@ -232,4 +235,15 @@ let ``the program's constants are among the inputs run: a bug at n == 1000 is fo
              + "  if n == 1000 { return lo + 1; }\n"
              + "  return lo; }")
     Assert.Equal<(string * string) list>([ "n", "1000" ], d.Counterexample)
+    Assert.Equal(Some "run", d.Evidence)
+
+[<Fact>]
+let ``inputs that a quantified requires makes rare come from the solver, and are run`` () =
+    // the external counter-review's case: four strictly increasing values from 4 up, which no
+    // small random input gives; the bug needs xs[3] > 40
+    let d =
+        assertRefuted "postcondition"
+            ("fn first(xs: seq<int>) -> int requires len(xs) >= 4 requires forall i in 0..len(xs) - 1: xs[i] < xs[i + 1]\n"
+             + "  requires xs[0] > 3 ensures result == xs[0] {\n"
+             + "  if xs[3] > 40 { return xs[1]; } return xs[0]; }")
     Assert.Equal(Some "run", d.Evidence)

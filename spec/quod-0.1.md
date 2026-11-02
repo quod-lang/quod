@@ -120,7 +120,11 @@ return e;              // or a final expression at the end of the body
   small inputs that satisfy its `requires`: zero values, each integer constant of the program and
   its neighbours (`c - 1`, `c`, `c + 1`), then random values (ints in -6..6 or a constant,
   sequences of 0 to 5 elements). A parameter that the `requires` define from the others, such as
-  a table of prefix sums, is built from them. Every obligation is checked on the way, including
+  a table of prefix sums, is built from them. When few random inputs satisfy the `requires` (a
+  quantified one: four strictly increasing values from 10 up), the solver finds some: for each
+  length 0 to 6, a sequence is that many unknowns, the quantifiers of the `requires` unfold over
+  the known range, and the formula, without quantifiers, is easy for it; random bounds on the
+  unknowns vary the inputs. Every obligation is checked on the way, including
   that each recursive call makes the `decreases` measure smaller (a call that does not would run
   forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
   milliseconds. When the solver then fails on an obligation that no run broke, the message gives

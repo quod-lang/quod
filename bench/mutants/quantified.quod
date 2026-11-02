@@ -1,0 +1,70 @@
+// Mutant bench: functions whose requires is quantified and rarely met by small random inputs
+// (at least 4 strictly increasing values, from 10 up), the family of bugs the external
+// counter-review found out of reach of both random runs and the solver.
+
+// The index of the first element above t, or len(xs).
+fn first_above(xs: seq<int>, t: int) -> int
+  requires len(xs) >= 4
+  requires forall i in 0..len(xs) - 1: xs[i] < xs[i + 1]
+  requires xs[0] >= 10
+  ensures 0 <= result <= len(xs)
+  ensures forall i in 0..result: xs[i] <= t
+  ensures result < len(xs) ==> xs[result] > t
+{
+  let mut k = 0;
+  while k < len(xs) && xs[k] <= t
+    invariant 0 <= k <= len(xs)
+    invariant forall i in 0..k: xs[i] <= t
+    decreases len(xs) - k
+  {
+    k = k + 1;
+  }
+  return k;
+}
+
+// The smallest gap between two neighbours.
+fn min_gap(xs: seq<int>) -> int
+  requires len(xs) >= 4
+  requires forall i in 0..len(xs) - 1: xs[i] < xs[i + 1]
+  requires xs[0] >= 10
+  ensures forall i in 0..len(xs) - 1: result <= xs[i + 1] - xs[i]
+  ensures exists i in 0..len(xs) - 1: result == xs[i + 1] - xs[i]
+{
+  let mut best = xs[1] - xs[0];
+  let mut w = 0;
+  let mut k = 1;
+  while k < len(xs) - 1
+    invariant 1 <= k <= len(xs) - 1
+    invariant 0 <= w < k
+    invariant best == xs[w + 1] - xs[w]
+    invariant forall i in 0..k: best <= xs[i + 1] - xs[i]
+    decreases len(xs) - k
+  {
+    if xs[k + 1] - xs[k] < best {
+      best = xs[k + 1] - xs[k];
+      w = k;
+    }
+    k = k + 1;
+  }
+  return best;
+}
+
+// How many elements are below t.
+fn count_below(xs: seq<int>, t: int) -> int
+  requires len(xs) >= 4
+  requires forall i in 0..len(xs) - 1: xs[i] < xs[i + 1]
+  requires xs[0] >= 10
+  ensures 0 <= result <= len(xs)
+  ensures forall i in 0..result: xs[i] < t
+  ensures result < len(xs) ==> xs[result] >= t
+{
+  let mut k = 0;
+  while k < len(xs) && xs[k] < t
+    invariant 0 <= k <= len(xs)
+    invariant forall i in 0..k: xs[i] < t
+    decreases len(xs) - k
+  {
+    k = k + 1;
+  }
+  return k;
+}

@@ -103,6 +103,20 @@ milliseconds where Z3 often timed out. The two hung checks were Z3 not keeping i
 mutants (`>=` for `>` where both branches agree, a model function's value on an empty input, a
 lemma stopping one step later...).
 
+**Inputs from the solver.** An external counter-review found the family these runs miss: bugs
+whose input must satisfy a quantified `requires`, which random inputs almost never do and the
+solver does not find either. [quantified.quod](../mutants/quantified.quod) has three such
+functions (at least four strictly increasing values, from 10 up); 30 mutants:
+
+| Compiler | Refuted, with a counterexample | Rejected, no counterexample | Survived | Median time to reject |
+|---|---|---|---|---|
+| random inputs only ([log](../runs/mutants-quantified-before.log)) | 0 | 29 | 1 | 10.7 s |
+| and inputs from the solver ([log](../runs/mutants-quantified-after.log)) | 28 | 1 | 1 | 0.2 s |
+
+When few random inputs satisfy the `requires`, the solver finds some, at a fixed length where
+the quantifiers unfold. On the eight programs above ([log](../runs/mutants-solver-inputs.log)),
+nothing changes: same verdicts, same time.
+
 **Measured and not adopted: bounded unfolding (fuel).** Dafny unfolds a recursive function a
 bounded number of times. Tried with 2 levels ([patch](../runs/fuel-experiment.patch),
 [log](../runs/mutants-fuel2.log)), on the same mutants: as many refuted (51 of the 55 still in the

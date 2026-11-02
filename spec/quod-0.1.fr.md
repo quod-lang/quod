@@ -124,7 +124,11 @@ return e;              // ou une expression finale à la fin du corps
   constante entière du programme et ses voisines (`c - 1`, `c`, `c + 1`), puis des valeurs
   aléatoires (entiers dans -6..6 ou une constante, séquences de 0 à 5 éléments). Un paramètre que
   le `requires` définit à partir des autres, comme une table de sommes préfixes, est construit à
-  partir d'eux. Chaque obligation est vérifiée au passage, y compris que chaque appel récursif
+  partir d'eux. Quand peu d'entrées aléatoires satisfont le `requires` (un `requires` quantifié :
+  quatre valeurs strictement croissantes à partir de 10), le solveur en trouve : pour chaque
+  longueur de 0 à 6, une séquence est autant d'inconnues, les quantificateurs du `requires` se
+  déplient sur l'intervalle connu, et la formule, sans quantificateurs, lui est facile ; des bornes
+  aléatoires sur les inconnues varient les entrées. Chaque obligation est vérifiée au passage, y compris que chaque appel récursif
   fait diminuer la mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin).
   Une obligation violée est signalée avec ces entrées : un contre-exemple confirmé, en quelques
   millisecondes. Quand le solveur échoue ensuite sur une obligation qu'aucune exécution n'a violée,

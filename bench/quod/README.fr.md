@@ -109,6 +109,21 @@ Les deux vérifications bloquées venaient de Z3, qui ne respectait pas sa propr
 tous des mutants équivalents (`>=` pour `>` là où les deux branches coïncident, la valeur d'une
 fonction modèle sur une entrée vide, un lemme qui s'arrête un pas plus tard...).
 
+**Des entrées trouvées par le solveur.** Une contre-revue externe a trouvé la famille que ces
+exécutions manquent : les bugs dont l'entrée doit satisfaire un `requires` quantifié, ce que des
+entrées aléatoires ne font presque jamais, et que le solveur ne trouve pas non plus.
+[quantified.quod](../mutants/quantified.quod) en a trois (au moins quatre valeurs strictement
+croissantes, à partir de 10) ; 30 mutants :
+
+| Compilateur | Réfutés, avec contre-exemple | Rejetés, sans contre-exemple | Survivants | Temps médian de rejet |
+|---|---|---|---|---|
+| entrées aléatoires seules ([journal](../runs/mutants-quantified-before.log)) | 0 | 29 | 1 | 10,7 s |
+| et entrées trouvées par le solveur ([journal](../runs/mutants-quantified-after.log)) | 28 | 1 | 1 | 0,2 s |
+
+Quand peu d'entrées aléatoires satisfont le `requires`, le solveur en trouve, à longueur fixée,
+où les quantificateurs se déplient. Sur les huit programmes ci-dessus
+([journal](../runs/mutants-solver-inputs.log)), rien ne change : mêmes verdicts, même temps.
+
 **Mesuré et non retenu : le dépliage borné (carburant).** Dafny déplie une fonction récursive un
 nombre borné de fois. Essayé avec 2 niveaux ([patch](../runs/fuel-experiment.patch),
 [journal](../runs/mutants-fuel2.log)), sur les mêmes mutants : autant de réfutés (51 des 55 encore
