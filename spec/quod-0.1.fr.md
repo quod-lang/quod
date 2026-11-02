@@ -120,13 +120,18 @@ return e;              // ou une expression finale à la fin du corps
   l'entrée et préservé), `decreases` (boucles et récursion), bornes des séquences, diviseurs non
   nuls, affectations à un `nat`, `assert`.
 - **Contre-exemples par exécution.** Avant de solliciter le solveur, le compilateur exécute chaque
-  fonction sur de petites entrées qui satisfont son `requires` (un paramètre que le `requires`
-  définit à partir des autres, comme une table de sommes préfixes, est construit à partir d'eux), en
-  vérifiant chaque obligation au passage, y compris que chaque appel récursif fait diminuer la
-  mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin). Une obligation violée est signalée avec ces entrées : un
-  contre-exemple confirmé, en quelques millisecondes. Quand le solveur dépasse ensuite le temps sur
-  une obligation qu'aucune exécution n'a violée, le message le dit : la propriété est peut-être
-  vraie, et la preuve demande sans doute une indication.
+  fonction sur de petites entrées qui satisfont son `requires` : les valeurs nulles, chaque
+  constante entière du programme et ses voisines (`c - 1`, `c`, `c + 1`), puis des valeurs
+  aléatoires (entiers dans -6..6 ou une constante, séquences de 0 à 5 éléments). Un paramètre que
+  le `requires` définit à partir des autres, comme une table de sommes préfixes, est construit à
+  partir d'eux. Chaque obligation est vérifiée au passage, y compris que chaque appel récursif
+  fait diminuer la mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin).
+  Une obligation violée est signalée avec ces entrées : un contre-exemple confirmé, en quelques
+  millisecondes. Quand le solveur échoue ensuite sur une obligation qu'aucune exécution n'a violée,
+  le message donne les faits : combien d'exécutions, sur combien d'entrées essayées, et qu'aucune
+  ne l'a violée. Cela ne montre pas que la propriété est vraie (un bug peut demander d'autres
+  entrées) ; si elle l'est, la preuve demande une indication. Quand aucune entrée essayée ne
+  satisfait le `requires`, le message dit que la fonction n'a pas été exécutée.
 - `--runtime-checks` : au lieu de refuser de compiler quand une obligation n'est pas prouvée,
   vérifier à l'exécution, dans le Python généré, les contrats des fonctions concernées, et les
   signaler dans le rapport (le statut ⚠️ du [principe 2](kernel.fr.md)).
@@ -190,8 +195,9 @@ dans le JSON (`"kind": "contract"`) :
   définition.)
 - **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
   renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`
-  étant des faits. Un **avertissement** : elle se vérifie, mais le code généré l'exécute à chaque
-  appel. L'écrire comme un `lemma`, qui est effacé.
+  étant des faits, et dont le programme n'utilise jamais la valeur (`if feature_enabled() { ... }`
+  l'utilise ; un lemme ne le pourrait pas). Un **avertissement** : elle se vérifie, mais le code
+  généré l'exécute à chaque appel. L'écrire comme un `lemma`, qui est effacé.
 
 Les lemmes ne sont pas classés : leur `ensures` est ce qu'ils prouvent.
 
@@ -258,7 +264,10 @@ quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
   à la frontière publique (O(n)), car ses éléments peuvent arriver sous forme de listes. Une
   variable locale mutable étendue par `x = x + [e]` devient `x.append(e)` quand aucune autre
   variable, aucun argument, tuple ou séquence ne peut partager sa liste : une boucle qui construit
-  une séquence reste en O(n), pas en O(n²). Les fonctions natives
+  une séquence reste en O(n), pas en O(n²). Les arguments n'étant pas copiés, une fonction qui
+  renvoie un argument tel quel (`fn id(xs: seq<int>) -> seq<int> { xs }`) rend à l'appelant Python
+  sa propre liste : la modifier ensuite modifie aussi son entrée, comme avec toute fonction Python.
+  Les fonctions natives
   sont aliasées (`_quod_len`...), donc une fonction Quod nommée `len` ou `list` ne masque rien dont le
   code généré a besoin. Un nom qui est un mot-clé Python reçoit un `_` final.
 - Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).

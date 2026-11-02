@@ -52,6 +52,25 @@ four of six contracts say how to compute the result, not what it is. Hence the
 [contract style](../../spec/quod-0.1.md#contract-style) that `quod check` now reports, with a
 warning for a restated body.
 
+A smaller model, Haiku, one trial per task, twice: [quod2-haiku](../runs/quod2-haiku) with the
+compiler of the time, then [quod3-haiku](../runs/quod3-haiku) after the external review (lemmas,
+counterexamples by execution, contract notes) and a longer language reference.
+
+| Task | quod2-haiku | quod3-haiku |
+|---|---|---|
+| binary_search | verified, completeness not decided | verified, determined, 71 s |
+| merge_intervals | verified, not decided | verified, not decided, 28 min |
+| rle_encode | verified **without any ensures** (time limit hit) | verified, not decided |
+| bounded_queue | rejected | verified, determined, 84 s |
+| max_subarray | rejected | verified, not decided, 46 s |
+| rotate | verified, by a model | verified, determined, by properties |
+
+quod2-haiku found the holes in the completeness check (a `loose` that accepts everything, no
+ensures at all), now warnings. In quod3-haiku all six verify and pass the hidden tests, three with
+a determined contract, for 0.59 USD instead of 2.83; the agent wrote `lemma` unprompted in four
+tasks. One trial each, and two things changed at once (the compiler and the reference): a
+direction, not a measure.
+
 ## What writing them changed in the verifier
 
 - **Sequences are axiomatized** (as Dafny does), instead of using Z3's sequence theory, which

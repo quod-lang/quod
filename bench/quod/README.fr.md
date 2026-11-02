@@ -53,6 +53,26 @@ contrats sur six disent comment calculer le résultat, pas ce qu'il est. D'où l
 [style des contrats](../../spec/quod-0.1.fr.md#style-des-contrats) que `quod check` signale désormais,
 avec un avertissement pour un corps recopié.
 
+Un modèle plus petit, Haiku, un essai par tâche, deux fois : [quod2-haiku](../runs/quod2-haiku)
+avec le compilateur d'alors, puis [quod3-haiku](../runs/quod3-haiku) après la revue externe
+(lemmes, contre-exemples par exécution, notes sur les contrats) et une référence du langage plus
+longue.
+
+| Tâche | quod2-haiku | quod3-haiku |
+|---|---|---|
+| binary_search | vérifié, complétude non décidée | vérifié, déterminé, 71 s |
+| merge_intervals | vérifié, non décidé | vérifié, non décidé, 28 min |
+| rle_encode | vérifié **sans aucun ensures** (limite de temps atteinte) | vérifié, non décidé |
+| bounded_queue | rejeté | vérifié, déterminé, 84 s |
+| max_subarray | rejeté | vérifié, non décidé, 46 s |
+| rotate | vérifié, par un modèle | vérifié, déterminé, par propriétés |
+
+quod2-haiku a trouvé les trous du contrôle de complétude (un `loose` qui accepte tout, aucun
+ensures), désormais signalés. Dans quod3-haiku, les six se vérifient et passent les tests cachés,
+trois avec un contrat déterminé, pour 0,59 USD au lieu de 2,83 ; l'agent a écrit des `lemma` de
+lui-même dans quatre tâches. Un essai chacun, et deux changements à la fois (le compilateur et la
+référence) : une tendance, pas une mesure.
+
 ## Ce que leur écriture a changé dans le vérificateur
 
 - **Les séquences sont axiomatisées** (comme le fait Dafny), au lieu d'utiliser la théorie des

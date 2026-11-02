@@ -1,0 +1,63 @@
+// Bounded FIFO queue simulation.
+// Queue state is a sequence, oldest element first.
+
+// Push x: if the queue is full, the oldest element is dropped first.
+fn push_q(cap: int, q: seq<int>, x: int) -> seq<int>
+  requires cap >= 1
+  requires len(q) <= cap
+{
+  if len(q) < cap { q + [x] } else { q[1..] + [x] }
+}
+
+// Pop: the oldest element, or -1 when the queue is empty.
+fn pop_val(q: seq<int>) -> int {
+  if len(q) == 0 { -1 } else { q[0] }
+}
+
+// Pop: the queue without its oldest element (unchanged when empty).
+fn pop_q(q: seq<int>) -> seq<int> {
+  if len(q) == 0 { q } else { q[1..] }
+}
+
+// Reference model: the output produced by processing ops[i..] from queue state q.
+fn run_out(cap: int, ops: seq<int>, i: int, q: seq<int>) -> seq<int>
+  requires cap >= 1
+  requires 0 <= i <= len(ops)
+  requires len(q) <= cap
+  decreases len(ops) - i
+{
+  if i == len(ops) {
+    []
+  } else if ops[i] > 0 {
+    run_out(cap, ops, i + 1, push_q(cap, q, ops[i]))
+  } else {
+    [pop_val(q)] + run_out(cap, ops, i + 1, pop_q(q))
+  }
+}
+
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall k in 0..len(ops): ops[k] >= 0
+  ensures result == run_out(capacity, ops, 0, [])
+{
+  let mut q: seq<int> = [];
+  let mut out: seq<int> = [];
+  let mut i: int = 0;
+  while i < len(ops)
+    invariant 0 <= i <= len(ops)
+    invariant len(q) <= capacity
+    invariant out + run_out(capacity, ops, i, q) == run_out(capacity, ops, 0, [])
+    decreases len(ops) - i
+  {
+    if ops[i] > 0 {
+      assert run_out(capacity, ops, i, q) == run_out(capacity, ops, i + 1, push_q(capacity, q, ops[i]));
+      q = push_q(capacity, q, ops[i]);
+    } else {
+      assert run_out(capacity, ops, i, q) == [pop_val(q)] + run_out(capacity, ops, i + 1, pop_q(q));
+      out = out + [pop_val(q)];
+      q = pop_q(q);
+    }
+    i = i + 1;
+  }
+  out
+}

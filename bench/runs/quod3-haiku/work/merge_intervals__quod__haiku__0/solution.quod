@@ -1,0 +1,151 @@
+// Intervals are closed integer intervals (a, b) with a <= b.
+// Two intervals are merged when they share at least one real point, so
+// (1,2) and (3,4) stay apart while (1,3) and (3,5) become (1,5).
+//
+// Output contract, in words:
+//  - each output interval is well formed, and they are sorted and disjoint
+//    (each ends strictly before the next one starts, so they do not touch);
+//  - every input interval lies inside one output interval;
+//  - every output interval starts at some input start;
+//  - every output interval is fully covered by the inputs. The real point
+//    x + 1/2 is covered by an input (a, b) exactly when a <= x < b; cov_from
+//    says that some input from index k on covers it, so checking every
+//    half-point of each output interval rules out gaps.
+// These fix the result: the output is exactly the list of connected components.
+
+// Some input at index >= k covers the half-point x + 1/2 (i.e. a <= x < b).
+fn cov_from(iv: seq<(int, int)>, k: int, x: int) -> bool
+  requires 0 <= k
+  decreases len(iv) - k
+{
+  if k >= len(iv) { false } else { (iv[k].0 <= x && x < iv[k].1) || cov_from(iv, k + 1, x) }
+}
+
+// If input j covers x, then some input from index k on covers it (k <= j).
+lemma cov_mono(iv: seq<(int, int)>, k: int, x: int, j: int)
+  requires 0 <= k && k <= j && j < len(iv)
+  requires iv[j].0 <= x && x < iv[j].1
+  ensures cov_from(iv, k, x)
+  decreases j - k
+{
+  if k < j {
+    cov_mono(iv, k + 1, x, j);
+  }
+}
+
+// If input j covers [lo, hi) then every half-point in that range is covered.
+lemma cov_range(iv: seq<(int, int)>, j: int, lo: int, hi: int)
+  requires 0 <= j && j < len(iv)
+  requires iv[j].0 <= lo && hi <= iv[j].1
+  ensures forall x in lo..hi: cov_from(iv, 0, x)
+  decreases hi - lo
+{
+  if lo < hi {
+    cov_mono(iv, 0, lo, j);
+    cov_range(iv, j, lo + 1, hi);
+  }
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall j in 0..len(iv): iv[j].0 <= iv[j].1
+  ensures forall k in 0..len(result): result[k].0 <= result[k].1
+  ensures forall k in 0..len(result) - 1: result[k].1 < result[k + 1].0
+  ensures forall j in 0..len(iv): exists k in 0..len(result): result[k].0 <= iv[j].0 && iv[j].1 <= result[k].1
+  ensures forall k in 0..len(result): exists j in 0..len(iv): iv[j].0 == result[k].0
+  ensures forall k in 0..len(result): forall x in result[k].0..result[k].1: cov_from(iv, 0, x)
+{
+  // Bounds: mina <= every start (it is the least of 0 and the starts),
+  // mb >= every end (the greatest of 0 and the ends).
+  let mut mina: int = 0;
+  let mut mb: int = 0;
+  let mut qb: int = 0;
+  while qb < len(iv)
+    invariant 0 <= qb && qb <= len(iv)
+    invariant mina <= 0 && mb >= 0
+    invariant forall j in 0..qb: mina <= iv[j].0 && iv[j].1 <= mb
+    decreases len(iv) - qb
+  {
+    if iv[qb].0 < mina {
+      mina = iv[qb].0;
+    }
+    if mb < iv[qb].1 {
+      mb = iv[qb].1;
+    }
+    qb = qb + 1;
+  }
+
+  let mut r: seq<(int, int)> = [];
+  // f: end of the last component; every start is above mina - 1 = f at first.
+  let mut f: int = mina - 1;
+  let mut go: bool = true;
+  while go
+    invariant forall k in 0..len(r): r[k].0 <= r[k].1
+    invariant forall k in 0..len(r) - 1: r[k].1 < r[k + 1].0
+    invariant len(r) > 0 ==> r[len(r) - 1].1 == f
+    invariant f <= mb
+    invariant forall j in 0..len(iv): iv[j].0 <= f ==> exists k in 0..len(r): r[k].0 <= iv[j].0 && iv[j].1 <= r[k].1
+    invariant forall k in 0..len(r): exists j in 0..len(iv): iv[j].0 == r[k].0
+    invariant forall k in 0..len(r): forall x in r[k].0..r[k].1: cov_from(iv, 0, x)
+    invariant !go ==> forall j in 0..len(iv): iv[j].0 <= f
+    decreases mb - f + (if go { 1 } else { 0 })
+  {
+    // Find the smallest start above f.
+    let mut found: bool = false;
+    let mut bi: int = 0;
+    let mut sc: int = 0;
+    while sc < len(iv)
+      invariant 0 <= sc && sc <= len(iv)
+      invariant found ==> (0 <= bi && bi < len(iv) && iv[bi].0 > f)
+      invariant found ==> forall q in 0..sc: (iv[q].0 > f ==> iv[bi].0 <= iv[q].0)
+      invariant !found ==> forall q in 0..sc: iv[q].0 <= f
+      decreases len(iv) - sc
+    {
+      if iv[sc].0 > f && (!found || iv[sc].0 < iv[bi].0) {
+        bi = sc;
+        found = true;
+      }
+      sc = sc + 1;
+    }
+
+    if found {
+      let c = iv[bi].0;
+      let mut d = iv[bi].1;
+      cov_range(iv, bi, c, d);
+      // Grow d: while some interval starts at or before d and ends after d,
+      // extend d to its end.
+      let mut more: bool = true;
+      while more
+        invariant mb >= d && d >= c
+        invariant forall x in c..d: cov_from(iv, 0, x)
+        invariant !more ==> forall q in 0..len(iv): (iv[q].0 <= d ==> iv[q].1 <= d)
+        decreases mb - d + (if more { 1 } else { 0 })
+      {
+        let d0: int = d;
+        let mut changed: bool = false;
+        let mut j: int = 0;
+        while j < len(iv)
+          invariant 0 <= j && j <= len(iv)
+          invariant d0 <= d && d <= mb && d >= c
+          invariant changed ==> d > d0
+          invariant !changed ==> d == d0
+          invariant forall x in c..d: cov_from(iv, 0, x)
+          invariant !changed ==> forall q in 0..j: !(iv[q].0 <= d && d < iv[q].1)
+          decreases len(iv) - j
+        {
+          if iv[j].0 <= d && d < iv[j].1 {
+            cov_range(iv, j, d, iv[j].1);
+            d = iv[j].1;
+            changed = true;
+          }
+          j = j + 1;
+        }
+        more = changed;
+      }
+      r = r + [(c, d)];
+      f = d;
+    } else {
+      go = false;
+    }
+  }
+  return r;
+}

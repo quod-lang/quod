@@ -8,7 +8,8 @@ let styles (src: string) : Map<string, Style> =
     let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
     Assert.True(errs.IsEmpty, "type errors: " + String.concat " | " (errs |> List.map (fun d -> d.Message)))
     let names = typed.Fns |> List.map (fun f -> f.Name) |> Set.ofList
-    typed.Fns |> List.choose (fun f -> styleOf names f |> Option.map (fun s -> f.Name, s)) |> Map.ofList
+    let uses = valueUses typed
+    typed.Fns |> List.choose (fun f -> styleOf names uses f |> Option.map (fun s -> f.Name, s)) |> Map.ofList
 
 [<Fact>]
 let ``properties of the result`` () =
@@ -97,3 +98,18 @@ let ``the functions the contracts are stated with are listed for review, through
     let ds = reviewOf src |> List.filter (fun d -> d.Kind = "review")
     Assert.Equal<string list>([ "sq"; "sum_sq" ], ds |> List.choose (fun d -> d.Fn))
     Assert.All(ds, fun d -> Assert.Equal(Some(reviewProperty + "energy"), d.Property))
+
+[<Fact>]
+let ``a function whose value is used is not a lemma, even if it always returns true`` () =
+    // the counter-review's case: rewritten as a lemma, `if feature_enabled()` would not type-check
+    let s =
+        styles (
+            "fn feature_enabled() -> bool ensures result { return true; }\n"
+            + "fn use_flag(x: int) -> int ensures result == x + 1 { if feature_enabled() { return x + 1; } return x + 1; }\n"
+            + "fn flag2() -> bool ensures result { return true; }\n"
+            + "fn use2(x: int) -> int ensures result == x { let b = flag2(); if b { return x; } return x; }\n"
+            + "fn unused_flag() -> bool ensures result { return true; }\n"
+            + "fn use3(x: int) -> int ensures result == x { let u = unused_flag(); return x; }\n")
+    Assert.NotEqual(LemmaAsFunction, s.["feature_enabled"])
+    Assert.NotEqual(LemmaAsFunction, s.["flag2"])
+    Assert.Equal(LemmaAsFunction, s.["unused_flag"])

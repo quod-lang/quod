@@ -1,0 +1,82 @@
+// Run-length encoding of a list of integers.
+//
+// A run list `rs` stands for the sequence `expand(rs)`: each pair (v, c) is
+// c copies of v, and the pairs are concatenated in order.
+
+// `c` copies of `v` (empty when `c <= 0`).
+fn repeat_val(v: int, c: int) -> seq<int>
+  decreases c
+{
+  if c <= 0 { [] } else { [v] + repeat_val(v, c - 1) }
+}
+
+// The sequence a run list stands for.
+fn expand(rs: seq<(int, int)>) -> seq<int>
+  decreases len(rs)
+{
+  if len(rs) == 0 {
+    []
+  } else {
+    expand(rs[..len(rs) - 1]) + repeat_val(rs[len(rs) - 1].0, rs[len(rs) - 1].1)
+  }
+}
+
+// Expansion distributes over concatenation of run lists.
+lemma expand_append(a: seq<(int, int)>, b: seq<(int, int)>)
+  ensures expand(a + b) == expand(a) + expand(b)
+  decreases len(b)
+{
+  if len(b) > 0 {
+    expand_append(a, b[..len(b) - 1]);
+    assert (a + b)[..len(a) + len(b) - 1] == a + b[..len(b) - 1];
+    assert (a + b)[len(a) + len(b) - 1] == b[len(b) - 1];
+  }
+}
+
+// A slice on which every element equals v is the repetition of v.
+lemma uniform_slice(xs: seq<int>, i: int, j: int, v: int)
+  requires 0 <= i <= j <= len(xs)
+  requires forall p in i..j: xs[p] == v
+  ensures xs[i..j] == repeat_val(v, j - i)
+  decreases j - i
+{
+  if i < j {
+    uniform_slice(xs, i + 1, j, v);
+    assert xs[i..j] == [xs[i]] + xs[i + 1..j];
+  }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures forall k in 0..len(result): result[k].1 >= 1
+  ensures forall k in 0..len(result): k + 1 < len(result) ==> result[k].0 != result[k + 1].0
+  ensures expand(result) == xs
+{
+  let n = len(xs);
+  let mut out: seq<(int, int)> = [];
+  let mut i: int = 0;
+  while i < n
+    invariant 0 <= i <= n
+    invariant expand(out) == xs[..i]
+    invariant forall k in 0..len(out): out[k].1 >= 1
+    invariant forall k in 0..len(out): k + 1 < len(out) ==> out[k].0 != out[k + 1].0
+    invariant len(out) > 0 && i < n ==> out[len(out) - 1].0 != xs[i]
+    decreases n - i
+  {
+    let v = xs[i];
+    let mut j = i + 1;
+    while j < n && xs[j] == v
+      invariant i < j <= n
+      invariant forall p in i..j: xs[p] == v
+      decreases n - j
+    {
+      j = j + 1;
+    }
+    uniform_slice(xs, i, j, v);
+    assert xs[..i] + xs[i..j] == xs[..j];
+    expand_append(out, [(v, j - i)]);
+    out = out + [(v, j - i)];
+    i = j;
+  }
+  assert xs[..n] == xs;
+  return out;
+}

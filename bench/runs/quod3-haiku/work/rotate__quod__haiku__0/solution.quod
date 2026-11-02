@@ -1,0 +1,137 @@
+// Rotate a sequence to the right by k positions (k may be any integer).
+// Element i of the result is xs[(i - k) mod n]; the Euclidean % keeps it in 0..n.
+
+// (x % n == x for 0 <= x < n)
+lemma mod_small(x: int, n: int)
+  requires n > 0
+  requires 0 <= x < n
+  ensures x % n == x
+{
+}
+
+// Adding one period does not change the Euclidean remainder.
+lemma mod_plus_one(y: int, n: int)
+  requires n > 0
+  ensures (y + n) % n == y % n
+{
+  assert y == n * (y / n) + y % n;
+  assert y + n == n * ((y + n) / n) + (y + n) % n;
+  let d = y / n + 1 - (y + n) / n;
+  assert n * d == (y + n) % n - y % n;
+  if d >= 1 {
+    assert n * d >= n;
+  }
+  if d <= -1 {
+    assert n * d <= -n;
+  }
+  assert d == 0;
+}
+
+// (n*s + e) % n == e for 0 <= e < n and any integer s.
+lemma mod_mul_add(s: int, e: int, n: int)
+  requires n > 0
+  requires 0 <= e < n
+  ensures (n * s + e) % n == e
+  decreases (if s >= 0 { s } else { 0 - s })
+{
+  if s > 0 {
+    mod_mul_add(s - 1, e, n);
+    mod_plus_one(n * (s - 1) + e, n);
+    assert n * s == n * (s - 1) + n;
+  } else if s < 0 {
+    mod_mul_add(s + 1, e, n);
+    mod_plus_one(n * s + e, n);
+    assert n * (s + 1) == n * s + n;
+  } else {
+    mod_small(e, n);
+  }
+}
+
+// x == n*s + e with 0 <= e < n gives x % n == e.
+lemma mod_of(x: int, s: int, e: int, n: int)
+  requires n > 0
+  requires 0 <= e < n
+  requires x == n * s + e
+  ensures x % n == e
+{
+  mod_mul_add(s, e, n);
+}
+
+// For j <= i < r: (i - k) mod n == n - r + i, where k == n*q + r.
+lemma rot_low(k: int, n: int, q: int, r: int, j: int)
+  requires n > 0
+  requires k == n * q + r
+  requires 0 <= r < n
+  requires 0 <= j <= r
+  ensures forall i in j..r: (i - k) % n == n - r + i
+  decreases r - j
+{
+  if j < r {
+    rot_low(k, n, q, r, j + 1);
+    assert j - k == n * (0 - q - 1) + (n - r + j);
+    mod_of(j - k, 0 - q - 1, n - r + j, n);
+    assert (j - k) % n == n - r + j;
+    assert forall i in j + 1..r: (i - k) % n == n - r + i;
+  }
+}
+
+// For r <= i < n: xs[(i - k) mod n] == xs[i - r], where k == n*q + r and n == len(xs).
+lemma rot_high_val(xs: seq<int>, k: int, n: int, q: int, r: int, j: int)
+  requires n > 0
+  requires n == len(xs)
+  requires k == n * q + r
+  requires 0 <= r < n
+  requires r <= j <= n
+  ensures forall i in j..n: xs[(i - k) % n] == xs[i - r]
+  decreases n - j
+{
+  if j < n {
+    rot_high_val(xs, k, n, q, r, j + 1);
+    assert j - k == n * (0 - q) + (j - r);
+    mod_of(j - k, 0 - q, j - r, n);
+  }
+}
+
+// For r <= i < n: (i - k) mod n == i - r, where k == n*q + r.
+lemma rot_high(k: int, n: int, q: int, r: int, j: int)
+  requires n > 0
+  requires k == n * q + r
+  requires 0 <= r < n
+  requires r <= j <= n
+  ensures forall i in j..n: (i - k) % n == i - r
+  decreases n - j
+{
+  if j < n {
+    rot_high(k, n, q, r, j + 1);
+    assert j - k == n * (0 - q) + (j - r);
+    mod_of(j - k, 0 - q, j - r, n);
+  }
+}
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i - k) % len(xs)]
+{
+  let n = len(xs);
+  if n == 0 {
+    return xs;
+  }
+  let r = k % n;
+  let q = k / n;
+  assert k == n * q + r;
+  assert 0 <= r < n;
+  rot_low(k, n, q, r, 0);
+  rot_high(k, n, q, r, r);
+  let a = xs[n - r..];
+  let b = xs[..n - r];
+  assert len(a) == r;
+  assert len(b) == n - r;
+  assert forall i in 0..r: a[i] == xs[n - r + i];
+  assert forall i in r..n: b[i - r] == xs[i - r];
+  assert forall i in 0..r: (a + b)[i] == a[i];
+  assert forall i in r..n: (a + b)[i] == b[i - r];
+  assert forall i in 0..r: (a + b)[i] == xs[(i - k) % n];
+  rot_high_val(xs, k, n, q, r, r);
+  assert forall i in r..n: (a + b)[i] == xs[(i - k) % n];
+  return a + b;
+}

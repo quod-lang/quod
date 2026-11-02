@@ -205,8 +205,9 @@ let ``a lemma whose recursive call does not decrease gets a counterexample from 
 
 [<Fact>]
 let ``a counterexample says where it comes from: a run, or the solver`` () =
-    // random small inputs never satisfy x > 1000: the counterexample comes from the solver
-    let solver = assertRefuted "postcondition" "fn f(x: int) -> int requires x > 1000 ensures result > 0 { x - 2000 }"
+    // no small input or constant of the program satisfies the requires (x > 56 with y = 8 at
+    // least): the counterexample comes from the solver
+    let solver = assertRefuted "postcondition" "fn f(x: int, y: int) -> int requires y > 7 && x > 7 * y ensures result > 0 { x - 7 * y - 5 }"
     Assert.Equal(Some "solver", solver.Evidence)
     let run = assertRefuted "postcondition" "fn g(x: int) -> int ensures result > 0 { x }"
     Assert.Equal(Some "run", run.Evidence)
@@ -219,3 +220,16 @@ let ``an inconclusive proof gives the solver's reason`` () =
     let d = ds |> List.exactlyOne
     Assert.Equal("inconclusive", d.Status)
     Assert.True(d.Reason.IsSome)
+
+[<Fact>]
+let ``the program's constants are among the inputs run: a bug at n == 1000 is found`` () =
+    let d =
+        assertRefuted "postcondition"
+            ("fn isqrt(n: nat) -> nat ensures result * result <= n ensures n < (result + 1) * (result + 1) {\n"
+             + "  let mut lo = 0; let mut hi = n + 1;\n"
+             + "  while hi - lo > 1 invariant 0 <= lo < hi invariant lo * lo <= n invariant n < hi * hi decreases hi - lo\n"
+             + "  { let mid = lo + (hi - lo) / 2; if mid * mid <= n { lo = mid; } else { hi = mid; } }\n"
+             + "  if n == 1000 { return lo + 1; }\n"
+             + "  return lo; }")
+    Assert.Equal<(string * string) list>([ "n", "1000" ], d.Counterexample)
+    Assert.Equal(Some "run", d.Evidence)

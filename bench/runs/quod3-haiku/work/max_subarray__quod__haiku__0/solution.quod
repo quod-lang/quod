@@ -1,0 +1,48 @@
+// Sum of xs[i..j] (i included, j excluded), defined by recursion on the right end.
+fn range_sum(xs: seq<int>, i: nat, j: nat) -> int
+  requires i <= j <= len(xs)
+  decreases j - i
+{
+  if i < j { xs[j - 1] + range_sum(xs, i, j - 1) } else { 0 }
+}
+
+// Maximum sum of a non-empty contiguous sublist, in O(n) (Kadane's algorithm).
+// `cur` is the best sum of a sublist ending at k; `best` the best over the prefix xs[0..k].
+// The start/end indices are kept as witnesses for the existential facts.
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) >= 1
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: result == range_sum(xs, i, j)
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: range_sum(xs, i, j) <= result
+{
+  let n: int = len(xs);
+  let mut best: int = xs[0];
+  let mut bs: nat = 0;
+  let mut be: nat = 1;
+  let mut cur: int = xs[0];
+  let mut cs: nat = 0;
+  let mut k: nat = 1;
+  while k < n
+    invariant 1 <= k <= n
+    invariant 0 <= cs < k
+    invariant cur == range_sum(xs, cs, k)
+    invariant forall s in 0..k: range_sum(xs, s, k) <= cur
+    invariant 0 <= bs < be <= k
+    invariant best == range_sum(xs, bs, be)
+    invariant forall s in 0..k: forall e in s + 1..k + 1: range_sum(xs, s, e) <= best
+    decreases n - k
+  {
+    if cur < 0 {
+      cur = xs[k];
+      cs = k;
+    } else {
+      cur = cur + xs[k];
+    }
+    if cur > best {
+      best = cur;
+      bs = cs;
+      be = k + 1;
+    }
+    k = k + 1;
+  }
+  best
+}

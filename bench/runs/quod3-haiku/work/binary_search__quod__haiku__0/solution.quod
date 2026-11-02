@@ -1,0 +1,68 @@
+// Binary search for any occurrence of `target` in a sorted sequence.
+
+// Monotonicity of a sorted sequence, by induction on the distance j - i.
+lemma sorted_mono(xs: seq<int>, i: nat, j: nat)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires i <= j < len(xs)
+  ensures xs[i] <= xs[j]
+  decreases j - i
+{
+  if i < j {
+    sorted_mono(xs, i, j - 1);
+    assert xs[j - 1] <= xs[j];
+  }
+}
+
+// Every element from i up to m is at most xs[m].
+lemma prefix_le(xs: seq<int>, m: nat, i: nat)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires i <= m < len(xs)
+  ensures forall k in i..m + 1: xs[k] <= xs[m]
+  decreases m - i
+{
+  sorted_mono(xs, i, m);
+  if i < m {
+    prefix_le(xs, m, i + 1);
+  }
+}
+
+// Every element from m up to j is at least xs[m].
+lemma suffix_ge(xs: seq<int>, m: nat, j: nat)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires m <= j < len(xs)
+  ensures forall k in m..j + 1: xs[k] >= xs[m]
+  decreases j - m
+{
+  sorted_mono(xs, m, j);
+  if m < j {
+    suffix_ge(xs, m, j - 1);
+  }
+}
+
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  ensures result == -1 ==> forall i in 0..len(xs): xs[i] != target
+  ensures result != -1 ==> 0 <= result < len(xs) && xs[result] == target
+  loose (r1, r2) => r1 == -1 || r2 == -1 || xs[r1] == xs[r2]
+{
+  let mut lo: int = 0;
+  let mut hi: int = len(xs);
+  while lo < hi
+    invariant 0 <= lo <= hi <= len(xs)
+    invariant forall i in 0..lo: xs[i] < target
+    invariant forall i in hi..len(xs): xs[i] > target
+    decreases hi - lo
+  {
+    let mid: int = lo + (hi - lo) / 2;
+    if xs[mid] < target {
+      prefix_le(xs, mid, 0);
+      lo = mid + 1;
+    } else if xs[mid] > target {
+      suffix_ge(xs, mid, len(xs) - 1);
+      hi = mid;
+    } else {
+      return mid;
+    }
+  }
+  -1
+}

@@ -18,6 +18,7 @@
 ///   says the same and is erased.
 module Quod.ContractStyle
 
+open System.Collections.Generic
 open Quod.Typed
 open Quod.Diagnostics
 
@@ -65,7 +66,57 @@ let rec private compound (e: TExpr) =
     | EToNat x -> compound x
     | _ -> true
 
-let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
+/// The functions whose value the program uses. A call that only binds a variable which is never
+/// read, or only returned by the function itself (`let ih = f(...); return ih;` in f, the old
+/// lemma idiom), does not count. `if feature_enabled() { ... }` does: such a function cannot
+/// become a lemma, which has no value (external counter-review).
+let valueUses (prog: TProgram) : Set<string> =
+    let used = HashSet<string>()
+    let rec expr (e: TExpr) =
+        match e.Kind with
+        | ECall(g, xs) -> used.Add g |> ignore; List.iter expr xs
+        | ESeq xs | ETuple xs -> List.iter expr xs
+        | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
+        | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
+        | EInt _ | EBool _ | EVar _ | EResult -> ()
+    /// Does a variable named n appear in e?
+    let rec reads (n: string) (e: TExpr) =
+        match e.Kind with
+        | EVar m -> m = n
+        | ECall(_, xs) | ESeq xs | ETuple xs -> List.exists (reads n) xs
+        | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> reads n a || reads n b
+        | ESlice(a, b, c) -> reads n a || Option.exists (reads n) b || Option.exists (reads n) c
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> reads n a
+        | EIf(a, b, c) | EQuant(_, _, a, b, c) -> reads n a || reads n b || reads n c
+        | EInt _ | EBool _ | EResult -> false
+    for f in prog.Fns do
+        match f.Body with
+        | TExprBody e -> expr e
+        | TStmtBody body ->
+            // calls bound by `let x = g(...)`, then judged by the uses of x
+            let bound = ResizeArray<string * string>()
+            let rec stmt (st: TStmt) =
+                match st.Kind with
+                | SLet(_, x, _, { Kind = ECall(g, args) }) when not (isLemmaBinding x) ->
+                    bound.Add((x, g))
+                    List.iter expr args
+                | SLet(_, _, _, e) | SAssign(_, e) | SAssert e | SReturn e -> expr e
+                | SIf(c, a, b) -> expr c; List.iter stmt a; List.iter stmt b
+                | SWhile(c, invs, d, b) -> expr c; List.iter expr invs; expr d; List.iter stmt b
+            List.iter stmt body
+            let rec readers (x: string) (g: string) (st: TStmt) =
+                match st.Kind with
+                | SReturn { Kind = EVar m } when m = x && g = f.Name -> false // the recursive idiom
+                | SLet(_, _, _, e) | SAssign(_, e) | SAssert e | SReturn e -> reads x e
+                | SIf(c, a, b) -> reads x c || List.exists (readers x g) a || List.exists (readers x g) b
+                | SWhile(c, invs, d, b) -> reads x c || List.exists (reads x) invs || reads x d || List.exists (readers x g) b
+            for (x, g) in bound do
+                if body |> List.exists (readers x g) then used.Add g |> ignore
+    Set.ofSeq used
+
+let styleOf (fnNames: Set<string>) (usedAsValue: Set<string>) (f: TFn) : Style option =
     if f.IsLemma then None // a proof, not a function: its ensures are what it proves
     elif f.Ensures.IsEmpty then (if f.IsExprFn then None else Some NoContract)
     else
@@ -79,7 +130,7 @@ let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
             || f.Ensures |> List.exists (fun e -> match e.Kind with EResult -> true | _ -> false)
         let bodyKeys = values |> List.map key |> Set.ofList
         let cs = f.Ensures |> List.collect claims
-        if not f.IsExprFn && f.Ret = TyBool && alwaysTrue then Some LemmaAsFunction
+        if not f.IsExprFn && f.Ret = TyBool && alwaysTrue && not (usedAsValue.Contains f.Name) then Some LemmaAsFunction
         elif cs |> List.exists (fun c -> compound c && bodyKeys.Contains(key c)) then Some Restated
         elif cs |> List.exists (fun c -> match c.Kind with ECall(g, _) -> fnNames.Contains g | _ -> false) then Some Model
         else Some Properties
@@ -88,9 +139,10 @@ let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
 /// restated body or a missing contract.
 let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
     let names = prog.Fns |> List.map (fun f -> f.Name) |> Set.ofList
+    let uses = valueUses prog
     prog.Fns
     |> List.choose (fun f ->
-        styleOf names f
+        styleOf names uses f
         |> Option.map (fun style ->
             let status, severity, message =
                 match style with

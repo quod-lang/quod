@@ -117,12 +117,16 @@ return e;              // or a final expression at the end of the body
   preserved), `decreases` (loops and recursion), sequence bounds, non-zero divisors, `nat`
   assignments, `assert`.
 - **Counterexamples by execution.** Before asking the solver, the compiler runs each function on
-  small inputs that satisfy its `requires` (a parameter that the `requires` define from the
-  others, such as a table of prefix sums, is built from them), checking every obligation on the
-  way, including that each recursive call makes the `decreases` measure smaller (a call that
-  does not would run forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
-  milliseconds. When the solver then times out on an obligation that no run broke, the message
-  says so: the property may well hold, and the proof probably needs a hint.
+  small inputs that satisfy its `requires`: zero values, each integer constant of the program and
+  its neighbours (`c - 1`, `c`, `c + 1`), then random values (ints in -6..6 or a constant,
+  sequences of 0 to 5 elements). A parameter that the `requires` define from the others, such as
+  a table of prefix sums, is built from them. Every obligation is checked on the way, including
+  that each recursive call makes the `decreases` measure smaller (a call that does not would run
+  forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
+  milliseconds. When the solver then fails on an obligation that no run broke, the message gives
+  the facts: how many runs, out of how many inputs tried, and that none broke it. That does not
+  show the property holds (a bug may need other inputs); if it does, the proof needs a hint. When
+  no input tried satisfies the `requires`, the message says that the function was not run.
 - `--runtime-checks`: instead of refusing to build when an obligation is not proved, check the
   contracts of the functions concerned at run time in the generated Python, and list them in the
   report (the ⚠️ status of [principle 2](kernel.md)).
@@ -183,9 +187,10 @@ as a `note` in the JSON (`"kind": "contract"`):
   result, and its callers, who know it by its contract only, know nothing about it. (An expression
   function without `ensures` is not classified: the verifier knows its definition.)
 - **lemma written as a function** (`lemma-as-function`): a statement function returning `bool`
-  that returns `true` on every path, or says `ensures result`, its other `ensures` being facts. A
-  **warning**: it verifies, but the generated code runs it at every call. Write it as a `lemma`,
-  which is erased.
+  that returns `true` on every path, or says `ensures result`, its other `ensures` being facts,
+  and whose value the program never uses (`if feature_enabled() { ... }` uses it; a lemma could
+  not). A **warning**: it verifies, but the generated code runs it at every call. Write it as a
+  `lemma`, which is erased.
 
 Lemmas are not classified: their `ensures` is what they prove.
 
@@ -250,7 +255,9 @@ quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
   a sequence of tuples or of sequences is rebuilt at the public boundary (O(n)), since its elements
   may come as lists. A mutable local extended with `x = x + [e]` becomes `x.append(e)` when no
   other variable, argument, tuple or sequence can share its list: a loop that builds a sequence
-  stays O(n), not O(n²). Builtins are aliased (`_quod_len`...), so a
+  stays O(n), not O(n²). As arguments are not copied, a function that returns an argument as it
+  is (`fn id(xs: seq<int>) -> seq<int> { xs }`) gives the Python caller its own list back: changing
+  it afterwards changes the caller's input too, as with any Python function. Builtins are aliased (`_quod_len`...), so a
   Quod function named `len` or `list` shadows nothing the generated code needs. A name that is a
   Python keyword gets a trailing `_`.
 - Known limit: recursion is Python recursion (default depth 1000).

@@ -237,6 +237,53 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
     | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
 
+/// The integer literals of the program, and their neighbours: a bug triggered by `n == 1000`
+/// is out of reach of small random inputs (external counter-review). Small ones are left out
+/// (-6..6 is drawn anyway); at most 30 values.
+let private programConstants (prog: TProgram) : bigint list =
+    let found = HashSet<bigint>()
+    let rec expr (e: TExpr) =
+        match e.Kind with
+        | EInt n -> found.Add n |> ignore
+        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
+        | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
+        | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
+        | EBool _ | EVar _ | EResult -> ()
+    let rec stmt (s: TStmt) =
+        match s.Kind with
+        | SLet(_, _, _, e) | SAssign(_, e) | SAssert e | SReturn e -> expr e
+        | SIf(c, a, b) -> expr c; List.iter stmt a; List.iter stmt b
+        | SWhile(c, invs, d, b) -> expr c; List.iter expr invs; expr d; List.iter stmt b
+    for f in prog.Fns do
+        f.Requires @ f.Ensures |> List.iter expr
+        match f.Body with
+        | TExprBody e -> expr e
+        | TStmtBody ss -> List.iter stmt ss
+    found
+    |> Seq.collect (fun c -> [ c - 1I; c; c + 1I ])
+    |> Seq.filter (fun c -> abs c > 6I)
+    |> Seq.distinct
+    |> Seq.sort
+    |> Seq.truncate 30
+    |> List.ofSeq
+
+/// A random input: like randomValue, but an int is one of the program's constants one time
+/// in three (when there are any).
+let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Value =
+    let fromPool (ok: bigint -> bool) =
+        match pool |> List.filter ok with
+        | [] -> None
+        | cs when rnd.Next 3 = 0 -> Some(Eval.VInt cs.[rnd.Next cs.Length])
+        | _ -> None
+    match t with
+    | TyInt | TyError -> fromPool (fun _ -> true) |> Option.defaultWith (fun () -> randomValue rnd t)
+    | TyNat -> fromPool (fun c -> c.Sign >= 0) |> Option.defaultWith (fun () -> randomValue rnd t)
+    | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> inputValue rnd pool e ]
+    | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
+    | TyBool -> randomValue rnd t
+
 /// Does e mention the variable `name`? (By the text of e: a whole word.)
 let private mentions (name: string) (e: TExpr) =
     Text.RegularExpressions.Regex.IsMatch(Printer.exprText (toSyntax e), @"\b" + Text.RegularExpressions.Regex.Escape name + @"\b")
@@ -301,6 +348,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     /// (see RunConcrete), and how many inputs were run.
     let concrete = Dictionary<string * Span, (string * string) list>()
     let mutable concreteRuns = 0
+    /// Inputs tried (valid or not), for the message when few satisfy the requires.
+    let mutable concreteTries = 0
+    let constants = programConstants prog
 
     member _.Diagnostics = List.ofSeq diags
     member _.Proved = proved
@@ -447,6 +497,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     member v.RunConcrete(f: TFn) =
         concrete.Clear()
         concreteRuns <- 0
+        concreteTries <- 0
         Eval.withBigStack (fun () -> v.RunConcreteOnThisThread f)
 
     member private v.RunConcreteOnThisThread(f: TFn) =
@@ -454,14 +505,24 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         let plain = Eval.Evaluator(fns)
         let rnd = Random 7
         let names = f.Params |> List.map (fun p -> p.Name)
+        let zero = f.Params |> List.map (fun p -> zeroValue p.Ty)
         let candidates =
             seq {
-                yield f.Params |> List.map (fun p -> zeroValue p.Ty)
-                for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> randomValue rnd p.Ty)
+                yield zero
+                // each constant of the program in each int parameter, the others zero
+                for (k, p) in List.indexed f.Params do
+                    match p.Ty with
+                    | TyInt | TyNat ->
+                        for c in constants do
+                            if p.Ty = TyInt || c.Sign >= 0 then
+                                yield zero |> List.mapi (fun i z -> if i = k then Eval.VInt c else z)
+                    | _ -> ()
+                for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> inputValue rnd constants p.Ty)
             }
         let define = definedParams f plain
         use e = candidates.GetEnumerator()
         while concreteRuns < 200 && e.MoveNext() do
+            concreteTries <- concreteTries + 1
             let env = define (List.zip names e.Current |> Map.ofList)
             let values = names |> List.map (fun n -> env.[n])
             if f.Requires |> List.forall (fun r -> plain.Holds(r, env) = Some true) then
@@ -501,13 +562,19 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         z3.Pop()
         { st with Assume = o.Goal :: st.Assume }
 
-    /// What the concrete runs say when the solver fails without a counterexample: probably not
-    /// a bug, rather a missing proof hint. Tells an agent which way to look.
+    /// What the concrete runs say when the solver fails without a counterexample: facts only.
+    /// No counterexample on small inputs does not show that the property holds (a bug at
+    /// n == 1000, an input that a quantified requires makes rare), and an agent told "it may
+    /// hold" adds asserts to prove a false property (external counter-review).
     member _.NoCounterexample() =
-        if concreteRuns = 0 then ""
+        if concreteTries = 0 then ""
+        elif concreteRuns = 0 then
+            " (the function was not run: none of the " + string concreteTries
+            + " small inputs tried satisfies its requires, so there is no counterexample either way)"
         else
-            " (no counterexample in " + string concreteRuns + " runs of the function on small inputs: "
-            + "the property may hold, and the proof needs a hint, an assert or a lemma)"
+            " (no counterexample in " + string concreteRuns + " runs of the function on small inputs that satisfy its requires"
+            + (if concreteRuns < 200 then ", out of " + string concreteTries + " tried" else "")
+            + ": a bug may need other inputs; if the property holds, the proof needs a hint, an assert or a lemma)"
 
     /// The value of a term in the current model, as a Quod value. Sequences are axiomatized,
     /// so a sequence is read through its length and its elements (at most 50 of them).
