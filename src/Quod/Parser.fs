@@ -411,8 +411,14 @@ type private Parser(file: string, toks: Token[]) =
         | _ ->
             let e = p.Expr()
             if p.IsSym ";" then
-                p.Fail(e.Span, "this expression has no effect (Quod functions are pure); 'return' it or bind it with 'let'")
-            p.MkS(FinalExpr e, start)
+                match e.Kind with
+                | Call(name, args) when name <> "len" ->
+                    // a lemma call; the type checker rejects it if `name` is not a lemma
+                    p.Next() |> ignore
+                    p.MkS(Use(name, args), start)
+                | _ -> p.Fail(e.Span, "this expression has no effect (Quod functions are pure); 'return' it or bind it with 'let'")
+            else
+                p.MkS(FinalExpr e, start)
 
     member p.IfStatement() : Stmt =
         let start = p.Peek.Span.Start
@@ -429,10 +435,12 @@ type private Parser(file: string, toks: Token[]) =
 
     // --- functions ----------------------------------------------------------------
 
+    /// `fn name(params) -> type contract { body }`, or `lemma name(params) contract { steps }`.
     member p.Function() : FnDecl =
         let start = p.Peek.Span.Start
-        p.Kw "fn"
-        let name = p.Ident "a function name after 'fn'"
+        let isLemma = p.IsKw "lemma"
+        p.Next() |> ignore
+        let name = p.Ident(if isLemma then "a lemma name after 'lemma'" else "a function name after 'fn'")
         p.Sym "("
         let ps = ResizeArray<Param>()
         if not (p.IsSym ")") then
@@ -447,10 +455,16 @@ type private Parser(file: string, toks: Token[]) =
                 p.Next() |> ignore
                 if not (p.IsSym ")") then param ()
         p.Sym ")"
-        if not (p.IsSym "->") then
-            p.FailHere "'->' and a return type (Quod functions are pure, they always return a value)"
-        p.Next() |> ignore
-        let ret = p.Type()
+        let ret =
+            if isLemma then
+                if p.IsSym "->" then
+                    p.Fail(p.Peek.Span, "a lemma has no result: what it proves goes in its 'ensures' clauses")
+                TBool
+            else
+                if not (p.IsSym "->") then
+                    p.FailHere "'->' and a return type (Quod functions are pure, they always return a value)"
+                p.Next() |> ignore
+                p.Type()
         let req = ResizeArray<Expr>()
         let ens = ResizeArray<Expr>()
         let mutable loose = None
@@ -462,6 +476,7 @@ type private Parser(file: string, toks: Token[]) =
             | TkKeyword "ensures" -> p.Next() |> ignore; ens.Add(p.Expr())
             | TkKeyword "loose" ->
                 let s = p.Next().Span
+                if isLemma then p.Fail(s, "a lemma has no result, so no 'loose' clause")
                 if loose.IsSome then p.Fail(s, "a function has at most one 'loose' clause")
                 p.Sym "("
                 let a = p.Ident "the name of the first result, as in 'loose (r1, r2) => ...'"
@@ -485,13 +500,14 @@ type private Parser(file: string, toks: Token[]) =
           Ensures = List.ofSeq ens
           Loose = loose
           Decreases = dec
-          Body = classify items
+          Body = (if isLemma then StmtBody items else classify items)
+          IsLemma = isLemma
           Span = spanOf start p.LastEnd }
 
     member p.Program() : Program =
         let fns = ResizeArray<FnDecl>()
         while p.Peek.Kind <> TkEof do
-            if p.IsKw "fn" then fns.Add(p.Function()) else p.FailHere "'fn'"
+            if p.IsKw "fn" || p.IsKw "lemma" then fns.Add(p.Function()) else p.FailHere "'fn' or 'lemma'"
         { Fns = List.ofSeq fns }
 
 /// Parse a whole file. Raises QuodError on the first syntax error.

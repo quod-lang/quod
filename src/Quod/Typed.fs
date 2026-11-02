@@ -88,7 +88,15 @@ type TFn =
       /// Identifier of that cycle (-1 when not recursive): a call to a function of the same
       /// cycle must make the `decreases` measure smaller.
       Cycle: int
+      /// A lemma: a statement function returning true, checked like the others, erased from the
+      /// generated code. Its calls are `SLet` of a `lemmaBinding` name.
+      IsLemma: bool
       Span: Span }
+
+/// The name bound to the k-th lemma call of a function (`name(args);`): no source variable can
+/// have it (a dot), it is a valid SMT symbol, and the code generators skip it.
+let lemmaBinding (k: int) = "lemma." + string k
+let isLemmaBinding (name: string) = name.StartsWith "lemma."
 
 type TProgram = { Fns: TFn list }
 

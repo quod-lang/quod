@@ -132,6 +132,8 @@ type private Gen(checks: Set<string>) =
         | _ -> term
 
     member g.Stmts(sb: StringBuilder, indent: string, items: TStmt list, f: TFn) =
+        // lemma calls are proof steps: erased (a lemma may be recursive and slow, and its value is true)
+        let items = items |> List.filter (fun s -> match s.Kind with SLet(_, n, _, _) -> not (isLemmaBinding n) | _ -> true)
         if items.IsEmpty then sb.Append(indent).Append("pass\n") |> ignore
         for s in items do
             g.Stmt(sb, indent, s, f)
@@ -198,10 +200,14 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) : strin
         sb.Append("# Every contract below was proved; none is checked at run time.\n") |> ignore
     else
         sb.Append("# WARNING: not fully proved (--runtime-checks): ").Append(String.Join(", ", checks)).Append("\n") |> ignore
+    let lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.map (fun f -> f.Name)
+    if not lemmas.IsEmpty then
+        sb.Append("# Lemmas are proofs, not code, and are not generated: ").Append(String.Join(", ", lemmas)).Append("\n") |> ignore
     sb.Append("from __future__ import annotations\n\n").Append(prelude) |> ignore
-    sb.Append("\n\n__all__ = [").Append(prog.Fns |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
+    let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
+    sb.Append("\n\n__all__ = [").Append(fns |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
     let g = Gen(checks)
-    for f in prog.Fns do
+    for f in fns do
         sb.Append("\n\n") |> ignore
         g.Function(sb, f)
     sb.ToString()

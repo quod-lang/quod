@@ -104,6 +104,7 @@ let rec private summary (r: Vcgen.VerifyResult) =
     + "; " + string r.Determined + " of " + string r.WithContract + " contract(s) determine their result"
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
     + styleSummary r
+    + (if r.Lemmas > 0 then "; " + string r.Lemmas + " lemma(s)" else "")
 
 /// "; contracts: 2 by properties, 1 by a model, 1 restating the body, 1 missing" (the styles present).
 and private styleSummary (r: Vcgen.VerifyResult) =

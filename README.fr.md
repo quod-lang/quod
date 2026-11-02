@@ -134,10 +134,11 @@ artifacts/aot/quod check examples/binary_search.quod
 0. **Mesurer** (fait) : la vérification réduit-elle les bugs échappés, à quel coût ? Premier
    outil livré : [dafny-complete](tools/dafny-complete/).
 1. **Quod 0.1** (presque terminé) : fonctions pures sur entiers, booléens, séquences et tuples,
-   avec contrats, contrôle de complétude et génération Python. Reste : la finition des diagnostics
+   avec contrats, lemmes (des preuves, effacées du code généré), contrôle de complétude et
+   génération Python. Reste : la finition des diagnostics
    JSON et des binaires Native AOT publiés pour Windows, Linux et macOS.
-2. **Quod 0.2** : chaînes, types algébriques, modules, génériques, une construction `lemma`, un
-   serveur MCP pour les agents.
+2. **Quod 0.2** : chaînes, types algébriques, modules, génériques, un serveur MCP pour les
+   agents.
 3. **Quod 0.3** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
    dictionnaires et ensembles.

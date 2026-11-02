@@ -10,7 +10,7 @@ la seule grammaire. Chacune est vérifiée, compile en Python, et passe les test
 | Tâche | Lignes | Obligations | Contrat déterminé | Indications | Tests cachés |
 |---|---|---|---|---|---|
 | [binary_search](binary_search/solution.quod) | 22 | 29 | ✅ (avec `loose`) | aucune | 510/510 |
-| [merge_intervals](merge_intervals/solution.quod) | 89 | 176 | ⚠️ non décidé | 6 assert, 2 lemmes | 508/508 |
+| [merge_intervals](merge_intervals/solution.quod) | 87 | 168 | ⚠️ non décidé | 6 assert, 2 lemmes | 508/508 |
 | [rle_encode](rle_encode/solution.quod) | 39 | 55 | ⚠️ non décidé | aucune | 506/506 |
 | [bounded_queue](bounded_queue/solution.quod) | 49 | 69 | ✅ | 3 assert | 505/505 |
 | [max_subarray](max_subarray/solution.quod) | 31 | 64 | ✅ | aucune | 506/506 |

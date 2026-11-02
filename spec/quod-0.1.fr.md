@@ -54,7 +54,7 @@ fn nom(p1: T1, p2: T2) -> T
 Toutes les fonctions sont pures : pas d'entrée-sortie, pas de modification de leurs arguments.
 Plusieurs résultats forment un tuple (`-> (int, int)`, `result.0`).
 
-Un seul mot-clé, deux sortes de corps, distinguées par leur contenu :
+Deux sortes de corps, distinguées par leur contenu :
 
 - **Fonctions-expressions** : le corps est une seule expression (éventuellement
   `if c { a } else { b }`). Elles sont utilisables dans les contrats, et le vérificateur connaît
@@ -62,6 +62,18 @@ Un seul mot-clé, deux sortes de corps, distinguées par leur contenu :
 - **Fonctions à instructions** : le corps contient des instructions. Elles ne sont appelables que
   depuis le code, et leurs appelants ne les connaissent que par leur contrat (vérification
   modulaire).
+
+Un **lemme** est une preuve, pas une fonction : il n'a pas de résultat, son `ensures` est ce qu'il
+prouve, et son corps, les étapes de la preuve. Il se vérifie comme une fonction à instructions, et
+il est **effacé** du code généré.
+
+```rust
+lemma nom(p1: T1, p2: T2)
+  requires P          // zéro ou plus
+  ensures Q           // ce qu'il prouve (pas de `result`)
+  decreases D         // obligatoire pour les lemmes récursifs
+{ étapes }            // assert, appels de lemmes, `if` pour séparer les cas ; pas de `return`
+```
 
 ### Instructions
 
@@ -75,6 +87,7 @@ while c
   decreases D          // obligatoire
 { ... }
 assert P;              // indication de preuve, vérifiée
+nom_lemme(a, b);       // appel de lemme : une étape de preuve, effacée du code généré
 return e;              // ou une expression finale à la fin du corps
 ```
 
@@ -124,11 +137,25 @@ Ce dont une preuve a besoin au-delà des contrats s'écrit dans le code, et se v
 
 - `assert P;` prouve P, puis le suppose. C'est la manière de nommer un fait que le solveur ne trouve
   pas seul, typiquement sur les tranches : `assert xs[..k + 1] == xs[..k] + [xs[k]];`.
-- Un **lemme** est une fonction à instructions dont l'`ensures` est le fait, renvoyant en général un
-  `bool` avec `ensures result`. Les appelants ne connaissent une fonction à instructions que par son
-  contrat : l'appeler donne donc le fait pour ses arguments : `let ih = sum_cat(a, b[..len(b) - 1]);`.
-  Un lemme récursif est une preuve par récurrence : l'appel récursif est l'hypothèse de récurrence,
-  et `decreases` la rend bien fondée.
+- Un **lemme** énonce un fait dans son `ensures` et le prouve dans son corps. L'appeler, comme une
+  instruction, donne le fait pour ses arguments : `sum_split(xs, i, j);`. Un lemme récursif est une
+  preuve par récurrence : l'appel récursif est l'hypothèse de récurrence, et `decreases` la rend
+  bien fondée.
+
+  ```rust
+  lemma sum_split(xs: seq<int>, i: nat, j: nat)
+    requires i <= j <= len(xs)
+    ensures sum(xs, 0, j) == sum(xs, 0, i) + sum(xs, i, j)
+    decreases j - i
+  {
+    if i < j { sum_split(xs, i, j - 1); }
+  }
+  ```
+
+  Les lemmes et leurs appels sont effacés du code généré : une preuve ne coûte rien à l'exécution.
+  Un lemme n'a pas de valeur : il ne peut pas figurer dans une expression, et rien de ce qu'il
+  prouve ne peut changer ce que le code calcule. Il n'est pas soumis au contrôle de complétude
+  (il n'a pas de résultat à déterminer), et le résumé compte les lemmes à part.
 - Un `exists` dans un invariant ou un `ensures` demande son témoin : garder, dans une variable,
   l'indice qui le rend vrai, et énoncer le fait pour cet indice ; le solveur n'invente pas de témoins.
 - Les faits sur `a % n` pour un `n` que le solveur ne connaît pas dépassent le plus souvent Z3

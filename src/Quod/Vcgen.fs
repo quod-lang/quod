@@ -965,7 +965,8 @@ type VerifyResult =
       /// Functions whose contract was proved to determine a unique result (or its loose relation)
       Determined: int
       /// Functions with at least one ensures clause (the ones the completeness check applies to)
-      WithContract: int }
+      WithContract: int
+      Lemmas: int }
 
 /// Verify every function of a well-typed program with one Z3 session:
 /// 1. declarations; definitions of the non-recursive expression functions;
@@ -985,6 +986,8 @@ let verify (file: string) (prog: TProgram) (z3: Session) : VerifyResult =
         v.Define f
     for f in prog.Fns do
         v.Function f
-    let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty)
+    // a lemma has no result to determine: it is a proof, its ensures are what it proves
+    let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
     let determined = withContract |> List.filter v.Completeness |> List.length
-    { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length }
+    { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length
+      Lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.length }

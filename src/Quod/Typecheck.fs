@@ -32,6 +32,8 @@ let rec private alwaysReturns (stmts: TStmt list) : bool =
 type private Checker(file: string, fns: Map<string, FnDecl>) =
     let errors = ResizeArray<Diagnostic>()
     let scopes = Stack<Dictionary<string, Binding>>()
+    /// Lemma calls seen so far in the current function (to name their bindings).
+    let mutable lemmaCalls = 0
 
     member _.Errors = List.ofSeq errors
 
@@ -207,19 +209,17 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | None ->
                 c.Error(e.Span, ctx.FnName, "unknown function '" + name + "'")
                 fail ()
+            | Some f when f.IsLemma ->
+                // a lemma has no value: nothing proved by it can flow into the computed result
+                c.Error(e.Span, ctx.FnName, "'" + name + "' is a lemma: it has no value, so it is not used in an expression; call it as a proof step, '" + name + "(...);'")
+                fail ()
             | Some f ->
                 let isExprFn = match f.Body with ExprBody _ -> true | StmtBody _ -> false
                 if ctx.InSpec && not isExprFn then
                     c.Error(e.Span, ctx.FnName, "'" + name + "' has a statement body, so it cannot be used in a contract; only functions whose body is a single expression can")
-                if args.Length <> f.Params.Length then
-                    c.Error(e.Span, ctx.FnName, "'" + name + "' takes " + string f.Params.Length + " argument(s), " + string args.Length + " given")
-                    fail ()
-                else
-                    let targs =
-                        List.map2 (fun (a: Expr) (p: Param) ->
-                            let pt = ofSyntax p.Type
-                            c.Coerce(c.Expr(a, ctx, Some pt), pt, ctx.FnName, "argument '" + p.Name + "'")) args f.Params
-                    mk (ECall(name, targs)) (ofSyntax f.Ret)
+                match c.Args(e, f, args, ctx) with
+                | Some targs -> mk (ECall(name, targs)) (ofSyntax f.Ret)
+                | None -> fail ()
         | Unary(Neg, x) ->
             let tx = c.Expr(x, ctx, None)
             c.ExpectInt(tx, ctx, "the operand of '-'")
@@ -252,6 +252,17 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             c.Pop()
             c.ExpectBool(tbody, ctx, "the body of a quantifier")
             mk (EQuant(q, v, tlo, thi, tbody)) TyBool
+
+    /// The arguments of a call to f, typed against its parameters (None: wrong count).
+    member c.Args(e: Expr, f: FnDecl, args: Expr list, ctx: Ctx) : TExpr list option =
+        if args.Length <> f.Params.Length then
+            c.Error(e.Span, ctx.FnName, "'" + f.Name + "' takes " + string f.Params.Length + " argument(s), " + string args.Length + " given")
+            None
+        else
+            Some(
+                List.map2 (fun (a: Expr) (p: Param) ->
+                    let pt = ofSyntax p.Type
+                    c.Coerce(c.Expr(a, ctx, Some pt), pt, ctx.FnName, "argument '" + p.Name + "'")) args f.Params)
 
     member c.Binary(e: Expr, op: BinOp, l: Expr, r: Expr, ctx: Ctx, expected: Ty option) : TExpr =
         let mk kind ty = { Kind = kind; Ty = ty; Span = e.Span }
@@ -367,6 +378,25 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 c.Pop()
                 mk (SWhile(tc, tinvs, tdec, tb))
             | Assert e -> mk (SAssert(c.Spec(e, f.Name, None, "an assertion")))
+            | Return _ | FinalExpr _ when f.IsLemma ->
+                c.Error(s.Span, f.Name, "a lemma returns nothing: its body is proof steps (asserts, lemma calls, 'if' to split cases), and what it proves goes in its 'ensures'")
+                mk (SAssert { Kind = EBool true; Ty = TyBool; Span = s.Span })
+            | Use(name, args) ->
+                let ok = { Kind = EBool true; Ty = TyBool; Span = s.Span }
+                match fns.TryFind name with
+                | Some g when g.IsLemma ->
+                    let callExpr: Expr = { Kind = Call(name, args); Span = s.Span }
+                    match c.Args(callExpr, g, args, code) with
+                    | Some targs ->
+                        lemmaCalls <- lemmaCalls + 1
+                        mk (SLet(false, lemmaBinding lemmaCalls, TyBool, { Kind = ECall(name, targs); Ty = TyBool; Span = s.Span }))
+                    | None -> mk (SAssert ok)
+                | Some _ ->
+                    c.Error(s.Span, f.Name, "this call has no effect (Quod functions are pure); 'return' it or bind it with 'let' (only a lemma is called on its own)")
+                    mk (SAssert ok)
+                | None ->
+                    c.Error(s.Span, f.Name, "unknown function '" + name + "'")
+                    mk (SAssert ok)
             | Return e -> mk (SReturn(c.Coerce(c.Expr(e, code, Some ret), ret, f.Name, "the returned value")))
             | FinalExpr e ->
                 if not last then
@@ -376,6 +406,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
     member c.Function(f: FnDecl, cycle: int option) : TFn =
         let recursive = cycle.IsSome
         let ret = ofSyntax f.Ret
+        lemmaCalls <- 0
         c.Push()
         let ps =
             f.Params |> List.map (fun p ->
@@ -383,7 +414,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 c.Declare(p.Name, { Ty = t; IsMutable = false; What = "parameter" }, p.Span, f.Name)
                 { Name = p.Name; Ty = t; Span = p.Span })
         let req = f.Requires |> List.map (fun r -> c.Spec(r, f.Name, None, "a 'requires' clause"))
-        let ens = f.Ensures |> List.map (fun e -> c.Spec(e, f.Name, Some ret, "an 'ensures' clause"))
+        let ens = f.Ensures |> List.map (fun e -> c.Spec(e, f.Name, (if f.IsLemma then None else Some ret), "an 'ensures' clause"))
         let loose =
             f.Loose |> Option.map (fun l ->
                 c.Push()
@@ -402,6 +433,10 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | ExprBody e ->
                 let code = { InSpec = false; ResultTy = None; FnName = f.Name }
                 TExprBody(c.Coerce(c.Expr(e, code, Some ret), ret, f.Name, "the body")), true
+            | StmtBody items when f.IsLemma ->
+                // the steps, then the implicit end: a lemma "returns" true, which its callers ignore
+                let ts = c.Stmts(items, f, ret, false)
+                TStmtBody(ts @ [ { Kind = SReturn { Kind = EBool true; Ty = TyBool; Span = f.Span }; Span = f.Span } ]), false
             | StmtBody items ->
                 let ts = c.Stmts(items, f, ret, true)
                 if not (alwaysReturns ts) then
@@ -410,7 +445,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         c.Pop()
         { Name = f.Name; Params = ps; Ret = ret; Requires = req; Ensures = ens; Loose = loose
           Decreases = dec; Body = body; IsExprFn = isExpr; IsRecursive = recursive
-          Cycle = defaultArg cycle -1; Span = f.Span }
+          Cycle = defaultArg cycle -1; IsLemma = f.IsLemma; Span = f.Span }
 
 /// Names of the functions called in an expression or statement list (bodies only).
 let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
@@ -432,6 +467,9 @@ let rec private callsStmts (acc: HashSet<string>) (ss: Stmt list) =
     for s in ss do
         match s.Kind with
         | Let(_, _, _, v) | Assign(_, v) | Assert v | Return v | FinalExpr v -> callsExpr acc v
+        | Use(n, args) ->
+            acc.Add n |> ignore
+            List.iter (callsExpr acc) args
         | IfStmt(c, t, e) ->
             callsExpr acc c
             callsStmts acc t

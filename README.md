@@ -130,10 +130,9 @@ artifacts/aot/quod check examples/binary_search.quod
 0. **Measure** (done): does verification reduce escaped bugs, and at what cost?
    First tool shipped: [dafny-complete](tools/dafny-complete/).
 1. **Quod 0.1** (nearly done): pure functions on integers, booleans, sequences and tuples, with
-   contracts, the completeness check and a Python backend. Left: JSON diagnostics polish and
-   Native AOT releases for Windows, Linux and macOS.
-2. **Quod 0.2**: strings, algebraic types, modules, generics, a `lemma` construct, an MCP server
-   for agents.
+   contracts, lemmas (proofs erased from the generated code), the completeness check and a Python
+   backend. Left: JSON diagnostics polish and Native AOT releases for Windows, Linux and macOS.
+2. **Quod 0.2**: strings, algebraic types, modules, generics, an MCP server for agents.
 3. **Quod 0.3**: capabilities (no ambient authority: a function touches the console, files or
    the network only through a capability it receives), sealed contracts, maps and sets.
 4. **Quod 0.4**: a C backend, towards native code and WASM.

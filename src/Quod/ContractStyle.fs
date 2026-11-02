@@ -61,7 +61,8 @@ let rec private compound (e: TExpr) =
     | _ -> true
 
 let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
-    if f.Ensures.IsEmpty then (if f.IsExprFn then None else Some NoContract)
+    if f.IsLemma then None // a proof, not a function: its ensures are what it proves
+    elif f.Ensures.IsEmpty then (if f.IsExprFn then None else Some NoContract)
     else
         let values =
             match f.Body with

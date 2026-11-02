@@ -54,12 +54,24 @@ fn name(p1: T1, p2: T2) -> T
 All functions are pure: no input/output, no mutation of their arguments. Multiple results are a
 tuple (`-> (int, int)`, `result.0`).
 
-There is one keyword and two kinds of bodies, told apart by their content:
+There are two kinds of bodies, told apart by their content:
 
 - **Expression functions**: the body is a single expression (possibly `if c { a } else { b }`).
   They can be used inside contracts, and the verifier knows their definition.
 - **Statement functions**: the body contains statements. They can only be called from code, and
   callers know them through their contract only (modular verification).
+
+A **lemma** is a proof, not a function: it has no result, its `ensures` is what it proves, and
+its body is the proof steps. It is checked like a statement function, and **erased** from the
+generated code.
+
+```rust
+lemma name(p1: T1, p2: T2)
+  requires P          // zero or more
+  ensures Q           // what it proves (no `result`)
+  decreases D         // required for recursive lemmas
+{ steps }             // asserts, lemma calls, `if` to split cases; no `return`
+```
 
 ### Statements
 
@@ -73,6 +85,7 @@ while c
   decreases D          // required
 { ... }
 assert P;              // proof hint, checked
+lemma_name(a, b);      // lemma call: a proof step, erased from the generated code
 return e;              // or a final expression at the end of the body
 ```
 
@@ -120,11 +133,25 @@ What a proof needs beyond the contracts is written in the code, and checked like
 
 - `assert P;` proves P, then assumes it. It is the way to name a fact the solver does not find
   alone, typically about slices: `assert xs[..k + 1] == xs[..k] + [xs[k]];`.
-- A **lemma** is a statement function whose `ensures` is the fact, usually returning `bool` with
-  `ensures result`. Callers know a statement function by its contract only, so calling it gives
-  the fact for its arguments: `let ih = sum_cat(a, b[..len(b) - 1]);`. A recursive lemma is a
+- A **lemma** states a fact in its `ensures` and proves it in its body. Calling it, as a
+  statement, gives the fact for its arguments: `sum_split(xs, i, j);`. A recursive lemma is a
   proof by induction: the recursive call is the induction hypothesis, and `decreases` makes it
   well-founded.
+
+  ```rust
+  lemma sum_split(xs: seq<int>, i: nat, j: nat)
+    requires i <= j <= len(xs)
+    ensures sum(xs, 0, j) == sum(xs, 0, i) + sum(xs, i, j)
+    decreases j - i
+  {
+    if i < j { sum_split(xs, i, j - 1); }
+  }
+  ```
+
+  Lemmas and their calls are erased from the generated code: a proof costs nothing at run time.
+  A lemma has no value, so it cannot appear in an expression, and nothing it proves can change
+  what the code computes. It is not subject to the completeness check (it has no result to
+  determine), and the summary counts lemmas apart.
 - An `exists` in an invariant or an `ensures` needs its witness: keep, in a variable, the index
   that makes it true, and state the fact for that index; the solver does not invent witnesses.
 - Facts about `a % n` for an `n` the solver does not know are mostly beyond Z3 (nonlinear

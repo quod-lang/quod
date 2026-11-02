@@ -64,6 +64,8 @@ and StmtKind =
     | Return of Expr
     /// an expression ending a block, without `;`: the value of that block
     | FinalExpr of Expr
+    /// `name(args);`: a lemma call, a proof step with no value (erased from the generated code)
+    | Use of name: string * args: Expr list
 
 /// A body that is a single expression makes an *expression function*, usable in contracts.
 /// Anything else is a *statement function*, known to its callers by its contract only.
@@ -84,6 +86,9 @@ type FnDecl =
       Loose: Loose option
       Decreases: Expr option
       Body: Body
+      /// `lemma name(...)`: a proof, checked like a function, erased from the generated code.
+      /// It has no result (Ret is bool internally, its body returns true when it ends).
+      IsLemma: bool
       Span: Span }
 
 type Program = { Fns: FnDecl list }

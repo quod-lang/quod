@@ -105,12 +105,13 @@ let rec private stmts (sb: StringBuilder) (indent: string) (items: Stmt list) =
         | Assert e -> sb.Append("assert ").Append(exprText e).Append(";\n") |> ignore
         | Return e -> sb.Append("return ").Append(exprText e).Append(";\n") |> ignore
         | FinalExpr e -> sb.Append(exprText e).Append("\n") |> ignore
+        | Use(n, args) -> sb.Append(n).Append("(").Append(args |> List.map exprText |> String.concat ", ").Append(");\n") |> ignore
 
 let fnText (f: FnDecl) =
     let sb = StringBuilder()
-    sb.Append("fn ").Append(f.Name).Append("(") |> ignore
+    sb.Append(if f.IsLemma then "lemma " else "fn ").Append(f.Name).Append("(") |> ignore
     sb.Append(f.Params |> List.map (fun p -> p.Name + ": " + typeText p.Type) |> String.concat ", ") |> ignore
-    sb.Append(") -> ").Append(typeText f.Ret).Append("\n") |> ignore
+    sb.Append(")").Append(if f.IsLemma then "" else " -> " + typeText f.Ret).Append("\n") |> ignore
     for r in f.Requires do
         sb.Append("  requires ").Append(exprText r).Append("\n") |> ignore
     for e in f.Ensures do

@@ -10,7 +10,7 @@ tests as the Python and Dafny arms of Phase 0).
 | Task | Lines | Obligations | Contract determined | Hints | Hidden tests |
 |---|---|---|---|---|---|
 | [binary_search](binary_search/solution.quod) | 22 | 29 | ✅ (with `loose`) | none | 510/510 |
-| [merge_intervals](merge_intervals/solution.quod) | 89 | 176 | ⚠️ not decided | 6 asserts, 2 lemmas | 508/508 |
+| [merge_intervals](merge_intervals/solution.quod) | 87 | 168 | ⚠️ not decided | 6 asserts, 2 lemmas | 508/508 |
 | [rle_encode](rle_encode/solution.quod) | 39 | 55 | ⚠️ not decided | none | 506/506 |
 | [bounded_queue](bounded_queue/solution.quod) | 49 | 69 | ✅ | 3 asserts | 505/505 |
 | [max_subarray](max_subarray/solution.quod) | 31 | 64 | ✅ | none | 506/506 |

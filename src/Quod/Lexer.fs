@@ -15,7 +15,7 @@ type TokenKind =
 type Token = { Kind: TokenKind; Span: Span }
 
 let keywords =
-    set [ "fn"; "requires"; "ensures"; "loose"; "decreases"; "invariant"
+    set [ "fn"; "lemma"; "requires"; "ensures"; "loose"; "decreases"; "invariant"
           "let"; "mut"; "if"; "else"; "while"; "assert"; "return"
           "forall"; "exists"; "in"; "true"; "false"; "result"
           "int"; "nat"; "bool"; "seq" ]

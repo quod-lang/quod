@@ -30,27 +30,25 @@ fn hi_of(s: seq<(int, int)>) -> int
 }
 
 // Lemma: every interval of s lies within [lo_of(s), hi_of(s)].
-fn bounds(s: seq<(int, int)>) -> bool
-  ensures result
+lemma bounds(s: seq<(int, int)>)
   ensures forall i in 0..len(s): lo_of(s) <= s[i].0 && s[i].1 <= hi_of(s)
   decreases len(s)
 {
-  if len(s) <= 1 { return true; }
-  let ih = bounds(s[1..]);
-  assert forall i in 1..len(s): s[i] == s[1..][i - 1];
-  return true;
+  if len(s) > 1 {
+    bounds(s[1..]);
+    assert forall i in 1..len(s): s[i] == s[1..][i - 1];
+  }
 }
 
 // Lemma: covering s + [x] is covering s or x.
-fn covered_snoc(s: seq<(int, int)>, x: (int, int), lo: int, hi: int) -> bool
-  ensures result
+lemma covered_snoc(s: seq<(int, int)>, x: (int, int), lo: int, hi: int)
   ensures forall p in lo..hi: covered(s + [x], p) == (covered(s, p) || inside(x, p))
   decreases len(s)
 {
-  if len(s) == 0 { return true; }
-  let ih = covered_snoc(s[1..], x, lo, hi);
-  assert (s + [x])[1..] == s[1..] + [x];
-  return true;
+  if len(s) > 0 {
+    covered_snoc(s[1..], x, lo, hi);
+    assert (s + [x])[1..] == s[1..] + [x];
+  }
 }
 
 // Insert x into r, which is sorted and separated (each interval ends before the next one
@@ -95,7 +93,7 @@ fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
 {
   let lo = 2 * lo_of(iv);
   let hi = 2 * hi_of(iv) + 1;
-  let b = bounds(iv);
+  bounds(iv);
   let mut r: seq<(int, int)> = [];
   let mut k = 0;
   while k < len(iv)
@@ -105,7 +103,7 @@ fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
     invariant forall p in lo..hi: covered(r, p) == covered(iv[..k], p)
     decreases len(iv) - k
   {
-    let c = covered_snoc(iv[..k], iv[k], lo, hi);
+    covered_snoc(iv[..k], iv[k], lo, hi);
     assert iv[..k + 1] == iv[..k] + [iv[k]];
     r = insert(r, iv[k], lo_of(iv), hi_of(iv));
     k = k + 1;
