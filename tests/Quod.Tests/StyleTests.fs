@@ -61,3 +61,16 @@ let ``a statement function without ensures has no contract (Haiku's rle_encode)`
     Assert.Equal(NoContract, s.["f"])
     // an expression function without ensures is known by its definition: not classified
     Assert.False((styles "fn g(x: int) -> int { x + 1 }").ContainsKey "g")
+[<Fact>]
+let ``a statement function that always returns true is a lemma written as a function`` () =
+    let s =
+        styles (
+            "fn sum(xs: seq<int>, i: nat, j: nat) -> int requires i <= j <= len(xs) decreases j - i { if i == j { 0 } else { sum(xs, i, j - 1) + xs[j - 1] } }\n"
+            + "fn split(xs: seq<int>, i: nat, j: nat) -> bool requires i <= j <= len(xs) ensures result ensures sum(xs, 0, j) == sum(xs, 0, i) + sum(xs, i, j) decreases j - i {\n"
+            + "  if i == j { return true; } let ih = split(xs, i, j - 1); return true; }\n"
+            + "fn split2(xs: seq<int>, i: nat, j: nat) -> bool requires i <= j <= len(xs) ensures result ensures sum(xs, 0, j) == sum(xs, 0, i) + sum(xs, i, j) decreases j - i {\n"
+            + "  if i == j { return true; } let ih = split2(xs, i, j - 1); return ih; }\n"
+            + "fn nonneg(x: int) -> bool ensures result == (x >= 0) { if x >= 0 { return true; } return false; }\n")
+    Assert.Equal(LemmaAsFunction, s.["split"])
+    Assert.Equal(LemmaAsFunction, s.["split2"])
+    Assert.Equal(Properties, s.["nonneg"])

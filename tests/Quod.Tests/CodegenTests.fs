@@ -244,3 +244,37 @@ let ``unproved bounds are checked at run time, where Python would wrap or clamp`
         "5\nindex -1 out of bounds (not proved: checked at run time)\n[2]\n"
         + "slice -1..2 out of bounds (not proved: checked at run time)\nslice 3..2 out of bounds (not proved: checked at run time)\n",
         runPython code driver)
+[<Fact>]
+let ``a local extended in a loop is appended to in place, and lists are not copied on entry`` () =
+    let src =
+        "fn doubled(xs: seq<int>) -> seq<int> ensures len(result) == len(xs) ensures forall i in 0..len(xs): result[i] == 2 * xs[i] {\n"
+        + "  let mut r: seq<int> = []; let mut k = 0;\n"
+        + "  while k < len(xs) invariant 0 <= k <= len(xs) invariant len(r) == k invariant forall i in 0..k: r[i] == 2 * xs[i] decreases len(xs) - k\n"
+        + "  { r = r + [2 * xs[k]]; k = k + 1; }\n"
+        + "  return r; }\n"
+    let _, modul = compile src
+    Assert.Contains("r.append((2 * xs[k]))", modul)
+    Assert.Contains("return _quod_f_doubled(_quod_seq(xs))", modul)
+    Assert.Equal("[2, 4] [0, 2]\n", runPython modul "print(doubled([1, 2]), doubled((0, 1)))")
+    differential src 100 |> ignore
+
+[<Fact>]
+let ``a local that is shared is never extended in place`` () =
+    // s, t and the tuple see r before it grows: appending in place would change them too
+    let src =
+        "fn same(xs: seq<int>) -> seq<int> { xs }\n"
+        + "fn shared(n: int) -> (seq<int>, seq<int>, (seq<int>, int), seq<int>) {\n"
+        + "  let mut r: seq<int> = [n]; let s = r; let t = same(r); let p = (r, 0);\n"
+        + "  r = r + [1]; return (s, t, p, r); }\n"
+        + "fn param(xs: seq<int>) -> seq<int> { let mut r = xs; r = r + [1]; return r; }\n"
+    let _, modul = compile src
+    Assert.DoesNotContain(".append(", modul)
+    Assert.Equal("([5], [5], ([5], 0), [5, 1]) [7] [7, 1]\n", runPython modul "a = [7]\nprint(shared(5), a, param(a))")
+
+[<Fact>]
+let ``sequences of tuples are accepted as lists of lists at the public boundary`` () =
+    let src =
+        "fn first(xs: seq<(int, int)>) -> bool requires len(xs) > 0 { xs[0] == (1, 2) }\n"
+        + "fn firsts(xs: seq<(int, int)>) -> bool requires len(xs) > 0 { first(xs) && first(xs[..1]) }\n"
+    let _, modul = compile src
+    Assert.Equal("True True False\n", runPython modul "print(first([[1, 2]]), firsts(((1, 2), (3, 4))), first([(2, 1)]))")

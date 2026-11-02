@@ -1,0 +1,6 @@
+{"quod": "before (copy on entry, concatenation)", "n": 1000, "binary_search": 2.816000487655401e-06, "prefix_sums": 0.0008642667283614477, "range_sum": 2.8559996280819176e-06}
+{"quod": "before (copy on entry, concatenation)", "n": 10000, "binary_search": 1.4999000122770666e-05, "prefix_sums": 0.06696716664979856, "range_sum": 2.566250041127205e-05}
+{"quod": "before (copy on entry, concatenation)", "n": 100000, "binary_search": 0.0001429685007315129, "prefix_sums": 7.007317966703947, "range_sum": 0.0003310564998537302}
+{"quod": "after (no copy, append)", "n": 1000, "binary_search": 1.4210003428161143e-06, "prefix_sums": 7.366660671929519e-05, "range_sum": 1.610000617802143e-07}
+{"quod": "after (no copy, append)", "n": 10000, "binary_search": 2.3010000586509703e-06, "prefix_sums": 0.0007407000133146843, "range_sum": 1.6300007700920106e-07}
+{"quod": "after (no copy, append)", "n": 100000, "binary_search": 3.2154994551092387e-06, "prefix_sums": 0.007625299971550703, "range_sum": 1.7600017599761485e-07}

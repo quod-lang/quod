@@ -1,9 +1,10 @@
 /// Python backend: one module per Quod file, one `def` per function, from the typed
 /// representation of a *verified* program. Proved contracts produce no code. The semantics are
-/// Quod's, not Python's where they differ: Euclidean division, sequences copied on entry.
+/// Quod's, not Python's where they differ: Euclidean division, sequences that never change.
 module Quod.CodegenPython
 
 open System
+open System.Collections.Generic
 open System.Text
 open Quod.Typed
 
@@ -32,6 +33,12 @@ _quod_any = any
 _quod_range = range
 _quod_list = list
 _quod_tuple = tuple
+
+
+def _quod_seq(xs):
+    # A sequence argument as a list: as it is when it already is one (generated code never
+    # mutates an argument, so no copy is needed), converted when it is a tuple or a range.
+    return xs if type(xs) is list else _quod_list(xs)
 
 
 def _quod_divmod(a: int, b: int) -> tuple[int, int]:
@@ -65,10 +72,68 @@ def _quod_slice(xs, lo: int, hi: int):
     return xs[lo:hi]
 """
 
+/// The implementation of a Quod function: what Quod code calls. The public `def` only
+/// normalizes its arguments, once, then calls it.
+let private implName (f: string) = "_quod_f_" + f
+
+/// Does this expression build a new list (so that nothing else refers to it)?
+let rec private fresh (e: TExpr) =
+    match e.Kind with
+    | ESeq _ | EConcat _ | ESlice _ -> true
+    | EIf(_, a, b) -> fresh a && fresh b
+    | _ -> false
+
+/// The mutable sequence locals that may be extended in place: `r = r + [e]` as `r.append(e)`
+/// instead of a copy (quadratic in a loop). A local qualifies when it always holds a list of its
+/// own: every value assigned to it is fresh, and it is never shared, that is never used as a
+/// whole except in a concatenation, len, an index, a slice, a comparison, or a return. Then no
+/// other variable, argument, tuple or sequence can see the list change.
+let private appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
+    let candidates = HashSet<string>()
+    let shared = HashSet<string>()
+    let rec uses (whole: bool) (e: TExpr) =
+        let reads = uses true
+        let inner = uses false
+        match e.Kind with
+        | EVar n -> if not whole then shared.Add n |> ignore
+        | EConcat(a, b) | EEq(a, b) -> reads a; reads b
+        | ELen s -> reads s
+        | EIndex(s, i) -> reads s; inner i
+        | ESlice(s, lo, hi) -> reads s; Option.iter inner lo; Option.iter inner hi
+        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter inner xs
+        | EProj(x, _) | ENeg x | ENot x | EToNat x -> inner x
+        | EArith(_, a, b) | ECmp(_, a, b) | ELogic(_, a, b) -> inner a; inner b
+        | EIf(c, a, b) -> inner c; inner a; inner b
+        | EQuant(_, _, lo, hi, b) -> inner lo; inner hi; inner b
+        | EInt _ | EBool _ | EResult -> ()
+    let rec walk (ss: TStmt list) =
+        for s in ss do
+            match s.Kind with
+            | SLet(_, n, _, _) when isLemmaBinding n -> () // erased
+            | SLet(isMut, n, ty, v) ->
+                (match ty with
+                 | TySeq _ when isMut && fresh v -> candidates.Add n |> ignore
+                 | _ -> shared.Add n |> ignore) // another variable of that name: leave both alone
+                uses false v
+            | SAssign(n, v) ->
+                if not (fresh v) then shared.Add n |> ignore
+                uses false v
+            | SIf(c, a, b) -> uses false c; walk a; walk b
+            | SWhile(c, invs, _, b) ->
+                uses false c
+                if checkedAtRunTime then List.iter (uses false) invs
+                walk b
+            | SAssert e -> if checkedAtRunTime then uses false e
+            | SReturn e -> uses true e
+    walk body
+    candidates |> Seq.filter (fun n -> not (shared.Contains n)) |> Set.ofSeq
+
 type private Gen(checks: Set<string>) =
     let mutable counter = 0
     /// Is the function being generated checked at run time (--runtime-checks)?
     let mutable checking = false
+    /// Locals of the function being generated that are extended in place (see appendable).
+    let mutable inPlace: Set<string> = Set.empty
 
     member _.Fresh(prefix: string) =
         counter <- counter + 1
@@ -92,7 +157,7 @@ type private Gen(checks: Set<string>) =
             go s + "[" + (lo |> Option.map go |> Option.defaultValue "") + ":" + (hi |> Option.map go |> Option.defaultValue "") + "]"
         | EProj(t, k) -> go t + "[" + string k + "]"
         | ELen s -> "_quod_len(" + go s + ")"
-        | ECall(f, args) -> pyName f + "(" + (args |> List.map go |> String.concat ", ") + ")"
+        | ECall(f, args) -> implName f + "(" + (args |> List.map go |> String.concat ", ") + ")"
         | ENeg x -> "(-" + go x + ")"
         | ENot x -> "(not " + go x + ")"
         | EArith(op, a, b) ->
@@ -119,16 +184,18 @@ type private Gen(checks: Set<string>) =
             f + "(" + go body + " for " + pyName v + " in _quod_range(" + go lo + ", " + go hi + "))"
         | EToNat x -> go x
 
-    /// Copy a sequence argument into fresh lists (recursively), so that a caller passing a
-    /// tuple, or mutating its list afterwards, cannot affect the function.
-    member g.Copy(t: Ty, term: string) : string =
+    /// An argument from Python as the generated code expects it: sequences as lists, tuples as
+    /// tuples. A list of numbers or booleans is taken as it is (O(1)); a sequence of tuples or of
+    /// sequences is rebuilt, since its elements may come as lists or tuples (O(n), at the public
+    /// boundary only: calls between Quod functions pass values already in shape).
+    member g.Normalize(t: Ty, term: string) : string =
         match t with
         | TySeq e ->
-            match g.Copy(e, "_quod_x") with
-            | "_quod_x" -> "_quod_list(" + term + ")"
+            match g.Normalize(e, "_quod_x") with
+            | "_quod_x" -> "_quod_seq(" + term + ")"
             | inner -> "[" + inner + " for _quod_x in " + term + "]"
         | TyTuple ts ->
-            "(" + (ts |> List.mapi (fun k ct -> g.Copy(ct, term + "[" + string k + "]")) |> String.concat ", ") + ")"
+            "(" + (ts |> List.mapi (fun k ct -> g.Normalize(ct, term + "[" + string k + "]")) |> String.concat ", ") + ")"
         | _ -> term
 
     member g.Stmts(sb: StringBuilder, indent: string, items: TStmt list, f: TFn) =
@@ -147,6 +214,10 @@ type private Gen(checks: Set<string>) =
         let line (text: string) = sb.Append(indent).Append(text).Append('\n') |> ignore
         let checked' = checks.Contains f.Name
         match s.Kind with
+        | SAssign(n, { Kind = EConcat({ Kind = EVar n2 }, tail) }) when n2 = n && inPlace.Contains n ->
+            match tail.Kind with
+            | ESeq [ x ] -> line (pyName n + ".append(" + g.Expr x + ")")
+            | _ -> line (pyName n + ".extend(" + g.Expr tail + ")")
         | SLet(_, n, _, v) | SAssign(n, v) -> line (pyName n + " = " + g.Expr v)
         | SIf(c, a, b) ->
             line ("if " + g.Expr c + ":")
@@ -169,6 +240,8 @@ type private Gen(checks: Set<string>) =
             else
                 line ("return " + g.Expr e)
 
+    /// Two definitions: the public `def name`, which normalizes its arguments once and calls the
+    /// implementation `_quod_f_name`, the one Quod code calls (recursion included).
     member g.Function(sb: StringBuilder, f: TFn) =
         checking <- checks.Contains f.Name
         let ps = f.Params |> List.map (fun p -> pyName p.Name + ": " + pyType p.Ty) |> String.concat ", "
@@ -180,10 +253,13 @@ type private Gen(checks: Set<string>) =
         elif checks.Contains f.Name then doc.Add("(NOT fully proved: contracts are checked at run time)")
         if doc.Count > 0 then
             sb.Append("    \"\"\"").Append(String.Join("\n    ", doc)).Append("\"\"\"\n") |> ignore
-        for p in f.Params do
-            match p.Ty with
-            | TySeq _ | TyTuple _ -> sb.Append("    ").Append(pyName p.Name).Append(" = ").Append(g.Copy(p.Ty, pyName p.Name)).Append('\n') |> ignore
-            | _ -> ()
+        let args = f.Params |> List.map (fun p -> g.Normalize(p.Ty, pyName p.Name)) |> String.concat ", "
+        sb.Append("    return ").Append(implName f.Name).Append("(").Append(args).Append(")\n\n\n") |> ignore
+        sb.Append("def ").Append(implName f.Name).Append("(").Append(ps).Append(") -> ").Append(pyType f.Ret).Append(":\n") |> ignore
+        inPlace <-
+            match f.Body with
+            | TStmtBody items -> appendable items checking
+            | TExprBody _ -> Set.empty
         if checks.Contains f.Name then
             for r in f.Requires do g.Check(sb, "    ", r, "precondition")
         match f.Body with

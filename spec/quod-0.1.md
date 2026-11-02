@@ -182,6 +182,12 @@ as a `note` in the JSON (`"kind": "contract"`):
 - **none**: a statement function without `ensures`. A **warning**: nothing is proved about its
   result, and its callers, who know it by its contract only, know nothing about it. (An expression
   function without `ensures` is not classified: the verifier knows its definition.)
+- **lemma written as a function** (`lemma-as-function`): a statement function returning `bool`
+  that returns `true` on every path, or says `ensures result`, its other `ensures` being facts. A
+  **warning**: it verifies, but the generated code runs it at every call. Write it as a `lemma`,
+  which is erased.
+
+Lemmas are not classified: their `ensures` is what they prove.
 
 ## Diagnostics
 
@@ -209,7 +215,9 @@ quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
 
 ## Python backend
 
-- One Python module per Quod file, one `def` per function, type hints included.
+- One Python module per Quod file. Each function is a public `def name`, which puts its arguments
+  in shape once, and an implementation `_quod_f_name`, which Quod code calls (recursion included),
+  type hints included. Lemmas are not generated.
 - `seq<T>` is a Python `list` (accepted as any sequence on input), tuples are tuples, `int`/`nat`
   are `int`, `bool` is `bool`.
 - `quod build` generates code only for a program that verifies. With `--runtime-checks`, a function
@@ -222,7 +230,12 @@ quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
   negative is not checked.
 - Proved contracts produce no runtime code, only the function's docstring.
 - Quod semantics where Python differs: Euclidean `/` and `%` (`_quod_div`, `_quod_mod`), and
-  sequence arguments copied into fresh lists on entry. Builtins are aliased (`_quod_len`...), so a
+  sequences that never change. A list argument is not copied (the generated code never mutates
+  an argument): O(1) on entry, so a binary search stays O(log n). A tuple is converted to a list;
+  a sequence of tuples or of sequences is rebuilt at the public boundary (O(n)), since its elements
+  may come as lists. A mutable local extended with `x = x + [e]` becomes `x.append(e)` when no
+  other variable, argument, tuple or sequence can share its list: a loop that builds a sequence
+  stays O(n), not O(n²). Builtins are aliased (`_quod_len`...), so a
   Quod function named `len` or `list` shadows nothing the generated code needs. A name that is a
   Python keyword gets a trailing `_`.
 - Known limit: recursion is Python recursion (default depth 1000).

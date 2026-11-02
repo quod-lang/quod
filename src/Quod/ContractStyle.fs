@@ -12,6 +12,10 @@
 ///   only, so they know nothing, and nothing is proved about its result. An expression function
 ///   without ensures is not classified: the verifier knows its definition. (A Haiku agent's
 ///   rle_encode, VerifBench run quod2-haiku, had no ensures at all and passed the check.)
+/// - a lemma written as a function (a warning): a statement function that returns `true` on every
+///   path, its ensures being the facts it proves. It verifies, but it is generated and run: a
+///   recursive one made the external review's range_sum O(n), and fail at n = 5000. `lemma`
+///   says the same and is erased.
 module Quod.ContractStyle
 
 open Quod.Typed
@@ -22,6 +26,7 @@ type Style =
     | Model
     | Restated
     | NoContract
+    | LemmaAsFunction
 
 /// An expression as text, whatever its positions: two expressions with the same key are the same.
 let private key (e: TExpr) = Printer.exprText (toSyntax e)
@@ -68,9 +73,14 @@ let styleOf (fnNames: Set<string>) (f: TFn) : Style option =
             match f.Body with
             | TExprBody e -> leaves e
             | TStmtBody ss -> returned ss
+        // returns true on every path, or says so: `ensures result` (the idiom returns `ih`)
+        let alwaysTrue =
+            values |> List.forall (fun v -> match v.Kind with EBool true -> true | _ -> false)
+            || f.Ensures |> List.exists (fun e -> match e.Kind with EResult -> true | _ -> false)
         let bodyKeys = values |> List.map key |> Set.ofList
         let cs = f.Ensures |> List.collect claims
-        if cs |> List.exists (fun c -> compound c && bodyKeys.Contains(key c)) then Some Restated
+        if not f.IsExprFn && f.Ret = TyBool && alwaysTrue then Some LemmaAsFunction
+        elif cs |> List.exists (fun c -> compound c && bodyKeys.Contains(key c)) then Some Restated
         elif cs |> List.exists (fun c -> match c.Kind with ECall(g, _) -> fnNames.Contains g | _ -> false) then Some Model
         else Some Properties
 
@@ -94,5 +104,8 @@ let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
                 | NoContract ->
                     "none", Warning,
                     "no ensures: nothing is proved about the result, and callers know nothing about it (a function with statements is known by its contract only). State what the result is"
+                | LemmaAsFunction ->
+                    "lemma-as-function", Warning,
+                    "'" + f.Name + "' always returns true and states facts in its ensures: it is a lemma written as a function, so the generated code runs it at every call (a recursive one costs its depth, and can overflow the stack). Write it 'lemma " + f.Name + "(...)', without result type and 'ensures result', and call it as a statement, '" + f.Name + "(...);': it is then erased"
             { File = file; Span = f.Span; Kind = "contract"; Status = status; Severity = severity
               Fn = Some f.Name; Property = Some "contract style"; Counterexample = []; Message = message }))

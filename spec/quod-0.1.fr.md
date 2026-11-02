@@ -188,6 +188,12 @@ dans le JSON (`"kind": "contract"`) :
   prouvé sur son résultat, et ses appelants, qui ne la connaissent que par son contrat, n'en savent
   rien. (Une fonction-expression sans `ensures` n'est pas classée : le vérificateur connaît sa
   définition.)
+- **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
+  renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`
+  étant des faits. Un **avertissement** : elle se vérifie, mais le code généré l'exécute à chaque
+  appel. L'écrire comme un `lemma`, qui est effacé.
+
+Les lemmes ne sont pas classés : leur `ensures` est ce qu'ils prouvent.
 
 ## Diagnostics
 
@@ -215,7 +221,9 @@ quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
 
 ## Backend Python
 
-- Un module Python par fichier Quod, une `def` par fonction, avec annotations de type.
+- Un module Python par fichier Quod. Chaque fonction est une `def nom` publique, qui met ses
+  arguments en forme une fois, et une implémentation `_quod_f_nom`, qu'appelle le code Quod
+  (récursion comprise), avec annotations de type. Les lemmes ne sont pas générés.
 - `seq<T>` devient une `list` Python (n'importe quelle séquence est acceptée en entrée), les tuples
   restent des tuples, `int`/`nat` deviennent `int`, `bool` reste `bool`.
 - `quod build` ne génère du code que pour un programme vérifié. Avec `--runtime-checks`, une
@@ -229,7 +237,13 @@ quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
   Un `nat` qui deviendrait négatif n'est pas vérifié.
 - Les contrats prouvés ne produisent aucun code à l'exécution, seulement la docstring de la fonction.
 - La sémantique de Quod là où Python diffère : `/` et `%` euclidiens (`_quod_div`, `_quod_mod`), et
-  les séquences reçues en argument copiées dans de nouvelles listes à l'entrée. Les fonctions natives
+  des séquences qui ne changent jamais. Une liste reçue en argument n'est pas copiée (le code
+  généré ne modifie jamais un argument) : O(1) à l'entrée, et une recherche dichotomique reste en
+  O(log n). Un tuple est converti en liste ; une séquence de tuples ou de séquences est reconstruite
+  à la frontière publique (O(n)), car ses éléments peuvent arriver sous forme de listes. Une
+  variable locale mutable étendue par `x = x + [e]` devient `x.append(e)` quand aucune autre
+  variable, aucun argument, tuple ou séquence ne peut partager sa liste : une boucle qui construit
+  une séquence reste en O(n), pas en O(n²). Les fonctions natives
   sont aliasées (`_quod_len`...), donc une fonction Quod nommée `len` ou `list` ne masque rien dont le
   code généré a besoin. Un nom qui est un mot-clé Python reçoit un `_` final.
 - Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).
