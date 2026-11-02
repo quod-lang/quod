@@ -17,8 +17,21 @@ type Value =
 /// to a statement function, a quantifier over a huge range. The caller then confirms nothing.
 exception CannotEvaluate of string
 
+/// Raised in checking mode when running a function breaks one of its proof obligations: the
+/// label and position are those of the obligation in the verifier ("invariant #2 is preserved
+/// by the loop body"...). A run is a real execution, so this is a confirmed counterexample.
+exception Violation of string * Quod.Syntax.Span
+
+/// A `return` while running a statement body.
+exception Returned of Value * Quod.Syntax.Span
+
 /// Bounded quantifiers over more values than this are not evaluated.
 let private maxRange = BigInteger 100000
+
+/// Calls nested deeper than this are not evaluated. Values are small (sequences of 50 elements
+/// at most), and running random inputs meets non-terminating functions: a deeper limit
+/// overflowed the stack.
+let private maxDepth = 400
 
 /// Euclidean division, as in SMT-LIB and in the Quod semantics: the remainder is >= 0.
 let euclidDivMod (a: BigInteger) (b: BigInteger) =
@@ -28,6 +41,22 @@ let euclidDivMod (a: BigInteger) (b: BigInteger) =
         if b.Sign > 0 then q0 - BigInteger.One, r0 + b else q0 + BigInteger.One, r0 - b
     else q0, r0
 
+/// Run `work` on a thread with a large stack (256 MB): evaluating nested calls, up to maxDepth
+/// of them, takes several big frames each, more than the 1 MB of an ordinary thread.
+let withBigStack (work: unit -> 'a) : 'a =
+    let mutable result = Unchecked.defaultof<'a>
+    let mutable error: exn = null
+    let thread =
+        System.Threading.Thread(
+            (fun () ->
+                try result <- work ()
+                with e -> error <- e),
+            256 * 1024 * 1024)
+    thread.Start()
+    thread.Join()
+    if not (isNull error) then raise error
+    result
+
 let rec valueText (v: Value) =
     match v with
     | VInt n -> n.ToString()
@@ -35,8 +64,21 @@ let rec valueText (v: Value) =
     | VSeq xs -> "[" + (xs |> List.map valueText |> String.concat ", ") + "]"
     | VTuple xs -> "(" + (xs |> List.map valueText |> String.concat ", ") + ")"
 
-type Evaluator(fns: Map<string, TFn>) =
+/// Evaluates expressions and runs functions. In checking mode, what would be an evaluation
+/// error is a broken obligation (Violation): an index out of bounds, a division by zero, a
+/// negative nat, a call outside its precondition; and running a statement function checks its
+/// assertions, invariants, loop measures and postconditions.
+type Evaluator(fns: Map<string, TFn>, checking: bool) =
     let mutable depth = 0
+    let mutable steps = 0
+    /// The functions being run (checking mode), innermost first, with their measure on entry.
+    let mutable running: (TFn * BigInteger option) list = []
+
+    new(fns: Map<string, TFn>) = Evaluator(fns, false)
+
+    /// An evaluation error: a broken obligation in checking mode, else "cannot evaluate".
+    member private _.Fail(label: string, span: Quod.Syntax.Span, reason: string) : 'a =
+        if checking then raise (Violation(label, span)) else raise (CannotEvaluate reason)
 
     member ev.Expr(e: TExpr, env: Map<string, Value>) : Value =
         let go x = ev.Expr(x, env)
@@ -58,13 +100,14 @@ type Evaluator(fns: Map<string, TFn>) =
         | ETuple xs -> VTuple(xs |> List.map go)
         | EIndex(s, i) ->
             let xs, k = asSeq s, asInt i
-            if k.Sign < 0 || k >= BigInteger xs.Length then raise (CannotEvaluate "index out of bounds")
+            if k.Sign < 0 || k >= BigInteger xs.Length then ev.Fail("index in bounds", e.Span, "index out of bounds")
             xs.[int k]
         | ESlice(s, lo, hi) ->
             let xs = asSeq s
             let l = lo |> Option.map asInt |> Option.defaultValue BigInteger.Zero
             let h = hi |> Option.map asInt |> Option.defaultValue (BigInteger xs.Length)
-            if l.Sign < 0 || l > h || h > BigInteger xs.Length then raise (CannotEvaluate "slice out of bounds")
+            if l.Sign < 0 || l > h || h > BigInteger xs.Length then
+                ev.Fail("slice bounds (0 <= lo <= hi <= len)", e.Span, "slice out of bounds")
             VSeq(xs |> List.skip (int l) |> List.take (int (h - l)))
         | EProj(t, k) ->
             match go t with
@@ -73,15 +116,35 @@ type Evaluator(fns: Map<string, TFn>) =
         | ELen s -> VInt(BigInteger (asSeq s).Length)
         | ECall(name, args) ->
             let f = fns.[name]
+            let values = args |> List.map go
             match f.Body with
-            | TStmtBody _ -> raise (CannotEvaluate("'" + name + "' is a statement function"))
+            | TStmtBody _ when not checking -> raise (CannotEvaluate("'" + name + "' is a statement function"))
+            | _ when checking ->
+                // the caller's obligation: the callee's precondition
+                let callEnv = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
+                for (r, k) in List.zip f.Requires [ 1 .. f.Requires.Length ] do
+                    if ev.Holds(r, callEnv) = Some false then
+                        raise (Violation("precondition of '" + name + "'" + (if f.Requires.Length > 1 then " (requires #" + string k + ")" else ""), e.Span))
+                // a call inside the caller's recursive cycle must make the measure smaller: a
+                // call that does not (f(j - 0)) would run forever, where the solver only times out
+                match running, f.Decreases with
+                | (caller, Some m0) :: _, Some d when caller.IsRecursive && caller.Cycle = f.Cycle ->
+                    match ev.Expr(d, callEnv) with
+                    | VInt m1 when m0.Sign < 0 || m1 >= m0 ->
+                        raise (Violation("recursive call decreases the measure (and it stays >= 0)", e.Span))
+                    | _ -> ()
+                | _ -> ()
+                // the callee's own obligations are its own: a failure inside it is not the caller's
+                try ev.Run(f, values) with Violation _ -> raise (CannotEvaluate("'" + name + "' fails"))
             | TExprBody body ->
                 depth <- depth + 1
-                if depth > 10000 then raise (CannotEvaluate "recursion too deep")
-                let callEnv = List.zip (f.Params |> List.map (fun p -> p.Name)) (args |> List.map go) |> Map.ofList
-                let r = ev.Expr(body, callEnv)
-                depth <- depth - 1
-                r
+                try
+                    if depth > maxDepth then raise (CannotEvaluate "recursion too deep")
+                    let callEnv = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
+                    ev.Expr(body, callEnv)
+                finally
+                    depth <- depth - 1
+            | TStmtBody _ -> raise (CannotEvaluate("'" + name + "' is a statement function"))
         | ENeg x -> VInt(-(asInt x))
         | ENot x -> VBool(not (asBool x))
         | EArith(op, a, b) ->
@@ -91,7 +154,7 @@ type Evaluator(fns: Map<string, TFn>) =
             | OSub -> VInt(x - y)
             | OMul -> VInt(x * y)
             | ODiv | OMod ->
-                if y.IsZero then raise (CannotEvaluate "division by zero")
+                if y.IsZero then ev.Fail("divisor is not zero", b.Span, "division by zero")
                 let q, r = euclidDivMod x y
                 VInt(if op = ODiv then q else r)
         | EConcat(a, b) -> VSeq(asSeq a @ asSeq b)
@@ -114,7 +177,11 @@ type Evaluator(fns: Map<string, TFn>) =
             match q with
             | Syntax.Forall -> VBool(Seq.forall test values)
             | Syntax.Exists -> VBool(Seq.exists test values)
-        | EToNat x -> go x
+        | EToNat x ->
+            let v = go x
+            match v with
+            | VInt n when checking && n.Sign < 0 -> raise (Violation("value is a nat (>= 0)", e.Span))
+            | _ -> v
 
     /// Is the value of the expected type (a nat is >= 0, recursively)?
     member ev.Fits(t: Ty, v: Value) : bool =
@@ -133,3 +200,86 @@ type Evaluator(fns: Map<string, TFn>) =
             | VBool b -> Some b
             | _ -> None
         with CannotEvaluate _ -> None
+
+    /// A property checked while running: false is a broken obligation; not computable stops the run.
+    member private ev.Require(e: TExpr, env: Map<string, Value>, label: string, span: Quod.Syntax.Span) =
+        match ev.Holds(e, env) with
+        | Some true -> ()
+        | Some false -> raise (Violation(label, span))
+        | None -> raise (CannotEvaluate("cannot evaluate: " + label))
+
+    member private ev.Int(e: TExpr, env: Map<string, Value>) : BigInteger =
+        match ev.Expr(e, env) with
+        | VInt n -> n
+        | _ -> raise (CannotEvaluate "not an int")
+
+    /// Run a block; the variables it declares end with it, the assignments it makes stay.
+    member private ev.Block(items: TStmt list, env: Map<string, Value>) : Map<string, Value> =
+        let after = items |> List.fold (fun en s -> ev.Stmt(s, en)) env
+        env |> Map.map (fun name _ -> after.[name])
+
+    member private ev.Stmt(s: TStmt, env: Map<string, Value>) : Map<string, Value> =
+        steps <- steps + 1
+        if steps > 1000000 then raise (CannotEvaluate "too many steps")
+        match s.Kind with
+        | SLet(_, name, _, value) | SAssign(name, value) -> env.Add(name, ev.Expr(value, env))
+        | SAssert e ->
+            ev.Require(e, env, "assertion", s.Span)
+            env
+        | SReturn e -> raise (Returned(ev.Expr(e, env), s.Span))
+        | SIf(c, a, b) ->
+            match ev.Expr(c, env) with
+            | VBool true -> ev.Block(a, env)
+            | VBool false -> ev.Block(b, env)
+            | _ -> raise (CannotEvaluate "not a bool")
+        | SWhile(cond, invs, dec, body) ->
+            let numbered = List.zip invs [ 1 .. invs.Length ]
+            for (inv, k) in numbered do
+                ev.Require(inv, env, "invariant #" + string k + " holds on entry to the loop", inv.Span)
+            let mutable en = env
+            let test () =
+                match ev.Expr(cond, en) with
+                | VBool b -> b
+                | _ -> raise (CannotEvaluate "not a bool")
+            while test () do
+                let m0 = ev.Int(dec, en)
+                if m0.Sign < 0 then raise (Violation("loop measure (decreases) is >= 0", dec.Span))
+                en <- ev.Block(body, en)
+                for (inv, k) in numbered do
+                    ev.Require(inv, en, "invariant #" + string k + " is preserved by the loop body", inv.Span)
+                if not (ev.Int(dec, en) < m0) then raise (Violation("loop measure (decreases) gets smaller", dec.Span))
+            en
+
+    /// Run a function on arguments (in checking mode: every obligation of its body is checked on
+    /// the way, and its postconditions at the return). Its requires are the caller's business.
+    member ev.Run(f: TFn, args: Value list) : Value =
+        depth <- depth + 1
+        let mutable pushed = false
+        try
+            if depth > maxDepth then raise (CannotEvaluate "recursion too deep")
+            let env = List.zip (f.Params |> List.map (fun p -> p.Name)) args |> Map.ofList
+            if checking then
+                let measure =
+                    match f.Decreases with
+                    | Some d -> (match ev.Expr(d, env) with VInt m -> Some m | _ -> None)
+                    | None -> None
+                running <- (f, measure) :: running
+                pushed <- true
+            let result, span =
+                match f.Body with
+                | TExprBody body -> ev.Expr(body, env), body.Span
+                | TStmtBody items ->
+                    try
+                        items |> List.fold (fun en s -> ev.Stmt(s, en)) env |> ignore
+                        raise (CannotEvaluate "no return")
+                    with Returned(v, span) -> v, span
+            if checking then
+                for (ens, k) in List.zip f.Ensures [ 1 .. f.Ensures.Length ] do
+                    ev.Require(ens, env.Add("result", result), "postcondition (ensures #" + string k + ")", span)
+            result
+        finally
+            if pushed then running <- running.Tail
+            depth <- depth - 1
+
+    /// Steps taken so far (statements run); reset to bound one run.
+    member _.ResetSteps() = steps <- 0

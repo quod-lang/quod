@@ -1,0 +1,19 @@
+// From the external review of Quod 0.1 (2026-11-01), reproduction file.
+
+fn isqrt(n: nat) -> nat
+  ensures result * result <= n
+  ensures n < (result + 1) * (result + 1)
+{
+  let mut lo = 0;
+  let mut hi = n + 1;
+  while hi - lo > 1
+    invariant 0 <= lo < hi
+    invariant lo * lo <= n
+    invariant n < hi * hi
+    decreases hi - lo
+  {
+    let mid = lo + (hi - lo) / 2;
+    if mid * mid <= n { lo = mid; } else { hi = mid; }
+  }
+  return lo;
+}

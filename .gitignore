@@ -17,6 +17,9 @@ bench/completeness/
 # early smoke tests, not part of the reported results
 bench/runs/smoke*/
 
+# mutated programs written by bench/verifbench/mutants.py (the jsonl and log are kept)
+bench/runs/mutants-*/
+
 # unpublished drafts
 docs/drafts/
 

@@ -103,6 +103,13 @@ return e;              // or a final expression at the end of the body
 - Obligations: `requires` of each call, `ensures` at each return, loop `invariant` (on entry and
   preserved), `decreases` (loops and recursion), sequence bounds, non-zero divisors, `nat`
   assignments, `assert`.
+- **Counterexamples by execution.** Before asking the solver, the compiler runs each function on
+  small inputs that satisfy its `requires` (a parameter that the `requires` define from the
+  others, such as a table of prefix sums, is built from them), checking every obligation on the
+  way, including that each recursive call makes the `decreases` measure smaller (a call that
+  does not would run forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
+  milliseconds. When the solver then times out on an obligation that no run broke, the message
+  says so: the property may well hold, and the proof probably needs a hint.
 - `--runtime-checks`: instead of refusing to build when an obligation is not proved, check the
   contracts of the functions concerned at run time in the generated Python, and list them in the
   report (the ⚠️ status of [principle 2](kernel.md)).

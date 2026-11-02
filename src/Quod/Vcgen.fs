@@ -212,6 +212,14 @@ let rec private smallValues (t: Ty) : Eval.Value list =
         let elems = smallValues e |> List.truncate 12
         [ Eval.VSeq [] ] @ [ for x in elems -> Eval.VSeq [ x ] ] @ ([ for x in elems do for y in elems -> Eval.VSeq [ x; y ] ] |> List.truncate 20)
 
+/// The simplest value of a type: 0, false, [], a tuple of those (an edge case worth running).
+let rec private zeroValue (t: Ty) : Eval.Value =
+    match t with
+    | TyInt | TyNat | TyError -> Eval.VInt(bigint 0)
+    | TyBool -> Eval.VBool false
+    | TySeq _ -> Eval.VSeq []
+    | TyTuple ts -> Eval.VTuple(ts |> List.map zeroValue)
+
 /// A random small value of a type, for inputs (ints in -6..6, sequences of length 0..5).
 let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
     match t with
@@ -220,6 +228,49 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
     | TyBool -> Eval.VBool(rnd.Next 2 = 0)
     | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
+
+/// Does e mention the variable `name`? (By the text of e: a whole word.)
+let private mentions (name: string) (e: TExpr) =
+    Text.RegularExpressions.Regex.IsMatch(Printer.exprText (toSyntax e), @"\b" + Text.RegularExpressions.Regex.Escape name + @"\b")
+
+/// Parameters that the requires define from the others, so that random inputs can satisfy them:
+/// `p == E`, or `len(p) == E` with `forall k in 0..E2: p[k] == F`. Random values almost never
+/// satisfy `forall k in 0..len(xs) + 1: ps[k] == sum(xs, 0, k)`; built from xs, they always do.
+/// Returns a function that rewrites the defined parameters of an input.
+let private definedParams (f: TFn) (ev: Eval.Evaluator) : Map<string, Eval.Value> -> Map<string, Eval.Value> =
+    let rec conjuncts (e: TExpr) =
+        match e.Kind with
+        | ELogic(OAnd, a, b) -> conjuncts a @ conjuncts b
+        | _ -> [ e ]
+    let parts = f.Requires |> List.collect conjuncts
+    let isParam (n: string) = f.Params |> List.exists (fun p -> p.Name = n)
+    let direct =
+        parts |> List.choose (fun r ->
+            match r.Kind with
+            | EEq({ Kind = EVar p }, v) | EEq(v, { Kind = EVar p }) when isParam p && not (mentions p v) -> Some(p, v)
+            | _ -> None)
+    let elementwise =
+        parts |> List.choose (fun r ->
+            match r.Kind with
+            | EQuant(Syntax.Forall, k, lo, hi, body) ->
+                match body.Kind with
+                | EEq({ Kind = EIndex({ Kind = EVar p }, { Kind = EVar k2 }) }, v)
+                | EEq(v, { Kind = EIndex({ Kind = EVar p }, { Kind = EVar k2 }) }) when k2 = k && isParam p && not (mentions p v) && not (mentions p hi) ->
+                    Some(p, k, lo, hi, v)
+                | _ -> None
+            | _ -> None)
+    fun (env: Map<string, Eval.Value>) ->
+        let mutable env = env
+        for (p, v) in direct do
+            try env <- env.Add(p, ev.Expr(v, env)) with Eval.CannotEvaluate _ -> ()
+        for (p, k, lo, hi, v) in elementwise do
+            try
+                match ev.Expr(lo, env), ev.Expr(hi, env) with
+                | Eval.VInt l, Eval.VInt h when l.IsZero && h.Sign >= 0 && h <= bigint 50 ->
+                    env <- env.Add(p, Eval.VSeq [ for i in 0 .. int h - 1 -> ev.Expr(v, env.Add(k, Eval.VInt(bigint i))) ])
+                | _ -> ()
+            with Eval.CannotEvaluate _ -> ()
+        env
 
 let rec private assignedIn (body: TStmt list) : string list =
     body |> List.collect (fun s ->
@@ -238,6 +289,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     let mutable proved = 0
     let mutable current: FnInfo option = None
     let paramsOf = Dictionary<string, (string * Ty) list>()
+    /// Obligations of the current function broken by running it on small inputs, with the inputs
+    /// (see RunConcrete), and how many inputs were run.
+    let concrete = Dictionary<string * Span, (string * string) list>()
+    let mutable concreteRuns = 0
 
     member _.Diagnostics = List.ofSeq diags
     member _.Proved = proved
@@ -377,8 +432,46 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
 
     // --- checking -----------------------------------------------------------------------
 
+    /// Run the function on small inputs that satisfy its requires (edge values first, then
+    /// random ones), checking every obligation on the way. A broken one is a confirmed
+    /// counterexample, found in milliseconds where the solver may only time out: Check reports
+    /// it without asking the solver. Nothing found proves nothing; the solver decides.
+    member v.RunConcrete(f: TFn) =
+        concrete.Clear()
+        concreteRuns <- 0
+        Eval.withBigStack (fun () -> v.RunConcreteOnThisThread f)
+
+    member private v.RunConcreteOnThisThread(f: TFn) =
+        let ev = Eval.Evaluator(fns, true)
+        let plain = Eval.Evaluator(fns)
+        let rnd = Random 7
+        let names = f.Params |> List.map (fun p -> p.Name)
+        let candidates =
+            seq {
+                yield f.Params |> List.map (fun p -> zeroValue p.Ty)
+                for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> randomValue rnd p.Ty)
+            }
+        let define = definedParams f plain
+        use e = candidates.GetEnumerator()
+        while concreteRuns < 200 && e.MoveNext() do
+            let env = define (List.zip names e.Current |> Map.ofList)
+            let values = names |> List.map (fun n -> env.[n])
+            if f.Requires |> List.forall (fun r -> plain.Holds(r, env) = Some true) then
+                concreteRuns <- concreteRuns + 1
+                ev.ResetSteps()
+                try ev.Run(f, values) |> ignore with
+                | Eval.Violation(label, span) ->
+                    if not (concrete.ContainsKey((label, span))) then
+                        concrete.[(label, span)] <- List.zip names values |> List.map (fun (n, x) -> n, Eval.valueText x)
+                | Eval.CannotEvaluate _ -> ()
+
     /// Check one obligation on the current path, report it if it fails, then assume it.
     member v.Check(st: State, o: Obligation) : State =
+        match concrete.TryGetValue((o.Label, o.Span)) with
+        | true, cex ->
+            v.Report(o, "refuted", "cannot prove: " + o.Label + ": it fails when the function runs on the inputs below", cex)
+            { st with Assume = o.Goal :: st.Assume }
+        | _ ->
         z3.Push()
         for a in List.rev st.Assume do
             z3.Send("(assert " + a + ")")
@@ -387,15 +480,23 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         | Unsat -> proved <- proved + 1
         | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample())
         | Unknown "timeout" ->
-            v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit", [])
+            v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [])
         | Unknown _ ->
             // Quantifiers make Z3 incomplete: it stops with a candidate model it cannot confirm.
             // Shown as a *possible* counterexample: it often is the real one.
             match v.Counterexample() with
-            | [] -> v.Report(o, "inconclusive", "could not prove " + o.Label, [])
+            | [] -> v.Report(o, "inconclusive", "could not prove " + o.Label + v.NoCounterexample(), [])
             | cex -> v.Report(o, "inconclusive", "cannot prove: " + o.Label + " (possible counterexample, not confirmed by the solver)", cex)
         z3.Pop()
         { st with Assume = o.Goal :: st.Assume }
+
+    /// What the concrete runs say when the solver fails without a counterexample: probably not
+    /// a bug, rather a missing proof hint. Tells an agent which way to look.
+    member _.NoCounterexample() =
+        if concreteRuns = 0 then ""
+        else
+            " (no counterexample in " + string concreteRuns + " runs of the function on small inputs: "
+            + "the property may hold, and the proof needs a hint, an assert or a lemma)"
 
     /// The value of a term in the current model, as a Quod value. Sequences are axiomatized,
     /// so a sequence is read through its length and its elements (at most 50 of them).
@@ -556,6 +657,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         paramsOf.[f.Name] <- List.ofSeq ps
         let checkDec = not (f.IsExprFn && f.IsRecursive) // expression functions: checked by Termination
         current <- Some { Fn = f; InitialMeasure = None; CheckDecreases = checkDec }
+        v.RunConcrete f
         for r in f.Requires do
             st <- v.Assume(st, r) // its own obligations (well-formedness) are checked by Eval
         // Under an impossible precondition everything is "proved": reject it explicitly, or a
@@ -589,6 +691,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             v.Ensures(s2, f, term, e.Span)
         | TStmtBody items -> v.Stmts(st, items, f, types) |> ignore
         current <- None
+        concrete.Clear()
+        concreteRuns <- 0
         z3.Pop()
 
     /// Declarations shared by all functions: tuple datatypes, statement functions (known by
@@ -683,6 +787,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             assume <- v.Expr(r, env, [], silent) :: assume
         let measure = f.Decreases |> Option.map (fun d -> v.Expr(d, env, [], silent))
         current <- Some { Fn = f; InitialMeasure = measure; CheckDecreases = true }
+        v.RunConcrete f // a call that does not decrease (f(j - 0)) is found by running f
         let out = Collector()
         match f.Body with
         | TExprBody e -> v.Expr(e, env, [], out) |> ignore
@@ -691,6 +796,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         for o in out.Obs |> Seq.filter (fun o -> o.Label.StartsWith "recursive call decreases") do
             st <- v.Check(st, o)
         current <- None
+        concrete.Clear()
+        concreteRuns <- 0
         z3.Pop()
         diags.Count = before
 
@@ -827,7 +934,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
                     z3.SetTimeout z3.DefaultTimeout
                     match w with
                     | Some _ -> w
-                    | None -> concrete ()
+                    | None -> Eval.withBigStack concrete
         let determined =
             match answer, witness with
             | Unsat, _ -> true

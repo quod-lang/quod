@@ -163,3 +163,42 @@ let ``a run-length step keeps a quantified property of the prefix`` () =
     assertProved
         ("fn step(r: seq<(int, nat)>, x: int) -> seq<(int, nat)> requires forall i in 0..len(r): r[i].1 >= 1 ensures forall i in 0..len(result): result[i].1 >= 1 "
          + "{ if len(r) > 0 && r[len(r) - 1].0 == x { r[..len(r) - 1] + [(x, r[len(r) - 1].1 + 1)] } else { r + [(x, 1)] } }")
+[<Fact>]
+let ``a bug the solver times out on is refuted by running the function (the review's bug.quod)`` () =
+    // ps is built from xs (the requires define it); i == 2 breaks the postcondition
+    let rec up (d: DirectoryInfo) =
+        if File.Exists(Path.Combine(d.FullName, "bench", "review", "prefix_sums.quod")) then Path.Combine(d.FullName, "bench", "review", "prefix_sums.quod")
+        else up d.Parent
+    let src =
+        File.ReadAllText(up (DirectoryInfo AppContext.BaseDirectory))
+            .Replace("  return ps[j] - ps[i];", "  return ps[j] - ps[i] + 0 * j + (if i == 2 { 1 } else { 0 });")
+    let d = assertRefuted "postcondition (ensures #1)" src
+    Assert.Equal("refuted", d.Status)
+    Assert.Equal("2", (Map.ofList d.Counterexample).["i"])
+
+[<Fact>]
+let ``false invariants get a counterexample from execution`` () =
+    let d =
+        assertRefuted "invariant #3 is preserved"
+            ("fn max_index(xs: seq<int>) -> int requires len(xs) > 0 ensures 0 <= result < len(xs) ensures forall i in 0..len(xs): xs[i] <= xs[result] {\n"
+             + "  let mut best = 0; let mut i = 1;\n"
+             + "  while i < len(xs) invariant 1 <= i <= len(xs) invariant 0 <= best < len(xs) invariant forall j in 0..i: xs[j] <= xs[best] decreases len(xs) - i\n"
+             + "  { if xs[i] > xs[best] { best = i; } i = i + 2; }\n"
+             + "  return best; }")
+    Assert.NotEmpty(d.Counterexample)
+[<Fact>]
+let ``a recursive call that does not decrease gets a counterexample from execution`` () =
+    // sum(xs, i, j - 0) recurses forever: the solver may only time out, running it shows it
+    let d =
+        assertRefuted "recursive call decreases"
+            ("fn sum(xs: seq<int>, i: nat, j: nat) -> int requires i <= j <= len(xs) decreases j - i {\n"
+             + "  if i == j { 0 } else { sum(xs, i, j - 0) + xs[j - 1] } }")
+    Assert.NotEmpty(d.Counterexample)
+
+[<Fact>]
+let ``a lemma whose recursive call does not decrease gets a counterexample from execution`` () =
+    let d =
+        assertRefuted "recursive call decreases"
+            ("fn down(n: nat) -> bool ensures result decreases n {\n"
+             + "  if n == 0 { return true; } let ih = down(n); return ih; }")
+    Assert.NotEmpty(d.Counterexample)

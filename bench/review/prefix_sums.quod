@@ -1,0 +1,50 @@
+// From the external review of Quod 0.1 (2026-11-01), reproduction file.
+
+fn sum(xs: seq<int>, i: nat, j: nat) -> int
+  requires i <= j <= len(xs)
+  decreases j - i
+{
+  if i == j { 0 } else { sum(xs, i, j - 1) + xs[j - 1] }
+}
+
+fn sum_split(xs: seq<int>, i: nat, j: nat) -> bool
+  requires i <= j <= len(xs)
+  ensures result
+  ensures sum(xs, 0, j) == sum(xs, 0, i) + sum(xs, i, j)
+  decreases j - i
+{
+  if i == j { return true; }
+  let ih = sum_split(xs, i, j - 1);
+  return ih;
+}
+
+fn prefix_sums(xs: seq<int>) -> seq<int>
+  ensures len(result) == len(xs) + 1
+  ensures forall i in 0..len(xs) + 1: result[i] == sum(xs, 0, i)
+{
+  let mut ps: seq<int> = [0];
+  let mut acc = 0;
+  let mut k = 0;
+  while k < len(xs)
+    invariant 0 <= k <= len(xs)
+    invariant len(ps) == k + 1
+    invariant acc == sum(xs, 0, k)
+    invariant forall i in 0..k + 1: ps[i] == sum(xs, 0, i)
+    decreases len(xs) - k
+  {
+    acc = acc + xs[k];
+    ps = ps + [acc];
+    k = k + 1;
+  }
+  return ps;
+}
+
+fn range_sum(xs: seq<int>, ps: seq<int>, i: nat, j: nat) -> int
+  requires len(ps) == len(xs) + 1
+  requires forall k in 0..len(xs) + 1: ps[k] == sum(xs, 0, k)
+  requires i <= j <= len(xs)
+  ensures result == sum(xs, i, j)
+{
+  let split = sum_split(xs, i, j);
+  return ps[j] - ps[i];
+}

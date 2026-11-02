@@ -99,18 +99,25 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
         psi.RedirectStandardOutput <- true
         psi.RedirectStandardError <- true
         psi.UseShellExecute <- false
-    let proc = Process.Start psi
-    let input = proc.StandardInput
-    let output = proc.StandardOutput
+    let mutable proc = Process.Start psi
+    let mutable input = proc.StandardInput
+    let mutable output = proc.StandardOutput
+    do input.AutoFlush <- false
 
     /// Read one complete answer: an atom line, or a parenthesised block spanning lines.
-    let readAnswer () : string =
+    let readAnswerFrom (first: string option) : string =
         let sb = StringBuilder()
         let mutable depth = 0
         let mutable started = false
         let mutable fin = false
+        let mutable given = first
         while not fin do
-            let line = output.ReadLine()
+            let line =
+                match given with
+                | Some l ->
+                    given <- None
+                    l
+                | None -> output.ReadLine()
             if isNull line then raise (SmtFailure("z3 stopped unexpectedly: " + proc.StandardError.ReadToEnd()))
             let t = line.Trim()
             if t <> "" then
@@ -125,8 +132,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
         if answer.StartsWith "(error" then raise (SmtFailure("z3 rejected a command: " + answer))
         answer
 
-    do
-        input.AutoFlush <- false
+    let readAnswer () = readAnswerFrom None
 
     /// The commands of the current context, one list per push level, kept to replay it. A check
     /// that fails in incremental mode is tried again on a fresh solver: (reset), then the whole
@@ -140,17 +146,44 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
 
     let raw (command: string) = input.WriteLine command
 
+    let replayFrames () =
+        for k in 0 .. frames.Count - 1 do
+            if k > 0 then raw "(push 1)"
+            for command in frames.[k] do raw command
+
     let restore () =
         if dirty then
             raw "(reset)"
-            for k in 0 .. frames.Count - 1 do
-                if k > 0 then raw "(push 1)"
-                for command in frames.[k] do raw command
+            replayFrames ()
             dirty <- false
+
+    /// The time limit of the checks, as last set (milliseconds).
+    let mutable currentTimeout = timeoutMs
+
+    /// z3 does not always keep its own time limit: with quantifiers, a check sometimes runs on
+    /// for many minutes (a mutant of rle_encode ran over 15). Past twice the limit plus 5 s, the
+    /// process is replaced by a fresh one holding the same context, and the answer is a timeout.
+    let readFirstLine () : string option =
+        let t = output.ReadLineAsync()
+        if t.Wait(2 * currentTimeout + 5000) then Some t.Result
+        else
+            (try proc.Kill true with _ -> ())
+            (try t.Wait 2000 |> ignore with _ -> ())
+            proc.Dispose()
+            proc <- Process.Start psi
+            input <- proc.StandardInput
+            output <- proc.StandardOutput
+            input.AutoFlush <- false
+            replayFrames ()
+            dirty <- false
+            None
 
     let readResult () =
         input.Flush()
-        match readAnswer () with
+        match readFirstLine () with
+        | None -> Unknown "timeout"
+        | Some first ->
+        match readAnswerFrom (Some first) with
         | "sat" -> Sat
         | "unsat" -> Unsat
         | "unknown" ->
@@ -179,7 +212,9 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
         s.Send "(set-logic ALL)"
 
     /// Change the time limit of the following checks (milliseconds).
-    member s.SetTimeout(ms: int) = s.Send("(set-option :timeout " + string ms + ")")
+    member s.SetTimeout(ms: int) =
+        currentTimeout <- ms
+        s.Send("(set-option :timeout " + string ms + ")")
 
     /// The time limit given at start, to restore after a temporary change.
     member _.DefaultTimeout = timeoutMs

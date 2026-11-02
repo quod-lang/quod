@@ -106,6 +106,14 @@ return e;              // ou une expression finale à la fin du corps
 - Obligations : `requires` de chaque appel, `ensures` à chaque retour, `invariant` de boucle (à
   l'entrée et préservé), `decreases` (boucles et récursion), bornes des séquences, diviseurs non
   nuls, affectations à un `nat`, `assert`.
+- **Contre-exemples par exécution.** Avant de solliciter le solveur, le compilateur exécute chaque
+  fonction sur de petites entrées qui satisfont son `requires` (un paramètre que le `requires`
+  définit à partir des autres, comme une table de sommes préfixes, est construit à partir d'eux), en
+  vérifiant chaque obligation au passage, y compris que chaque appel récursif fait diminuer la
+  mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin). Une obligation violée est signalée avec ces entrées : un
+  contre-exemple confirmé, en quelques millisecondes. Quand le solveur dépasse ensuite le temps sur
+  une obligation qu'aucune exécution n'a violée, le message le dit : la propriété est peut-être
+  vraie, et la preuve demande sans doute une indication.
 - `--runtime-checks` : au lieu de refuser de compiler quand une obligation n'est pas prouvée,
   vérifier à l'exécution, dans le Python généré, les contrats des fonctions concernées, et les
   signaler dans le rapport (le statut ⚠️ du [principe 2](kernel.fr.md)).
