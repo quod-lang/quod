@@ -1,0 +1,100 @@
+diff --git a/src/Quod/Vcgen.fs b/src/Quod/Vcgen.fs
+index c97564f..0150295 100644
+--- a/src/Quod/Vcgen.fs
++++ b/src/Quod/Vcgen.fs
+@@ -36,6 +36,19 @@ let rec sortOf (t: Ty) =
+ 
+ let private fnSym (name: string) = "f_" + name
+ 
++/// Bounded unfolding of recursive expression functions (fuel, as Dafny does). With fuel k > 0,
++/// such a function takes a first argument of sort QFuel; the program's calls pass k levels,
++/// S(S(...Z)), and its definition is known only for f(S(fu), ...), its recursive calls
++/// getting fu: the solver unfolds a call k times at most. f(S(fu), x) = f(fu, x) keeps the
++/// levels equal. With 0, the definition is one axiom triggered by every call, unbounded.
++/// QUOD_FUEL sets k (for measurements).
++let private fuel =
++    match System.Environment.GetEnvironmentVariable "QUOD_FUEL" with
++    | null | "" -> 0
++    | text -> int text
++
++let private fuelTerm (k: int) = String.replicate k "(fuel.S " + "fuel.Z" + String.replicate k ")"
++
+ /// Sequences are axiomatized, as Dafny does: uninterpreted functions, one set per element sort
+ /// (q.len.i, q.nth.i, q.cat.TiiE...), described by triggered axioms. Z3's sequence theory is not
+ /// used. It does not carry a quantified fact about r over to r[..n] + [x] (it never creates the
+@@ -301,6 +314,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
+     /// (see RunConcrete), and how many inputs were run.
+     let concrete = Dictionary<string * Span, (string * string) list>()
+     let mutable concreteRuns = 0
++    /// Recursive expression functions, which take fuel (when fuel > 0).
++    let fuelled = prog.Fns |> List.filter (fun f -> fuel > 0 && f.IsExprFn && f.IsRecursive) |> List.map (fun f -> f.Name) |> Set.ofList
++    /// The fuel of the calls being translated: the start fuel, or the variable `fu` inside the
++    /// definition of a function of that cycle.
++    let mutable fuelIn: (int * string) option = None
+ 
+     member _.Diagnostics = List.ofSeq diags
+     member _.Proved = proved
+@@ -408,7 +426,14 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
+     /// inside the same recursive cycle must make the measure smaller.
+     member v.Call(e: TExpr, name: string, args: string list, guards: string list, out: Collector) : string =
+         let callee = fns.[name]
+-        let term = app (fnSym name) args
++        let term =
++            if fuelled.Contains name then
++                let f =
++                    match fuelIn with
++                    | Some(cycle, fu) when cycle = callee.Cycle -> fu
++                    | _ -> fuelTerm fuel
++                app (fnSym name) (f :: args)
++            else app (fnSym name) args
+         let calleeEnv = List.zip (callee.Params |> List.map (fun p -> p.Name)) args |> Map.ofList
+         let silent = Collector() // the callee's contract is well-formed: proved when it was checked
+         let reqs = callee.Requires |> List.map (fun r -> v.Expr(r, calleeEnv, [], silent))
+@@ -753,8 +778,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
+         // Every function is an SMT function symbol. A pure function returns the same result for
+         // the same arguments, so this is sound even for statement functions, which callers know
+         // through their contract only.
++        if not fuelled.IsEmpty then
++            z3.Send "(declare-datatypes ((QFuel 0)) (((fuel.Z) (fuel.S (fuel.pred QFuel)))))"
+         for f in prog.Fns do
+-            z3.Send("(declare-fun " + fnSym f.Name + " (" + String.Join(" ", f.Params |> List.map (fun p -> sortOf p.Ty)) + ") " + sortOf f.Ret + ")")
++            let sorts = (if fuelled.Contains f.Name then [ "QFuel" ] else []) @ (f.Params |> List.map (fun p -> sortOf p.Ty))
++            z3.Send("(declare-fun " + fnSym f.Name + " (" + String.Join(" ", sorts) + ") " + sortOf f.Ret + ")")
+     /// An expression function is also known by its definition, as an axiom guarded by its
+     /// parameter types and requires, and triggered only when a call f(...) appears (as Dafny
+     /// does). Z3's define-funs-rec unfolds recursive definitions eagerly and times out on simple
+@@ -763,6 +791,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
+     /// makes every later proof vacuous.
+     member v.Define(f: TFn) =
+         let env = f.Params |> List.map (fun p -> p.Name, "p_" + p.Name) |> Map.ofList
++        let withFuel = fuelled.Contains f.Name
++        // with fuel: the definition of f(S(fu), ...), whose recursive calls get fu
++        if withFuel then fuelIn <- Some(f.Cycle, "fu")
+         let body =
+             match f.Body with
+             | TExprBody e -> v.Expr(e, env, [], Collector())
+@@ -771,13 +802,20 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
+         let guards =
+             (f.Params |> List.collect (fun p -> typeFacts v.FreshQ p.Ty ("p_" + p.Name)))
+             @ (f.Requires |> List.map (fun r -> v.Expr(r, env, [], silent)))
+-        let call = app (fnSym f.Name) (f.Params |> List.map (fun p -> "p_" + p.Name))
++        fuelIn <- None
++        let ps = f.Params |> List.map (fun p -> "p_" + p.Name)
++        let call = app (fnSym f.Name) ((if withFuel then [ "(fuel.S fu)" ] else []) @ ps)
+         let definition = "(=> " + conj guards + " (= " + call + " " + body + "))"
+-        if f.Params.IsEmpty then
++        let binders =
++            (if withFuel then [ "(fu QFuel)" ] else [])
++            @ (f.Params |> List.map (fun p -> "(p_" + p.Name + " " + sortOf p.Ty + ")"))
++        if binders.IsEmpty then
+             z3.Send("(assert " + definition + ")")
+         else
+-            let binders = String.Join(" ", f.Params |> List.map (fun p -> "(p_" + p.Name + " " + sortOf p.Ty + ")"))
+-            z3.Send("(assert (forall (" + binders + ") (! " + definition + " :pattern (" + call + "))))")
++            z3.Send("(assert (forall (" + String.Join(" ", binders) + ") (! " + definition + " :pattern (" + call + "))))")
++        if withFuel then
++            let lower = app (fnSym f.Name) ("fu" :: ps)
++            z3.Send("(assert (forall (" + String.Join(" ", binders) + ") (! (= " + call + " " + lower + ") :pattern (" + call + "))))")
+ 
+     /// Check that a recursive expression function terminates, before its definition is known:
+     /// only the "recursive call decreases" obligations of its body, under its requires.

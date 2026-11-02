@@ -66,3 +66,34 @@ avec un avertissement pour un corps recopié.
   `(int, nat)` est attendu.
 
 Et dans la manière d'écrire du Quod : [indications et lemmes](../../spec/quod-0.1.fr.md#indications-et-lemmes).
+
+## Petits bugs : un banc de mutants
+
+[mutants.py](../verifbench/mutants.py) modifie un opérateur ou une constante dans le code d'un
+programme vérifié (jamais dans ses contrats), et note comment `quod check` le rejette : avec un
+contre-exemple, sans, ou pas du tout (un mutant équivalent, ou un bug que le contrat ne voit pas).
+Un échantillon tiré avec une graine fixe, 10 mutants par programme, sur les six solutions
+ci-dessus et les deux programmes d'une revue externe ([isqrt](../review/isqrt.quod),
+[prefix_sums](../review/prefix_sums.quod)) ; 64 mutants valides.
+
+| Compilateur | Réfutés, avec contre-exemple | Rejetés, sans contre-exemple | Bloqués | Survivants | Temps médian de rejet |
+|---|---|---|---|---|---|
+| avant ([journal](../runs/mutants-before.log)) | 7 | 48 | 2 | 7 | 27 s |
+| avec les contre-exemples par exécution ([journal](../runs/mutants-after.log)) | 57 | 0 | 0 | 7 | 1,3 s |
+
+Avant de solliciter Z3, le compilateur exécute désormais chaque fonction sur de petites entrées
+qui satisfont son `requires`, en vérifiant chaque obligation au passage : une obligation violée est
+un contre-exemple certain, trouvé en quelques millisecondes là où Z3 dépassait souvent le temps.
+Les deux vérifications bloquées venaient de Z3, qui ne respectait pas sa propre limite de temps
+(plus de 15 minutes) ; un chien de garde remplace désormais le processus. Les 7 survivants sont
+tous des mutants équivalents (`>=` pour `>` là où les deux branches coïncident, la valeur d'une
+fonction modèle sur une entrée vide, un lemme qui s'arrête un pas plus tard...).
+
+**Mesuré et non retenu : le dépliage borné (carburant).** Dafny déplie une fonction récursive un
+nombre borné de fois. Essayé avec 2 niveaux ([patch](../runs/fuel-experiment.patch),
+[journal](../runs/mutants-fuel2.log)), sur les mêmes mutants : autant de réfutés (51 des 55 encore
+dans l'échantillon), 13 % de temps en moins au total, et ce gain venait du contrôle de complétude
+qui abandonnait plus tôt sur rle_encode, avec le même verdict. Mais une preuve correcte a échoué :
+l'invariant `forall i in 0..k: sum(xs, i, k) <= here` de max_subarray, même avec 3 niveaux, car le
+`sum` déplié est un terme d'un niveau inférieur que l'invariant quantifié ne reconnaît pas. Cela a
+aussi fait rejeter un mutant équivalent. Le dépliage non borné reste.
