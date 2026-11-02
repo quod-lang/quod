@@ -35,6 +35,10 @@ DEFAULT_AGENT_CMD = (
 QUOD_EXE = os.environ.get("QUOD_EXE") or next(
     (str(p) for p in [ROOT.parent / "artifacts" / "aot" / ("quod.exe" if os.name == "nt" else "quod")]
      if p.exists()), "quod")
+# The agent runs `quod` by name: put that compiler first on the PATH it inherits. (Without it,
+# a Haiku run once wrote six unchecked files: the agents could not find quod.)
+if os.path.isabs(QUOD_EXE):
+    os.environ["PATH"] = os.path.dirname(QUOD_EXE) + os.pathsep + os.environ.get("PATH", "")
 
 # Same for both arms: tells the agent how to run its tool without tripping the permission rules.
 SHELL_HINT = "Run commands directly in the current directory (no `cd`, no chained commands)."
@@ -290,6 +294,8 @@ def main() -> None:
         jobs = [(TASKS[t], arm, m, i, work_root / f"{t}__{arm}__{m}__{i}")
                 for i in range(a.trials) for m in a.models.split(",")
                 for t in task_ids for arm in a.arms.split(",")]
+    if any(arm == "quod" for _, arm, _, _, _ in jobs) and not a.evaluate_only and shutil.which("quod") is None:
+        sys.exit("quod is not on the PATH the agents inherit: set QUOD_EXE to the compiler")
     out_dir.mkdir(parents=True, exist_ok=True)
     results = out_dir / "results.jsonl"
 

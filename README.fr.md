@@ -108,6 +108,16 @@ Avec `linux-x64` ou `osx-arm64` pour un autre système. Puis :
 artifacts/aot/quod check examples/binary_search.quod
 ```
 
+Sans accès à NuGet (hors ligne, ou derrière un réseau restreint), Native AOT est hors de portée :
+il lui faut le paquet ILCompiler. Compiler alors un programme .NET ordinaire, qui ne demande aucun
+paquet à télécharger (FSharp.Core est livré avec le SDK, dans `sdk/<version>/FSharp/library-packs`),
+et le lancer avec le runtime .NET 10 :
+
+```bash
+dotnet build src/Quod -c Release -p:PublishAot=false
+dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
+```
+
 ## Ce qu'on a appris jusqu'ici
 
 *La phase 0 en détail (en anglais) : [Green proofs, empty promises: when AI agents write their own specifications](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf) (dev.to).*
