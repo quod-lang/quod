@@ -218,6 +218,19 @@ def run_agent(cmd: str, workdir: Path, prompt: str, timeout: int) -> dict[str, A
     return metrics
 
 
+def usage_limit(workdir: Path) -> bool:
+    """Did the agent stop on a usage or rate limit of its account (claude -p reports it as an
+    error result), rather than fail at the task?"""
+    try:
+        j = json.loads((workdir / "agent_stdout.txt").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not j.get("is_error"):
+        return False
+    text = (str(j.get("result") or "") + " " + str(j.get("api_error_status") or "")).lower()
+    return any(w in text for w in ("usage limit", "rate limit", "limit reached", "429", "quota"))
+
+
 def hidden(task_id: str, arm: str, path: Path, timeout: int = 120) -> dict[str, Any]:
     cmd = [sys.executable, "-m", "verifbench.hidden", "--task", task_id, "--arm", arm,
            "--dir", str(path)]
@@ -318,6 +331,8 @@ def main() -> None:
     p.add_argument("--agent-cmd", default=DEFAULT_AGENT_CMD)
     p.add_argument("--agent-timeout", type=int, default=1800)
     p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--resume", action="store_true",
+                   help="skip the runs already in --out/results.jsonl (after a stop: usage limit, reboot)")
     p.add_argument("--evaluate-only", type=Path, default=None,
                    help="re-score existing workdirs named <task>__<arm>__<trial>")
     a = p.parse_args()
@@ -351,8 +366,16 @@ def main() -> None:
         write_mcp_config(mcp_config)
     out_dir.mkdir(parents=True, exist_ok=True)
     results = out_dir / "results.jsonl"
+    done = set()
+    if a.resume and results.exists():
+        for line in results.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                done.add((r["task"], r["arm"], r["model"], r["trial"]))
 
     for task, arm, model, trial, wd in jobs:
+        if (task.id, arm, model, trial) in done:
+            continue
         rec: dict[str, Any] = {"task": task.id, "suite": task.suite, "arm": arm, "model": model,
                                "trial": trial, "workdir": str(wd)}
         if not a.evaluate_only:
@@ -371,6 +394,10 @@ def main() -> None:
                 base = mcp_agent_cmd(mcp_config) if arm == "quod-mcp" else a.agent_cmd
                 cmd = base if model == "default" else f"{base} --model {model}"
             rec["agent"] = run_agent(cmd, wd, prompt, a.agent_timeout)
+            if usage_limit(wd):
+                # not a result: the agent never worked; stop, and resume later with --resume
+                sys.exit(f"stopped: the agent hit a usage limit at {task.id} / {arm} / {model} / #{trial}; "
+                         f"nothing was recorded for it. Resume later with --resume --out {out_dir}")
         rec["eval"] = evaluate(task, arm, wd)
         rec.update(score(rec["eval"]))
         if not a.evaluate_only:  # keep the agent's artifacts next to the results
