@@ -234,6 +234,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 ```
 quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS]
 quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
+quod mcp       # check, build, run and the reference, served to an AI agent (MCP, stdio)
 ```
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.

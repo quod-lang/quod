@@ -13,6 +13,7 @@
     <Compile Include="CodegenTests.fs" />
     <Compile Include="StyleTests.fs" />
     <Compile Include="LemmaTests.fs" />
+    <Compile Include="McpTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

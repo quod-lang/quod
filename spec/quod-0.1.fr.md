@@ -241,6 +241,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 ```
 quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES]
 quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
+quod mcp       # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 ```
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.

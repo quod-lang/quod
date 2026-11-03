@@ -101,6 +101,9 @@ quod check examples/binary_search.quod
 quod build examples/prefix_sums.quod --target python
 ```
 
+From an AI agent, without a shell: `quod mcp` is an MCP server, see [docs/mcp.md](docs/mcp.md)
+(one line for Claude Code, and a section to copy into AGENTS.md).
+
 To build from source, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download) and the
 native toolchain that Native AOT uses (on Windows, the C++ tools of Visual Studio), and
 [Z3](https://github.com/Z3Prover/z3/releases) to verify (on the `PATH`, next to `quod`, or in

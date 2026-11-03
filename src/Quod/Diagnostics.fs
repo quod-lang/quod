@@ -61,7 +61,8 @@ let toText (d: Diagnostic) =
     | _ -> ()
     sb.ToString()
 
-let private writeOne (w: Utf8JsonWriter) (d: Diagnostic) =
+/// One diagnostic as a JSON object (the --json format, and the MCP tools).
+let writeDiagnostic (w: Utf8JsonWriter) (d: Diagnostic) =
     w.WriteStartObject()
     w.WriteString("file", d.File)
     match d.Fn with
@@ -94,6 +95,6 @@ let toJson (ds: Diagnostic list) =
     (use w = new Utf8JsonWriter(ms, options)
      w.WriteStartArray()
      for d in ds do
-         writeOne w d
+         writeDiagnostic w d
      w.WriteEndArray())
     Encoding.UTF8.GetString(ms.ToArray())

@@ -1,0 +1,394 @@
+/// `quod mcp`: a Model Context Protocol server on stdin/stdout, so that an AI agent uses Quod as
+/// a tool, without a shell: check a program, build it, run one of its functions, read the
+/// language reference. JSON-RPC 2.0, one message per line; written by hand on System.Text.Json
+/// (no reflection, so it works under Native AOT, and no package to download).
+module Quod.Mcp
+
+open System
+open System.IO
+open System.Numerics
+open System.Text
+open System.Text.Json
+open Quod.Diagnostics
+open Quod.Typed
+
+let private protocolVersions = [ "2025-06-18"; "2025-03-26"; "2024-11-05" ]
+
+/// The language reference: the spec from "The language" to the roadmap, embedded in the binary.
+let reference =
+    lazy
+        (use stream = Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("quod-0.1.md")
+         use reader = new StreamReader(stream, Encoding.UTF8)
+         let spec = reader.ReadToEnd().Replace("\r\n", "\n")
+         let body = spec.Substring(spec.IndexOf "## The language", spec.IndexOf "## Not in 0.1" - spec.IndexOf "## The language")
+         "# Quod " + quodVersion + " reference\n\n"
+         + body.Replace("](kernel.md)", "](https://github.com/quod-lang/quod/blob/main/spec/kernel.md)").TrimEnd()
+         + "\n")
+
+/// One section of the reference: the first heading (## or ###) that contains `title`, up to the
+/// next heading of the same level or above.
+let private section (title: string) : string option =
+    let lines = reference.Value.Split('\n')
+    let level (l: string) = if l.StartsWith "### " then 3 elif l.StartsWith "## " then 2 else 0
+    match lines |> Array.tryFindIndex (fun l -> level l > 0 && l.Contains(title, StringComparison.OrdinalIgnoreCase)) with
+    | None -> None
+    | Some start ->
+        let lv = level lines.[start]
+        let stop =
+            lines |> Array.indexed |> Array.tryFind (fun (i, l) -> i > start && level l > 0 && level l <= lv)
+            |> Option.map fst |> Option.defaultValue lines.Length
+        Some(String.Join("\n", lines.[start .. stop - 1]).TrimEnd() + "\n")
+
+let private headings () =
+    reference.Value.Split('\n') |> Array.filter (fun l -> l.StartsWith "## " || l.StartsWith "### ") |> List.ofArray
+
+// --- JSON ------------------------------------------------------------------------------
+
+let private json (write: Utf8JsonWriter -> unit) : string =
+    use ms = new MemoryStream()
+    (use w = new Utf8JsonWriter(ms, JsonWriterOptions(Encoder = Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping))
+     write w)
+    Encoding.UTF8.GetString(ms.ToArray())
+
+let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
+    match v with
+    | Eval.VInt n -> if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then w.WriteNumberValue(int64 n) else w.WriteStringValue(n.ToString())
+    | Eval.VBool b -> w.WriteBooleanValue b
+    | Eval.VSeq xs | Eval.VTuple xs ->
+        w.WriteStartArray()
+        for x in xs do writeValue w x
+        w.WriteEndArray()
+
+/// A JSON argument as a value of type t: integers as numbers (or strings, for big ones), booleans,
+/// sequences and tuples as arrays.
+let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
+    match t, e.ValueKind with
+    | (TyInt | TyNat), JsonValueKind.Number ->
+        match BigInteger.TryParse(e.GetRawText()) with
+        | true, n -> Some(Eval.VInt n)
+        | _ -> None
+    | (TyInt | TyNat), JsonValueKind.String ->
+        match BigInteger.TryParse(e.GetString()) with
+        | true, n -> Some(Eval.VInt n)
+        | _ -> None
+    | TyBool, JsonValueKind.True -> Some(Eval.VBool true)
+    | TyBool, JsonValueKind.False -> Some(Eval.VBool false)
+    | TySeq el, JsonValueKind.Array ->
+        let items = [ for x in e.EnumerateArray() -> readValue el x ]
+        if List.forall Option.isSome items then Some(Eval.VSeq(List.map Option.get items)) else None
+    | TyTuple ts, JsonValueKind.Array when e.GetArrayLength() = ts.Length ->
+        let items = List.map2 readValue ts [ for x in e.EnumerateArray() -> x ]
+        if List.forall Option.isSome items then Some(Eval.VTuple(List.map Option.get items)) else None
+    | _ -> None
+
+// --- tools -----------------------------------------------------------------------------
+
+/// The result of a tool: a text for the agent, the same facts as JSON, and whether it is an
+/// error (a tool that could not do its job, not a program that does not verify).
+type private ToolResult = { Text: string; Structured: string; IsError: bool }
+
+exception private ToolError of string
+
+let private failTool message = raise (ToolError message)
+
+let private str (args: JsonElement) (name: string) =
+    match args.TryGetProperty name with
+    | true, v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
+    | _ -> None
+
+let private int' (args: JsonElement) (name: string) =
+    match args.TryGetProperty name with
+    | true, v when v.ValueKind = JsonValueKind.Number -> Some(v.GetInt32())
+    | _ -> None
+
+let private bool' (args: JsonElement) (name: string) =
+    match args.TryGetProperty name with
+    | true, v when v.ValueKind = JsonValueKind.True -> true
+    | _ -> false
+
+/// The program of a tool call: `source` (the text) or `path` (a file, relative to the server's
+/// working directory). The name is what diagnostics show.
+let private program (args: JsonElement) : string * string =
+    match str args "source", str args "path" with
+    | Some src, _ -> defaultArg (str args "file_name") "input.quod", src
+    | None, Some p when File.Exists p -> p, File.ReadAllText p
+    | None, Some p -> failTool ("file not found: " + p + " (relative to " + Directory.GetCurrentDirectory() + ")")
+    | None, None -> failTool "give the program as 'source' (its text) or 'path' (a file)"
+
+let private settings (base': Pipeline.Settings) (args: JsonElement) =
+    { base' with Timeout = defaultArg (int' args "timeout") base'.Timeout; Budget = defaultArg (int' args "budget") base'.Budget }
+
+/// The diagnostics as the command line prints them (notes are in the summary).
+let private reportText (ds: Diagnostic list) =
+    ds |> List.filter (fun d -> d.Severity <> Info) |> List.map toText |> String.concat "\n"
+
+let private writeDiagnostics (w: Utf8JsonWriter) (ds: Diagnostic list) =
+    w.WriteStartArray("diagnostics")
+    for d in ds do writeDiagnostic w d
+    w.WriteEndArray()
+
+let private check (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
+    let file, src = program args
+    match Pipeline.check file src (settings base' args) with
+    | Pipeline.Failure(message, _) -> failTool message
+    | Pipeline.Rejected ds ->
+        let line = "rejected: " + string ds.Length + " syntax or type error(s); nothing was proved"
+        { Text = reportText ds + "\n" + line
+          Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("verified", false); w.WriteString("summary", line); writeDiagnostics w ds; w.WriteEndObject())
+          IsError = false }
+    | Pipeline.Checked(_, r) ->
+        let ok = (Pipeline.errorsOf r).IsEmpty
+        let line = (if ok then "verified: " else "rejected: ") + Pipeline.summary r
+        let report = reportText r.Diagnostics
+        { Text = (if report = "" then line else report + "\n" + line)
+          Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("verified", ok); w.WriteString("summary", line); writeDiagnostics w r.Diagnostics; w.WriteEndObject())
+          IsError = false }
+
+let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
+    match str args "target" with
+    | Some t when t <> "python" -> failTool ("unknown target '" + t + "' (Quod 0.1 generates python only)")
+    | _ -> ()
+    let file, src = program args
+    let notBuilt (why: string) (ds: Diagnostic list) =
+        { Text = (match reportText ds with "" -> why | r -> r + "\n" + why)
+          Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("built", false); w.WriteString("summary", why); writeDiagnostics w ds; w.WriteEndObject())
+          IsError = false }
+    match Pipeline.check file src (settings base' args) with
+    | Pipeline.Failure(message, _) -> failTool message
+    | Pipeline.Rejected ds -> notBuilt ("not built: " + string ds.Length + " syntax or type error(s)") ds
+    | Pipeline.Checked(typed, r) ->
+        match Pipeline.generate file typed r (bool' args "runtime_checks") with
+        | Result.Error why -> notBuilt why r.Diagnostics
+        | Ok(code, unproved) ->
+            let line =
+                "built (" + Pipeline.summary r + ")"
+                + (if unproved.IsEmpty then "" else "; not fully proved, contracts checked at run time in: " + String.Join(", ", unproved))
+            { Text = line + "\n\n" + code
+              Structured =
+                json (fun w ->
+                    w.WriteStartObject()
+                    w.WriteBoolean("built", true)
+                    w.WriteString("summary", line)
+                    w.WriteString("language", "python")
+                    w.WriteString("code", code)
+                    w.WriteStartArray("runtime_checked")
+                    for f in unproved do w.WriteStringValue f
+                    w.WriteEndArray()
+                    writeDiagnostics w r.Diagnostics
+                    w.WriteEndObject())
+              IsError = false }
+
+/// Run one function on given arguments with the evaluator, checking every obligation on the way
+/// (as `quod check` does before asking the solver): its result, or the obligation it breaks.
+let private run (args: JsonElement) : ToolResult =
+    let file, src = program args
+    let name = match str args "function" with Some n -> n | None -> failTool "give the 'function' to run"
+    let typed =
+        try
+            match Typecheck.check file (Parser.parseProgram file src) with
+            | t, [] -> t
+            | _, errs -> failTool ("the program does not type-check:\n" + reportText errs)
+        with QuodError d -> failTool ("the program does not parse:\n" + toText d)
+    let f =
+        match typed.Fns |> List.tryFind (fun f -> f.Name = name) with
+        | Some f -> f
+        | None -> failTool ("no function '" + name + "' (there are: " + String.Join(", ", typed.Fns |> List.map (fun f -> f.Name)) + ")")
+    let given =
+        match args.TryGetProperty "args" with
+        | true, a when a.ValueKind = JsonValueKind.Array -> [ for x in a.EnumerateArray() -> x ]
+        | _ -> []
+    if given.Length <> f.Params.Length then
+        failTool ("'" + name + "' takes " + string f.Params.Length + " argument(s): " + String.Join(", ", f.Params |> List.map (fun p -> p.Name + ": " + tyText p.Ty)))
+    let values =
+        List.map2 (fun (p: TParam) x ->
+            match readValue p.Ty x with
+            | Some v -> v
+            | None -> failTool ("argument '" + p.Name + "' is not a " + tyText p.Ty + ": " + x.GetRawText())) f.Params given
+    let fns = typed.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+    let plain = Eval.Evaluator(fns)
+    let env = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
+    let notFit = List.zip f.Params values |> List.tryFind (fun (p, v) -> not (plain.Fits(p.Ty, v)))
+    let failedRequires =
+        List.indexed f.Requires |> List.tryFind (fun (_, r) -> plain.Holds(r, env) <> Some true)
+    let outcome (status: string) (text: string) (extra: Utf8JsonWriter -> unit) =
+        { Text = text
+          Structured = json (fun w -> w.WriteStartObject(); w.WriteString("status", status); extra w; w.WriteEndObject())
+          IsError = false }
+    match notFit, failedRequires with
+    | Some(p, v), _ -> outcome "invalid-input" ("argument '" + p.Name + "' = " + Eval.valueText v + " is not a " + tyText p.Ty) ignore
+    | _, Some(k, r) ->
+        outcome "requires-false" ("the requires #" + string (k + 1) + " does not hold for these arguments: " + Printer.exprText (toSyntax r))
+            (fun w -> w.WriteNumber("requires", k + 1))
+    | None, None ->
+        let ev = Eval.Evaluator(fns, true)
+        try
+            let v = Eval.withBigStack (fun () -> ev.Run(f, values))
+            outcome "ok" (name + " returns " + Eval.valueText v) (fun w -> w.WritePropertyName "result"; writeValue w v)
+        with
+        | Eval.Violation(label, span) ->
+            outcome "violation" (file + "(" + string span.Start.Line + "," + string span.Start.Col + "): " + label + " fails on these arguments")
+                (fun w -> w.WriteString("property", label); w.WriteNumber("line", span.Start.Line); w.WriteNumber("col", span.Start.Col))
+        | Eval.CannotEvaluate why -> outcome "not-evaluated" ("could not run '" + name + "': " + why) (fun w -> w.WriteString("reason", why))
+
+let private referenceTool (args: JsonElement) : ToolResult =
+    let text =
+        match str args "section" with
+        | None | Some "" -> reference.Value
+        | Some title ->
+            match section title with
+            | Some s -> s
+            | None -> failTool ("no section '" + title + "'; the sections are:\n" + String.concat "\n" (headings ()))
+    { Text = text; Structured = json (fun w -> w.WriteStartObject(); w.WriteString("reference", text); w.WriteEndObject()); IsError = false }
+
+// --- the server ------------------------------------------------------------------------
+
+let private programProperties =
+    "\"source\": {\"type\": \"string\", \"description\": \"The Quod program, as text\"},"
+    + "\"path\": {\"type\": \"string\", \"description\": \"Or a .quod file, relative to the server's working directory\"},"
+    + "\"file_name\": {\"type\": \"string\", \"description\": \"The name shown in diagnostics when 'source' is given\"}"
+
+let private budgetProperties =
+    "\"timeout\": {\"type\": \"integer\", \"description\": \"Seconds per proof obligation (default 10)\"},"
+    + "\"budget\": {\"type\": \"integer\", \"description\": \"Seconds for the whole check (default 300, 0 for none)\"}"
+
+/// name, description, input schema
+let private tools =
+    [ "quod_check",
+      "Check a Quod program: types, proofs of every contract with the z3 solver, and completeness (each contract must determine its result). "
+      + "Before the solver, each function runs on small inputs: a broken obligation comes with a confirmed counterexample. "
+      + "Returns the diagnostics and a summary line that starts with 'verified' or 'rejected'. Fix the program until it is verified.",
+      "{\"type\": \"object\", \"properties\": {" + programProperties + "," + budgetProperties + "}}"
+      "quod_build",
+      "Check a Quod program, then generate its Python module (returned as text, no file is written). Only a verified program is built, "
+      + "unless runtime_checks is true: the contracts that are not proved are then checked at run time (an underspecified contract still blocks the build).",
+      "{\"type\": \"object\", \"properties\": {" + programProperties + "," + budgetProperties
+      + ",\"target\": {\"type\": \"string\", \"enum\": [\"python\"]}, \"runtime_checks\": {\"type\": \"boolean\"}}}"
+      "quod_run",
+      "Run one function of a Quod program on given arguments, checking every assertion, invariant, bound and contract on the way, without the solver. "
+      + "Integers are JSON numbers (or strings for big ones), sequences and tuples are arrays. Returns the result, or the obligation that fails.",
+      "{\"type\": \"object\", \"properties\": {" + programProperties
+      + ",\"function\": {\"type\": \"string\"}, \"args\": {\"type\": \"array\", \"description\": \"One JSON value per parameter, in order\"}}, \"required\": [\"function\"]}"
+      "quod_reference",
+      "The Quod language reference: syntax, types, contracts, lemmas, verification, completeness, diagnostics, Python backend. "
+      + "Read it before writing Quod. Give a section title (e.g. 'Hints and lemmas', 'Contract style') to get only that section.",
+      "{\"type\": \"object\", \"properties\": {\"section\": {\"type\": \"string\"}}}" ]
+
+let private instructions =
+    "Quod is a language in which every function carries a contract that the compiler proves, and every contract must determine its result. "
+    + "To write a function in Quod: read quod_reference once, write the program, call quod_check until it says 'verified' "
+    + "(a counterexample shows the inputs that break the code or the contract), then quod_build to get the Python module."
+
+/// Handle one JSON-RPC message; the response to write, if any (notifications get none).
+let handle (settings: Pipeline.Settings) (line: string) : string option =
+    let response (id: JsonElement option) (body: Utf8JsonWriter -> unit) =
+        Some(
+            json (fun w ->
+                w.WriteStartObject()
+                w.WriteString("jsonrpc", "2.0")
+                match id with
+                | Some i -> w.WritePropertyName "id"; i.WriteTo w
+                | None -> w.WriteNull "id"
+                body w
+                w.WriteEndObject()))
+    let error id (code: int) (message: string) =
+        response id (fun w -> w.WriteStartObject "error"; w.WriteNumber("code", code); w.WriteString("message", message); w.WriteEndObject())
+    let result id (write: Utf8JsonWriter -> unit) = response id (fun w -> w.WriteStartObject "result"; write w; w.WriteEndObject())
+    let doc = try Some(JsonDocument.Parse line) with :? JsonException -> None
+    match doc with
+    | None -> error None -32700 "parse error"
+    | Some doc ->
+        use doc = doc
+        let root = doc.RootElement
+        let id = match root.TryGetProperty "id" with | true, i -> Some(i.Clone()) | _ -> None
+        let method' = match root.TryGetProperty "method" with | true, m when m.ValueKind = JsonValueKind.String -> m.GetString() | _ -> ""
+        let params' = match root.TryGetProperty "params" with | true, p -> Some p | _ -> None
+        match method', id with
+        | _, None -> None // a notification (initialized, cancelled...): nothing to answer
+        | "initialize", _ ->
+            let asked =
+                params' |> Option.bind (fun p -> match p.TryGetProperty "protocolVersion" with | true, v -> Some(v.GetString()) | _ -> None)
+            let version = match asked with Some v when List.contains v protocolVersions -> v | _ -> protocolVersions.Head
+            result id (fun w ->
+                w.WriteString("protocolVersion", version)
+                w.WriteStartObject "capabilities"
+                w.WriteStartObject "tools"; w.WriteEndObject()
+                w.WriteStartObject "resources"; w.WriteEndObject()
+                w.WriteEndObject()
+                w.WriteStartObject "serverInfo"; w.WriteString("name", "quod"); w.WriteString("version", quodVersion); w.WriteEndObject()
+                w.WriteString("instructions", instructions))
+        | "ping", _ -> result id ignore
+        | "tools/list", _ ->
+            result id (fun w ->
+                w.WriteStartArray "tools"
+                for (name, description, schema) in tools do
+                    w.WriteStartObject()
+                    w.WriteString("name", name)
+                    w.WriteString("description", description)
+                    w.WritePropertyName "inputSchema"
+                    w.WriteRawValue schema
+                    w.WriteEndObject()
+                w.WriteEndArray())
+        | "tools/call", _ ->
+            let name = params' |> Option.bind (fun p -> match p.TryGetProperty "name" with | true, n -> Some(n.GetString()) | _ -> None)
+            let args =
+                match params' |> Option.map (fun p -> p.TryGetProperty "arguments") with
+                | Some(true, a) when a.ValueKind = JsonValueKind.Object -> a
+                | _ -> JsonDocument.Parse("{}").RootElement
+            let outcome =
+                try
+                    match name with
+                    | Some "quod_check" -> Ok(check settings args)
+                    | Some "quod_build" -> Ok(build settings args)
+                    | Some "quod_run" -> Ok(run args)
+                    | Some "quod_reference" -> Ok(referenceTool args)
+                    | other -> Result.Error(-32602, "unknown tool: " + defaultArg other "(none)")
+                with ToolError message ->
+                    Ok { Text = message; Structured = json (fun w -> w.WriteStartObject(); w.WriteString("error", message); w.WriteEndObject()); IsError = true }
+            match outcome with
+            | Result.Error(code, message) -> error id code message
+            | Ok r ->
+                result id (fun w ->
+                    w.WriteStartArray "content"
+                    w.WriteStartObject(); w.WriteString("type", "text"); w.WriteString("text", r.Text); w.WriteEndObject()
+                    w.WriteEndArray()
+                    w.WritePropertyName "structuredContent"
+                    w.WriteRawValue r.Structured
+                    w.WriteBoolean("isError", r.IsError))
+        | "resources/list", _ ->
+            result id (fun w ->
+                w.WriteStartArray "resources"
+                w.WriteStartObject()
+                w.WriteString("uri", "quod://reference")
+                w.WriteString("name", "Quod language reference")
+                w.WriteString("mimeType", "text/markdown")
+                w.WriteEndObject()
+                w.WriteEndArray())
+        | "resources/read", _ ->
+            let uri = params' |> Option.bind (fun p -> match p.TryGetProperty "uri" with | true, u -> Some(u.GetString()) | _ -> None)
+            if uri = Some "quod://reference" then
+                result id (fun w ->
+                    w.WriteStartArray "contents"
+                    w.WriteStartObject()
+                    w.WriteString("uri", "quod://reference")
+                    w.WriteString("mimeType", "text/markdown")
+                    w.WriteString("text", reference.Value)
+                    w.WriteEndObject()
+                    w.WriteEndArray())
+            else error id -32002 ("resource not found: " + defaultArg uri "(none)")
+        | m, _ -> error id -32601 ("method not found: " + m)
+
+/// Serve on stdin/stdout until stdin closes. Logs go to stderr only: stdout is the protocol.
+let serve (settings: Pipeline.Settings) : int =
+    use input = new StreamReader(Console.OpenStandardInput(), UTF8Encoding(false))
+    use output = new StreamWriter(Console.OpenStandardOutput(), UTF8Encoding(false))
+    output.AutoFlush <- true
+    let mutable line = input.ReadLine()
+    while not (isNull line) do
+        if line.Trim() <> "" then
+            try
+                match handle settings line with
+                | Some r -> output.Write(r + "\n")
+                | None -> ()
+            with e -> Console.Error.WriteLine("quod mcp: " + e.Message)
+        line <- input.ReadLine()
+    0

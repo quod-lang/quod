@@ -17,6 +17,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- the language reference served by quod mcp -->
+    <EmbeddedResource Include="..\..\spec\quod-0.1.md" LogicalName="quod-0.1.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="Syntax.fs" />
     <Compile Include="Diagnostics.fs" />
     <Compile Include="Lexer.fs" />
@@ -29,6 +34,8 @@
     <Compile Include="ContractStyle.fs" />
     <Compile Include="Vcgen.fs" />
     <Compile Include="CodegenPython.fs" />
+    <Compile Include="Pipeline.fs" />
+    <Compile Include="Mcp.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
