@@ -39,6 +39,8 @@ QUOD_EXE = os.environ.get("QUOD_EXE") or next(
 # a Haiku run once wrote six unchecked files: the agents could not find quod.)
 if os.path.isabs(QUOD_EXE):
     os.environ["PATH"] = os.path.dirname(QUOD_EXE) + os.pathsep + os.environ.get("PATH", "")
+# verifbench.ollama_agent runs in each workdir: it must find this package
+os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 # Same for both arms: tells the agent how to run its tool without tripping the permission rules.
 SHELL_HINT = "Run commands directly in the current directory (no `cd`, no chained commands)."
@@ -335,7 +337,7 @@ def main() -> None:
             task_ids = a.tasks.split(",")
         # Workdirs live outside the repo so the agent has no path to the hidden tests.
         work_root = Path(tempfile.mkdtemp(prefix="verifbench-"))
-        jobs = [(TASKS[t], arm, m, i, work_root / f"{t}__{arm}__{m}__{i}")
+        jobs = [(TASKS[t], arm, m, i, work_root / f"{t}__{arm}__{m.replace(':', '-')}__{i}")
                 for i in range(a.trials) for m in a.models.split(",")
                 for t in task_ids for arm in a.arms.split(",")]
     if any(arm == "quod" for _, arm, _, _, _ in jobs) and not a.evaluate_only and shutil.which("quod") is None:
@@ -360,8 +362,14 @@ def main() -> None:
             prompt = build_prompt(task, arm)
             (wd / "PROMPT.md").write_text(prompt, encoding="utf-8")
             print(f"[agent] {task.id} / {arm} / {model} / #{trial} ...", flush=True)
-            base = mcp_agent_cmd(mcp_config) if arm == "quod-mcp" else a.agent_cmd
-            cmd = base if model == "default" else f"{base} --model {model}"
+            if model.startswith("ollama:"):  # a local model, through verifbench.ollama_agent (quod-mcp only)
+                if arm != "quod-mcp":
+                    sys.exit("an ollama model runs the quod-mcp arm only")
+                cmd = (f'"{sys.executable}" -m verifbench.ollama_agent --model {model[len("ollama:"):]} '
+                       f'--quod "{QUOD_EXE}"')
+            else:
+                base = mcp_agent_cmd(mcp_config) if arm == "quod-mcp" else a.agent_cmd
+                cmd = base if model == "default" else f"{base} --model {model}"
             rec["agent"] = run_agent(cmd, wd, prompt, a.agent_timeout)
         rec["eval"] = evaluate(task, arm, wd)
         rec.update(score(rec["eval"]))
