@@ -1,0 +1,20 @@
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures result >= 0
+  ensures result == max(sum(xs, i, j) for i in 0..len(xs) for j in i..len(xs))
+{
+  let mut max_sum = xs[0];
+  let mut current_sum = xs[0];
+  let mut i = 1;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant max_sum == max(sum(xs, k, l) for k in 0..i for l in k..i)
+    invariant current_sum == sum(xs, j, i) for some j in 0..i
+    decreases len(xs) - i
+  {
+    current_sum = max(xs[i], current_sum + xs[i]);
+    max_sum = max(max_sum, current_sum);
+    i = i + 1;
+  }
+  return max_sum;
+}

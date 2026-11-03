@@ -1,0 +1,10 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+requires len(xs) >= 0
+ensures len(result) == len(xs)
+ensures forall i: nat. i < len(xs) -> result[(i + k) % len(xs)] == xs[i]
+{
+  let n = len(xs);
+  let k_mod = k % n;
+  let k_final = if k_mod < 0 { k_mod + n } else { k_mod };
+  return xs[n - k_final..] + xs[..n - k_final];
+}

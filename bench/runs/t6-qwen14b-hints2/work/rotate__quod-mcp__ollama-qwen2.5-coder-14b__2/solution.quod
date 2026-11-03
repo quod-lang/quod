@@ -1,0 +1,7 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+{
+  let n = len(xs);
+  let k = k % n;
+  let k2 = if k < 0 { k + n } else { k };
+  return xs[n - k2..] + xs[..n - k2];
+}

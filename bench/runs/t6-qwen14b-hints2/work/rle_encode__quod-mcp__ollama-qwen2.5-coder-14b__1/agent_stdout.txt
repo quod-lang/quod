@@ -1,0 +1,1 @@
+{"type": "result", "is_error": true, "num_turns": 5, "total_cost_usd": 0, "duration_ms": 929196, "model": "qwen2.5-coder:14b", "usage": {"input_tokens": 8908, "output_tokens": 346}, "permission_denials": [], "result": "TimeoutError: timed out"}
