@@ -108,6 +108,48 @@ directory: it is all there is to know about Quod (there are no other documents o
   It will be compiled to Python (`quod build`) and evaluated against hidden tests.
 """
 
+PROMPT_QD_MCP = """\
+Implement the function below in Quod, in the file `solution.quod` in the current directory.
+
+Quod is a new verified programming language. Its tools are available to you as MCP tools:
+`quod_reference` (the language reference: it is all there is to know about Quod), `quod_check`,
+`quod_run` and `quod_build`. There is no shell.
+
+## Specification
+{spec}
+
+## Required signature (add the contracts yourself)
+```rust
+{sig}
+```
+
+## Rules
+- Add `requires` clauses expressing ONLY the input guarantees stated in the specification,
+  and `ensures` clauses that fully capture the specified result: `quod_check` rejects a contract
+  that accepts two different results for the same input, unless that freedom is intended and
+  declared with `loose`. Add loop invariants, `decreases` clauses and helper functions as needed.
+- `solution.quod` must pass `quod_check` (call it with `path: "solution.quod"`).
+- When it passes and you are confident it is correct, stop.
+  It will be compiled to Python and evaluated against hidden tests.
+"""
+
+# The quod-mcp arm: the agent reaches Quod only through `quod mcp` (no shell, no QUOD.md).
+MCP_TOOLS = "Read,Write,Edit,Glob,Grep," + ",".join(
+    "mcp__quod__" + t for t in ("quod_check", "quod_run", "quod_build", "quod_reference"))
+
+
+def mcp_agent_cmd(config: Path) -> str:
+    return ('claude -p --output-format json --permission-mode acceptEdits '
+            f'--mcp-config "{config}" --strict-mcp-config --allowedTools "{MCP_TOOLS}"')
+
+
+def write_mcp_config(path: Path) -> None:
+    server: dict[str, Any] = {"command": QUOD_EXE, "args": ["mcp"]}
+    if os.environ.get("QUOD_Z3"):
+        server["env"] = {"QUOD_Z3": os.environ["QUOD_Z3"]}
+    path.write_text(json.dumps({"mcpServers": {"quod": server}}), encoding="utf-8")
+
+
 QUOD_SIGNATURES = {
     "binary_search": "fn binary_search(xs: seq<int>, target: int) -> int",
     "merge_intervals": "fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>",
@@ -135,6 +177,8 @@ def build_prompt(task: Task, arm: str) -> str:
         return PROMPT_PY.format(spec=task.spec, sig=task.py_signature, hint=SHELL_HINT)
     if arm == "quod":
         return PROMPT_QD.format(spec=task.spec, sig=QUOD_SIGNATURES[task.id], hint=SHELL_HINT)
+    if arm == "quod-mcp":
+        return PROMPT_QD_MCP.format(spec=task.spec, sig=QUOD_SIGNATURES[task.id])
     return PROMPT_DFY.format(spec=task.spec, sig=task.dfy_signature, hint=SHELL_HINT)
 
 
@@ -193,7 +237,7 @@ def evaluate(task: Task, arm: str, workdir: Path) -> dict[str, Any]:
             res["hidden"] = hidden(task.id, arm, workdir)
         return res
 
-    if arm == "quod":
+    if arm in ("quod", "quod-mcp"):
         return evaluate_quod(task, workdir)
 
     src = workdir / "solution.dfy"
@@ -296,6 +340,13 @@ def main() -> None:
                 for t in task_ids for arm in a.arms.split(",")]
     if any(arm == "quod" for _, arm, _, _, _ in jobs) and not a.evaluate_only and shutil.which("quod") is None:
         sys.exit("quod is not on the PATH the agents inherit: set QUOD_EXE to the compiler")
+    mcp_config = None
+    if any(arm == "quod-mcp" for _, arm, _, _, _ in jobs) and not a.evaluate_only:
+        if not os.path.isabs(QUOD_EXE):
+            sys.exit("the quod-mcp arm needs QUOD_EXE, the absolute path of the compiler")
+        mcp_config = jobs[0][4].parent / "mcp.json"  # next to the workdirs, outside them
+        mcp_config.parent.mkdir(parents=True, exist_ok=True)
+        write_mcp_config(mcp_config)
     out_dir.mkdir(parents=True, exist_ok=True)
     results = out_dir / "results.jsonl"
 
@@ -309,7 +360,8 @@ def main() -> None:
             prompt = build_prompt(task, arm)
             (wd / "PROMPT.md").write_text(prompt, encoding="utf-8")
             print(f"[agent] {task.id} / {arm} / {model} / #{trial} ...", flush=True)
-            cmd = a.agent_cmd if model == "default" else f"{a.agent_cmd} --model {model}"
+            base = mcp_agent_cmd(mcp_config) if arm == "quod-mcp" else a.agent_cmd
+            cmd = base if model == "default" else f"{base} --model {model}"
             rec["agent"] = run_agent(cmd, wd, prompt, a.agent_timeout)
         rec["eval"] = evaluate(task, arm, wd)
         rec.update(score(rec["eval"]))
