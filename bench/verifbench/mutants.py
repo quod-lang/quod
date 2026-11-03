@@ -3,7 +3,9 @@
 Each mutant changes one operator or constant in the code of a verified Quod program (never in
 its contracts). quod check must reject it, ideally with a counterexample:
 
-- refuted: a proof error with a counterexample (the agent knows what input breaks what);
+- refuted: a proof error with a counterexample (the agent knows what input breaks what), run or
+  from the solver, or a completeness witness;
+- unconfirmed: rejected with a counterexample that neither the solver nor a run confirms;
 - no hint: rejected, but without any counterexample (typically a solver timeout);
 - survived: verified anyway (an equivalent mutant, or a contract that does not see the bug);
 - invalid: the mutant does not parse or type-check (e.g. `>` mutated in `seq<int>`): not counted;
@@ -78,8 +80,10 @@ def check(path: Path, timeout: int) -> tuple[str, float, list]:
         verdict = "survived"
     elif any(d.get("kind") in ("syntax", "type") for d in errors):
         verdict = "invalid"
-    elif any(d.get("counterexample") or d.get("witness") for d in errors):
+    elif any(d.get("witness") or (d.get("counterexample") and d.get("evidence") != "unconfirmed") for d in errors):
         verdict = "refuted"
+    elif any(d.get("counterexample") for d in errors):
+        verdict = "unconfirmed"  # a counterexample the solver or a run could not confirm
     else:
         verdict = "no hint"
     return verdict, secs, errors
@@ -117,7 +121,8 @@ def main() -> None:
                 mpath.write_text(src, encoding="utf-8")
                 verdict, secs, errors = check(mpath, a.timeout)
                 row = {"file": str(f), "mutant": desc, "verdict": verdict, "secs": round(secs, 2),
-                       "errors": [{"property": e.get("property"), "message": e.get("message", "")[:160]} for e in errors]}
+                       "errors": [{"property": e.get("property"), "evidence": e.get("evidence"),
+                                  "message": e.get("message", "")[:160]} for e in errors]}
                 rows.append(row)
                 fh.write(json.dumps(row) + "\n")
                 fh.flush()
@@ -126,6 +131,7 @@ def main() -> None:
     rows = [r for r in rows if r["verdict"] != "invalid"]
     killed = [r for r in rows if r["verdict"] != "survived"]
     print(f"\n{len(rows)} mutants ({invalid} invalid ones left out): {sum(r['verdict'] == 'refuted' for r in rows)} refuted with a counterexample, "
+          f"{sum(r['verdict'] == 'unconfirmed' for r in rows)} with an unconfirmed counterexample, "
           f"{sum(r['verdict'] == 'no hint' for r in rows)} rejected without a hint, "
           f"{sum(r['verdict'] == 'survived' for r in rows)} survived, "
           f"{sum(r['verdict'] == 'hung' for r in rows)} hung")
