@@ -2,8 +2,9 @@
 
 *[English](quod-0.1.md) · Français*
 
-> Statut : périmètre convenu (2026-10-22), avant l'implémentation. Le [brouillon du noyau](kernel.fr.md)
-> décrit où va le langage ; ce document fixe ce que contient la première version, et rien de plus.
+> Statut : implémenté, et publié comme Quod 0.1 (2026-11-03). Le [brouillon du noyau](kernel.fr.md)
+> décrit où va le langage ; ce document est ce que contient la première version, et rien de plus.
+> `quod reference` affiche sa partie « langage » (en anglais).
 
 ## Objectif
 
@@ -228,12 +229,15 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
   "severity": "error | warning | note",
   "property": "invariant #2 is preserved by the loop body",
   "counterexample": { "n": "2" },
+  "witness": { "x": "0", "result_a": "0", "result_b": "-1" },
   "evidence": "run | solver | unconfirmed",
   "reason": "timeout | incomplete quantifiers | ...",
   "message": "..."
 }
 ```
 
+- `counterexample` (une obligation de preuve) : les entrées qui la violent. `witness` (complétude) :
+  l'entrée et les deux résultats différents que le contrat accepte.
 - `evidence`, avec un contre-exemple : `run` (la fonction a été exécutée sur ces entrées et
   l'obligation a été violée : c'est certain), `solver` (un modèle de l'obligation niée),
   `unconfirmed` (un modèle candidat que le solveur n'a pas pu confirmer).
@@ -252,6 +256,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES]
 quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
 quod mcp       # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
+quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 ```
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.

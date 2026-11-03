@@ -202,7 +202,8 @@ let ``proved contracts produce no checks; unproved ones are checked with --runti
     let checkedCode = Quod.CodegenPython.generate "test.quod" typed (Set.singleton "dec")
     Assert.Contains("WARNING: not fully proved", checkedCode)
     let out = runPython checkedCode "try:\n    dec(3)\n    print('no error')\nexcept AssertionError as e:\n    print('caught:', e)"
-    Assert.Equal("caught: postcondition not proved: checked at run time\n", out)
+    // the message names the function, the property and the values (first-user test of 0.1.0)
+    Assert.Equal("caught: dec: postcondition `result > x` does not hold (not proved by quod: checked at run time); x = 3, result = 2\n", out)
     let _, provedCode = compile "fn inc(x: int) -> int ensures result == x + 1 { x + 1 }"
     Assert.DoesNotContain("AssertionError", provedCode)
 
@@ -217,7 +218,11 @@ let ``quantified contracts checked at run time use Python's all and any`` () =
         "for xs in ([3, -1], [-2, 5], [-1, -2]):\n"
         + "    try:\n        print(top(xs))\n"
         + "    except AssertionError as e:\n        print(e)"
-    Assert.Equal("3\npostcondition not proved: checked at run time\nprecondition not proved: checked at run time\n", runPython code driver)
+    let lines = (runPython code driver).Split('\n')
+    Assert.Equal("3", lines.[0])
+    Assert.StartsWith("top: postcondition `forall i in 0..len(xs): xs[i] <= result` does not hold", lines.[1])
+    Assert.EndsWith("; xs = [-2, 5], result = -2", lines.[1])
+    Assert.StartsWith("top: precondition `exists i in 0..len(xs): xs[i] > 0` does not hold", lines.[2])
 [<Fact>]
 let ``run-time checks survive python -O, and invariants are checked after the last iteration`` () =
     let src =
@@ -229,7 +234,9 @@ let ``run-time checks survive python -O, and invariants are checked after the la
     let typed, _ = Quod.Typecheck.check "test.quod" prog
     let code = Quod.CodegenPython.generate "test.quod" typed (Set.singleton "sum_to")
     let driver = "for n in (1, 2):\n    try:\n        print(sum_to(n))\n    except AssertionError as e:\n        print(e)"
-    Assert.Equal("1\ninvariant not proved: checked at run time\n", runPythonWith "-O" code driver)
+    let lines = (runPythonWith "-O" code driver).Split('\n')
+    Assert.Equal("1", lines.[0])
+    Assert.Equal("sum_to: invariant `s == i * (i + 1) / 2` does not hold (not proved by quod: checked at run time); n = 2", lines.[1])
 [<Fact>]
 let ``unproved bounds are checked at run time, where Python would wrap or clamp`` () =
     let src = "fn last(xs: seq<int>) -> int { xs[len(xs) - 1] }\nfn tail(xs: seq<int>, k: int) -> seq<int> { xs[k..] }"

@@ -205,10 +205,20 @@ type private Gen(checks: Set<string>) =
         for s in items do
             g.Stmt(sb, indent, s, f)
 
-    /// A run-time check. Not a Python `assert`, which `python -O` removes.
-    member g.Check(sb: StringBuilder, indent: string, e: TExpr, what: string) =
+    /// A run-time check. Not a Python `assert`, which `python -O` removes. The message names the
+    /// function, the property and the values (the arguments, and the result for a
+    /// postcondition): the first thing a Python developer sees of an unproved contract.
+    member g.Check(sb: StringBuilder, indent: string, e: TExpr, what: string, f: TFn) =
+        let literal (text: string) = "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""
+        let values =
+            (f.Params |> List.map (fun p -> p.Name, pyName p.Name))
+            @ (if what = "postcondition" then [ "result", "_quod_result" ] else [])
+            |> List.mapi (fun k (n, py) -> literal ((if k = 0 then "; " else ", ") + n + " = ") + " + repr(" + py + ")")
+        let message =
+            literal (f.Name + ": " + what + " `" + Printer.exprText (toSyntax e) + "` does not hold (not proved by quod: checked at run time)")
+            :: values
         sb.Append(indent).Append("if not ").Append(g.Expr e).Append(":\n")
-          .Append(indent).Append("    raise AssertionError(\"").Append(what).Append(" not proved: checked at run time\")\n") |> ignore
+          .Append(indent).Append("    raise AssertionError(").Append(String.Join(" + ", message)).Append(")\n") |> ignore
 
     member g.Stmt(sb: StringBuilder, indent: string, s: TStmt, f: TFn) =
         let line (text: string) = sb.Append(indent).Append(text).Append('\n') |> ignore
@@ -228,14 +238,14 @@ type private Gen(checks: Set<string>) =
         | SWhile(c, invs, _, body) ->
             line ("while " + g.Expr c + ":")
             // invariants hold before every iteration and after the last one
-            if checked' then for inv in invs do g.Check(sb, indent + "    ", inv, "invariant")
+            if checked' then for inv in invs do g.Check(sb, indent + "    ", inv, "invariant", f)
             g.Stmts(sb, indent + "    ", body, f)
-            if checked' then for inv in invs do g.Check(sb, indent, inv, "invariant")
-        | SAssert e -> if checked' then g.Check(sb, indent, e, "assertion")
+            if checked' then for inv in invs do g.Check(sb, indent, inv, "invariant", f)
+        | SAssert e -> if checked' then g.Check(sb, indent, e, "assertion", f)
         | SReturn e ->
             if checked' && not f.Ensures.IsEmpty then
                 line ("_quod_result = " + g.Expr e)
-                for ens in f.Ensures do g.Check(sb, indent, ens, "postcondition")
+                for ens in f.Ensures do g.Check(sb, indent, ens, "postcondition", f)
                 line "return _quod_result"
             else
                 line ("return " + g.Expr e)
@@ -261,7 +271,7 @@ type private Gen(checks: Set<string>) =
             | TStmtBody items -> appendable items checking
             | TExprBody _ -> Set.empty
         if checks.Contains f.Name then
-            for r in f.Requires do g.Check(sb, "    ", r, "precondition")
+            for r in f.Requires do g.Check(sb, "    ", r, "precondition", f)
         match f.Body with
         | TExprBody e ->
             g.Stmt(sb, "    ", { Kind = SReturn e; Span = e.Span }, f)

@@ -2,9 +2,9 @@
 
 *English · [Français](quod-0.1.fr.md)*
 
-> Status: agreed scope (2026-10-22), before implementation. The [kernel draft](kernel.md) describes
-> where the language is going; this document fixes what the first version contains, and nothing
-> more.
+> Status: implemented, and released as Quod 0.1 (2026-11-03). The [kernel draft](kernel.md)
+> describes where the language is going; this document is what the first version contains, and
+> nothing more. `quod reference` prints its language part.
 
 ## Goal
 
@@ -220,12 +220,15 @@ Human-readable by default, JSON with `--json`. One entry per finding:
   "severity": "error | warning | note",
   "property": "invariant #2 is preserved by the loop body",
   "counterexample": { "n": "2" },
+  "witness": { "x": "0", "result_a": "0", "result_b": "-1" },
   "evidence": "run | solver | unconfirmed",
   "reason": "timeout | incomplete quantifiers | ...",
   "message": "..."
 }
 ```
 
+- `counterexample` (a proof obligation): the inputs that break it. `witness` (completeness): the
+  input and the two different results the contract accepts.
 - `evidence`, with a counterexample: `run` (the function was run on these inputs and the
   obligation broke: certain), `solver` (a model of the negated obligation), `unconfirmed` (a
   candidate model the solver could not confirm).
@@ -244,6 +247,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS]
 quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
 quod mcp       # check, build, run and the reference, served to an AI agent (MCP, stdio)
+quod reference [SECTION]   # the language reference, or one section of it
 ```
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.

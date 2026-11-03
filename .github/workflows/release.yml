@@ -85,13 +85,18 @@ jobs:
           cp z3dist/* "$pkg/"
           cp LICENSE NOTICE "$pkg/"
           cp -r examples "$pkg/examples"
+          mkdir "$pkg/doc"
+          cp spec/quod-0.1.md spec/LICENSE docs/mcp.md "$pkg/doc/"
           cat > "$pkg/README.txt" <<EOF
           quod ${version}: https://github.com/quod-lang/quod
 
           quod check FILE.quod                   prove the contracts, check that they are complete
           quod build FILE.quod --target python   then generate a Python module
+          quod reference                         the language: all there is to know to write Quod
+          quod mcp                               the same, as tools for an AI agent (doc/mcp.md)
           quod --help
 
+          doc/quod-0.1.md is the language specification (CC BY 4.0: doc/LICENSE).
           z3 ${Z3_VERSION} is next to quod (MIT license: LICENSE-z3.txt). quod is Apache-2.0
           (LICENSE, NOTICE). Try: quod check examples/binary_search.quod
           EOF
@@ -115,6 +120,7 @@ jobs:
           cd "clean/$PKG"
           unset QUOD_Z3
           ./$exe --version
+          ./$exe reference "Hints and lemmas" | head -3
           ./$exe check examples/binary_search.quod | tee out.txt
           grep -q "^verified" out.txt
           ./$exe build examples/prefix_sums.quod --target python -o out

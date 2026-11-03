@@ -11,6 +11,8 @@ let private usage =
     + "  check   type-check FILE, prove its contracts, check that they are complete\n"
     + "  build   check FILE, then generate code (only for a verified program)\n"
     + "  mcp     serve check, build, run and the language reference to an AI agent (MCP, stdio)\n"
+    + "  reference [SECTION]   print the language reference (all there is to know to write Quod),\n"
+    + "          or one section of it, e.g. quod reference \"Hints and lemmas\"\n"
     + "options:\n"
     + "  --json              diagnostics as JSON\n"
     + "  --z3 PATH           the z3 executable (default: next to quod, $QUOD_Z3, then PATH)\n"
@@ -124,6 +126,14 @@ let main argv =
     | [ "check"; file ] -> checkCommand file o
     | [ "build"; file ] -> buildCommand file o
     | [ "mcp" ] -> Mcp.serve o.Settings
+    | "reference" :: title ->
+        match Mcp.referenceText (if title.IsEmpty then None else Some(String.Join(" ", title))) with
+        | Ok text ->
+            Console.Write text
+            0
+        | Result.Error message ->
+            Console.Error.WriteLine message
+            2
     | [ "--version" ] ->
         Console.WriteLine("quod " + Diagnostics.quodVersion)
         0

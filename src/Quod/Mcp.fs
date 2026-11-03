@@ -42,6 +42,16 @@ let private section (title: string) : string option =
 let private headings () =
     reference.Value.Split('\n') |> Array.filter (fun l -> l.StartsWith "## " || l.StartsWith "### ") |> List.ofArray
 
+/// The reference, or one section of it (`quod reference`, and the tool quod_reference). Error:
+/// no such section, with the list of sections.
+let referenceText (title: string option) : Result<string, string> =
+    match title with
+    | None | Some "" -> Ok reference.Value
+    | Some t ->
+        match section t with
+        | Some s -> Ok s
+        | None -> Result.Error("no section '" + t + "'; the sections are:\n" + String.concat "\n" (headings ()))
+
 // --- JSON ------------------------------------------------------------------------------
 
 let private json (write: Utf8JsonWriter -> unit) : string =
@@ -232,12 +242,9 @@ let private run (args: JsonElement) : ToolResult =
 
 let private referenceTool (args: JsonElement) : ToolResult =
     let text =
-        match str args "section" with
-        | None | Some "" -> reference.Value
-        | Some title ->
-            match section title with
-            | Some s -> s
-            | None -> failTool ("no section '" + title + "'; the sections are:\n" + String.concat "\n" (headings ()))
+        match referenceText (str args "section") with
+        | Ok text -> text
+        | Result.Error message -> failTool message
     { Text = text; Structured = json (fun w -> w.WriteStartObject(); w.WriteString("reference", text); w.WriteEndObject()); IsError = false }
 
 // --- the server ------------------------------------------------------------------------
