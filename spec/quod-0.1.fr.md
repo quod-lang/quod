@@ -213,7 +213,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 {
   "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3, "endLine": 7, "endCol": 30,
   "kind": "proof | completeness | type | syntax | contract | loose | review",
-  "status": "refuted | underspecified | inconclusive | error | ...",
+  "status": "refuted | underspecified | inconclusive | not-attempted | error | ...",
   "severity": "error | warning | note",
   "property": "invariant #2 is preserved by the loop body",
   "counterexample": { "n": "2" },
@@ -238,11 +238,20 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 ## Ligne de commande
 
 ```
-quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES]
+quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES]
 quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
 ```
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.
+
+`--timeout` limite chaque obligation de preuve (10 s par défaut) ; `--budget` limite la
+vérification entière (300 s par défaut, 0 pour aucune limite), car un agent l'attend en entier
+avant de continuer. Les fonctions sont vérifiées dans l'ordre du fichier. Les obligations qui
+restent quand le budget est épuisé ne sont pas envoyées au solveur : un diagnostic par fonction
+dit combien, avec le statut `not-attempted` (et `reason: budget`), distinct d'un dépassement de
+temps du solveur ; un contrôle de complétude laissé faute de temps est un avertissement de même
+statut. Une preuve de terminaison laissée faute de temps n'est pas acquise : la définition de la
+fonction reste inconnue du solveur.
 
 ## Backend Python
 

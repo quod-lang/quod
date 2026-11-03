@@ -14,6 +14,8 @@ let private usage =
     + "  --json              diagnostics as JSON\n"
     + "  --z3 PATH           the z3 executable (default: next to quod, $QUOD_Z3, then PATH)\n"
     + "  --timeout SECONDS   time limit per proof obligation (default 10)\n"
+    + "  --budget SECONDS    time limit of the whole check (default 300, 0 for none): the obligations\n"
+    + "                      left when it is used up are reported as not attempted\n"
     + "  --smt-log FILE      write every command sent to z3 to FILE\n"
     + "  --target python     code generation target (build; python is the only one in 0.1)\n"
     + "  -o DIR              output directory (build; default: next to FILE)\n"
@@ -24,6 +26,7 @@ type private Options =
     { Json: bool
       Z3: string option
       Timeout: int
+      Budget: int
       SmtLog: string option
       Target: string
       OutDir: string option
@@ -35,13 +38,14 @@ let private parseOptions (args: string list) : Options * string list =
         | "--json" :: tl -> go { o with Json = true } tl positional
         | "--z3" :: p :: tl -> go { o with Z3 = Some p } tl positional
         | "--timeout" :: s :: tl -> go { o with Timeout = int s } tl positional
+        | "--budget" :: s :: tl -> go { o with Budget = int s } tl positional
         | "--smt-log" :: p :: tl -> go { o with SmtLog = Some p } tl positional
         | "--target" :: t :: tl -> go { o with Target = t } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Z3 = None; Timeout = 10; SmtLog = None; Target = "python"; OutDir = None; RuntimeChecks = false } args []
+    go { Json = false; Z3 = None; Timeout = 10; Budget = 300; SmtLog = None; Target = "python"; OutDir = None; RuntimeChecks = false } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
@@ -81,7 +85,7 @@ let private verifyFile (file: string) (src: string) (o: Options) : Result<Typed.
                 use logWriter = (match o.SmtLog with Some p -> new StreamWriter(p) | None -> null)
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, o.Timeout * 1000, log)
-                let verified = Vcgen.verify file typed session
+                let verified = Vcgen.verify file typed session o.Budget
                 let result = { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed @ ContractStyle.review file typed }
                 report o result.Diagnostics
                 Ok(typed, result)
@@ -97,10 +101,11 @@ let private errorsOf (r: Vcgen.VerifyResult) = r.Diagnostics |> List.filter (fun
 
 let rec private summary (r: Vcgen.VerifyResult) =
     let errors = errorsOf r
-    let proofErrors = errors |> List.filter (fun d -> d.Kind = "proof") |> List.length
+    let proofErrors = errors |> List.filter (fun d -> d.Kind = "proof" && d.Status <> "not-attempted") |> List.length
     let underspecified = errors |> List.filter (fun d -> d.Kind = "completeness") |> List.length
     string r.Proved + " proof obligation(s) proved"
     + (if proofErrors > 0 then ", " + string proofErrors + " failed" else "")
+    + (if r.NotAttempted > 0 then ", " + string r.NotAttempted + " not attempted (time budget used up)" else "")
     + "; " + string r.Determined + " of " + string r.WithContract + " contract(s) determine their result"
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
     + styleSummary r

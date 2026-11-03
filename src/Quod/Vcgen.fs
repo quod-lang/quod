@@ -456,7 +456,7 @@ let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
 
 // --- the verifier ---------------------------------------------------------------------
 
-type private Verifier(file: string, prog: TProgram, z3: Session) =
+type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) =
     let fns = prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
     let diags = ResizeArray<Diagnostic>()
     let mutable counter = 0
@@ -467,11 +467,45 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     /// (see RunConcrete), and how many inputs were run.
     let concrete = Dictionary<string * Span, (string * string) list>()
     let mutable concreteRuns = 0
+    /// The time budget of the whole check (0: none). Past it, obligations are not sent to the
+    /// solver: they are counted as not attempted, per function (external counter-review: an
+    /// agent waits for `quod check` as a whole, N obligations at 2T + 5 s each add up).
+    let clock = Diagnostics.Stopwatch.StartNew()
+    let mutable skippedHere = 0
+    let mutable skipped = 0
     /// Inputs tried (valid or not), for the message when few satisfy the requires.
     let mutable concreteTries = 0
     let constants = programConstants prog
 
     member _.Diagnostics = List.ofSeq diags
+    member _.NotAttempted = skipped
+
+    /// Milliseconds left in the budget (None: no budget).
+    member _.Remaining : int option =
+        if budgetMs <= 0 then None else Some(budgetMs - int clock.ElapsedMilliseconds)
+
+    member v.OverBudget = match v.Remaining with Some r -> r <= 0 | None -> false
+
+    /// Check, with the time limit cut to what is left of the budget.
+    member v.BudgetedCheck(check: unit -> CheckResult) : CheckResult =
+        match v.Remaining with
+        | Some r when r < z3.DefaultTimeout ->
+            z3.SetTimeout(max 1 r)
+            let answer = check ()
+            z3.SetTimeout z3.DefaultTimeout
+            answer
+        | _ -> check ()
+
+    /// One diagnostic for the obligations of a function past the budget.
+    member v.ReportSkipped(f: TFn) =
+        if skippedHere > 0 then
+            diags.Add
+                { File = file; Span = f.Span; Kind = "proof"; Status = "not-attempted"; Severity = Error
+                  Fn = Some f.Name; Property = Some "time budget"; Counterexample = []; Reason = Some "budget"; Evidence = None
+                  Message =
+                    string skippedHere + " proof obligation(s) not attempted: the time budget of the check ("
+                    + string (budgetMs / 1000) + " s, --budget) was used up before them. Check this function in a file of its own, or raise the budget" }
+            skippedHere <- 0
     member _.Proved = proved
 
     member _.Fresh(prefix: string) =
@@ -632,7 +666,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             | TySeq(TyTuple ts) -> List.forall scalar ts
             | TySeq e -> scalar e
             | t -> scalar t
-        if f.Requires.IsEmpty || not (f.Params |> List.forall (fun p -> supported p.Ty)) then []
+        if f.Requires.IsEmpty || v.OverBudget || not (f.Params |> List.forall (fun p -> supported p.Ty)) then []
         else
             let found = ResizeArray<Eval.Value list>()
             let seen = HashSet<string>()
@@ -745,12 +779,16 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         | true, cex ->
             v.Report(o, "refuted", "cannot prove: " + o.Label + ": it fails when the function runs on the inputs below", cex, evidence = "run")
             { st with Assume = o.Goal :: st.Assume }
+        | _ when v.OverBudget ->
+            skippedHere <- skippedHere + 1
+            skipped <- skipped + 1
+            { st with Assume = o.Goal :: st.Assume }
         | _ ->
         z3.Push()
         for a in List.rev st.Assume do
             z3.Send("(assert " + a + ")")
         z3.Send("(assert (not " + o.Goal + "))")
-        match z3.CheckBoth() with
+        match v.BudgetedCheck z3.CheckBoth with
         | Unsat -> proved <- proved + 1
         | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample(), evidence = "solver")
         | Unknown "timeout" ->
@@ -946,7 +984,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             st <- v.Assume(st, r) // its own obligations (well-formedness) are checked by Eval
         // Under an impossible precondition everything is "proved": reject it explicitly, or a
         // `requires false` would make any function verify (and look complete).
-        if not f.Requires.IsEmpty then
+        if not f.Requires.IsEmpty && not v.OverBudget then
             z3.Push()
             for a in List.rev st.Assume do
                 z3.Send("(assert " + a + ")")
@@ -974,6 +1012,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
             let s2, term = v.Eval(st, e)
             v.Ensures(s2, f, term, e.Span)
         | TStmtBody items -> v.Stmts(st, items, f, types) |> ignore
+        v.ReportSkipped f
         current <- None
         concrete.Clear()
         concreteRuns <- 0
@@ -1079,11 +1118,15 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         let mutable st = { Env = env; Assume = List.rev (List.ofSeq out.Facts) @ List.rev (List.ofSeq silent.Facts) @ assume; Alive = true }
         for o in out.Obs |> Seq.filter (fun o -> o.Label.StartsWith "recursive call decreases") do
             st <- v.Check(st, o)
+        // termination not proved for lack of time is not proved: the definition stays unknown
+        // (a non-terminating definition would make every later proof vacuous)
+        let unchecked = skippedHere > 0
+        v.ReportSkipped f
         current <- None
         concrete.Clear()
         concreteRuns <- 0
         z3.Pop()
-        diags.Count = before
+        diags.Count = before && not unchecked
 
     /// Completeness (pillar 5): can two different results satisfy the contract for the same
     /// valid input (or, with `loose`, two results that the declared relation does not allow)?
@@ -1091,6 +1134,14 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
     /// concrete values: if the contract really accepts both, the function is underspecified
     /// (an error, with a certain witness); if not, the verdict is inconclusive (a warning).
     member v.Completeness(f: TFn) : bool =
+        if v.OverBudget then
+            diags.Add
+                { File = file; Span = f.Span; Kind = "completeness"; Status = "not-attempted"; Severity = Warning
+                  Fn = Some f.Name; Property = Some "the contract determines a unique result"; Counterexample = []
+                  Reason = Some "budget"; Evidence = None
+                  Message = "completeness not checked: the time budget of the check (--budget) was used up" }
+            false
+        else
         z3.Push()
         let silent = Collector()
         let mutable env = Map.empty
@@ -1143,7 +1194,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session) =
         for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
             z3.Send("(assert " + a + ")")
         z3.Send("(assert (not " + goal + "))")
-        let answer = z3.Check()
+        let answer = v.BudgetedCheck z3.Check
         let candidate () =
             let terms = (ps |> List.ofSeq) @ [ r1, f.Ret; r2, f.Ret ]
             let parsed = terms |> List.map (fun (term, ty) -> v.ModelValue(term, ty))
@@ -1250,15 +1301,18 @@ type VerifyResult =
       Determined: int
       /// Functions with at least one ensures clause (the ones the completeness check applies to)
       WithContract: int
-      Lemmas: int }
+      Lemmas: int
+      /// Proof obligations not sent to the solver: the time budget was used up
+      NotAttempted: int }
 
 /// Verify every function of a well-typed program with one Z3 session:
 /// 1. declarations; definitions of the non-recursive expression functions;
 /// 2. termination of the recursive expression functions, without their definitions;
 /// 3. definitions of those that terminate;
 /// 4. every function, with all the definitions that are safe to know.
-let verify (file: string) (prog: TProgram) (z3: Session) : VerifyResult =
-    let v = Verifier(file, prog, z3)
+/// Within a time budget (seconds, 0: none), functions in the order of the file.
+let verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : VerifyResult =
+    let v = Verifier(file, prog, z3, budgetSeconds * 1000)
     z3.Init()
     v.Prelude()
     let exprFns = prog.Fns |> List.filter (fun f -> f.IsExprFn)
@@ -1274,4 +1328,4 @@ let verify (file: string) (prog: TProgram) (z3: Session) : VerifyResult =
     let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
     let determined = withContract |> List.filter v.Completeness |> List.length
     { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length
-      Lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.length }
+      Lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.length; NotAttempted = v.NotAttempted }

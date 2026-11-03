@@ -25,7 +25,7 @@ let verifyAll (src: string) : Diagnostic list =
     let typed, errs = Quod.Typecheck.check "test.quod" prog
     Assert.True(errs.IsEmpty, "type errors: " + String.concat " | " (errs |> List.map (fun d -> d.Message)))
     use z3 = new Quod.Smt.Session(z3Path, 10000, None)
-    (Quod.Vcgen.verify "test.quod" typed z3).Diagnostics
+    (Quod.Vcgen.verify "test.quod" typed z3 0).Diagnostics
 
 /// The proof diagnostics only (these tests are about proofs; completeness has its own tests).
 let verify (src: string) : Diagnostic list = verifyAll src |> List.filter (fun d -> d.Kind = "proof")
@@ -247,3 +247,19 @@ let ``inputs that a quantified requires makes rare come from the solver, and are
              + "  requires xs[0] > 3 ensures result == xs[0] {\n"
              + "  if xs[3] > 40 { return xs[1]; } return xs[0]; }")
     Assert.Equal(Some "run", d.Evidence)
+
+[<Fact>]
+let ``past the time budget, obligations are reported as not attempted, not as timeouts`` () =
+    // fermat takes the whole budget of 1 s (beyond the solver); after it, nothing is attempted
+    let src =
+        "fn fermat(a: int, b: int, c: int) -> int requires a > 0 && b > 0 && c > 0 ensures result != 0 { a * a * a + b * b * b - c * c * c }\n"
+        + "fn later(x: int) -> int ensures result > x { x + 1 }\n"
+    let typed, _ = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
+    use z3 = new Quod.Smt.Session(z3Path, 10000, None)
+    let clock = Diagnostics.Stopwatch.StartNew()
+    let r = Quod.Vcgen.verify "test.quod" typed z3 1
+    Assert.True(clock.Elapsed.TotalSeconds < 6.0, "the budget cuts the solver's time limit")
+    Assert.True(r.NotAttempted > 0)
+    let d = r.Diagnostics |> List.find (fun d -> d.Fn = Some "later" && d.Kind = "proof")
+    Assert.Equal("not-attempted", d.Status)
+    Assert.Equal(Some "budget", d.Reason)

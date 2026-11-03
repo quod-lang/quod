@@ -54,7 +54,7 @@ let toText (d: Diagnostic) =
     if not d.Counterexample.IsEmpty then
         sb.Append(if d.Kind = "completeness" then "\n    witness: " else "\n    counterexample: ").Append(d.Counterexample |> List.map (fun (n, v) -> n + " = " + v) |> String.concat ", ") |> ignore
     match d.Reason with
-    | Some r when r <> "timeout" -> sb.Append("\n    solver: ").Append(r) |> ignore // the message says "time limit"
+    | Some r when r <> "timeout" && r <> "budget" -> sb.Append("\n    solver: ").Append(r) |> ignore // the message says so
     | _ -> ()
     sb.ToString()
 

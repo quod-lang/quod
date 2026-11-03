@@ -206,7 +206,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 {
   "file": "sums.quod", "fn": "sum_to", "line": 7, "col": 3, "endLine": 7, "endCol": 30,
   "kind": "proof | completeness | type | syntax | contract | loose | review",
-  "status": "refuted | underspecified | inconclusive | error | ...",
+  "status": "refuted | underspecified | inconclusive | not-attempted | error | ...",
   "severity": "error | warning | note",
   "property": "invariant #2 is preserved by the loop body",
   "counterexample": { "n": "2" },
@@ -231,11 +231,19 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 ## Command line
 
 ```
-quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS]
+quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS]
 quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
 ```
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.
+
+`--timeout` limits each proof obligation (10 s by default); `--budget` limits the whole check
+(300 s by default, 0 for none), since an agent waits for the whole of it before going on.
+Functions are checked in the order of the file. The obligations left when the budget is used
+up are not sent to the solver: one diagnostic per function reports how many, with the status
+`not-attempted` (and `reason: budget`), distinct from a solver timeout; a completeness check
+left for lack of time is a warning with the same status. A termination proof left for lack
+of time is not proved: the function's definition stays unknown to the solver.
 
 ## Python backend
 
