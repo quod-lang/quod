@@ -73,6 +73,21 @@ trois avec un contrat déterminé, pour 0,59 USD au lieu de 2,83 ; l'agent a éc
 lui-même dans quatre tâches. Un essai chacun, et deux changements à la fois (le compilateur et la
 référence) : une tendance, pas une mesure.
 
+Puis le même modèle à travers le serveur MCP : [quod4-haiku-mcp](../runs/quod4-haiku-mcp) (le bras
+`quod-mcp` : ni shell ni QUOD.md, seulement les fichiers et les quatre outils de `quod mcp`), avec le
+même compilateur que quod3-haiku.
+
+| | quod3-haiku (shell) | quod4-haiku-mcp (MCP) |
+|---|---|---|
+| Vérifiés, et passent les tests cachés | 6/6 | 6/6 |
+| Contrat déterminé | 3/6 | 6/6 (merge_intervals et rle_encode par un modèle) |
+| Tours par tâche | 7 à 42 | 4 à 16 |
+| Temps, coût | 47 min, 0,59 USD | 7 min, 0,08 USD |
+
+L'agent ne tâtonne plus avec un shell, des chemins et des fichiers temporaires : il appelle
+`quod_check` et lit une réponse structurée. Un essai par tâche là encore : une tendance, pas une
+mesure.
+
 ## Ce que leur écriture a changé dans le vérificateur
 
 - **Les séquences sont axiomatisées** (comme le fait Dafny), au lieu d'utiliser la théorie des

@@ -1,0 +1,44 @@
+// Insert the interval x into `out`, a list of disjoint intervals sorted by start
+// (no two touching). Intervals that overlap or touch x are merged with it.
+fn ins(out: seq<(int, int)>, x: (int, int)) -> seq<(int, int)>
+  decreases len(out)
+{
+  if len(out) == 0 {
+    [x]
+  } else if out[len(out) - 1].1 < x.0 {
+    out + [x]
+  } else if x.1 < out[len(out) - 1].0 {
+    ins(out[..len(out) - 1], x) + [out[len(out) - 1]]
+  } else {
+    ins(out[..len(out) - 1], (if out[len(out) - 1].0 < x.0 { out[len(out) - 1].0 } else { x.0 }, if out[len(out) - 1].1 > x.1 { out[len(out) - 1].1 } else { x.1 }))
+  }
+}
+
+// The merged union of a list of intervals, built by inserting them one by one.
+fn merge_model(iv: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(iv)
+{
+  if len(iv) == 0 {
+    []
+  } else {
+    ins(merge_model(iv[..len(iv) - 1]), iv[len(iv) - 1])
+  }
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures result == merge_model(iv)
+{
+  let mut out: seq<(int, int)> = [];
+  let mut j = 0;
+  while j < len(iv)
+    invariant 0 <= j && j <= len(iv)
+    invariant out == merge_model(iv[..j])
+    decreases len(iv) - j
+  {
+    assert iv[..j + 1][..j] == iv[..j];
+    out = ins(out, iv[j]);
+    j = j + 1;
+  }
+  out
+}

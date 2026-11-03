@@ -1,0 +1,47 @@
+// Length of the run of values equal to v that starts at index i of xs.
+fn run_len(xs: seq<int>, i: nat, v: int) -> nat
+  requires i <= len(xs)
+  decreases len(xs) - i
+{
+  if i < len(xs) {
+    if xs[i] == v { 1 + run_len(xs, i + 1, v) } else { 0 }
+  } else {
+    0
+  }
+}
+
+// Run-length encoding of xs from index i onwards (the specification).
+fn rle_model(xs: seq<int>, i: nat) -> seq<(int, int)>
+  decreases if len(xs) - i > 0 { len(xs) - i } else { 0 }
+{
+  if i < len(xs) {
+    [(xs[i], 1 + run_len(xs, i + 1, xs[i]))] + rle_model(xs, i + 1 + run_len(xs, i + 1, xs[i]))
+  } else {
+    []
+  }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures result == rle_model(xs, 0)
+{
+  let mut out: seq<(int, int)> = [];
+  let mut i: nat = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant out + rle_model(xs, i) == rle_model(xs, 0)
+    decreases len(xs) - i
+  {
+    let v = xs[i];
+    let mut j: nat = i + 1;
+    while j < len(xs) && xs[j] == v
+      invariant i + 1 <= j && j <= len(xs)
+      invariant run_len(xs, i + 1, v) == (j - (i + 1)) + run_len(xs, j, v)
+      decreases len(xs) - j
+    {
+      j = j + 1;
+    }
+    out = out + [(v, j - i)];
+    i = j;
+  }
+  return out;
+}

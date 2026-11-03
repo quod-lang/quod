@@ -71,6 +71,20 @@ a determined contract, for 0.59 USD instead of 2.83; the agent wrote `lemma` unp
 tasks. One trial each, and two things changed at once (the compiler and the reference): a
 direction, not a measure.
 
+Then the same model through the MCP server: [quod4-haiku-mcp](../runs/quod4-haiku-mcp) (the
+`quod-mcp` arm: no shell and no QUOD.md, only the files and the four tools of `quod mcp`), with the
+same compiler as quod3-haiku.
+
+| | quod3-haiku (shell) | quod4-haiku-mcp (MCP) |
+|---|---|---|
+| Verified and pass the hidden tests | 6/6 | 6/6 |
+| Contract determined | 3/6 | 6/6 (merge_intervals and rle_encode by a model) |
+| Turns per task | 7 to 42 | 4 to 16 |
+| Time, cost | 47 min, 0.59 USD | 7 min, 0.08 USD |
+
+The agent no longer gropes with a shell, paths and temporary files: it calls `quod_check` and
+reads a structured answer. One trial per task again: a direction, not a measure.
+
 ## What writing them changed in the verifier
 
 - **Sequences are axiomatized** (as Dafny does), instead of using Z3's sequence theory, which
