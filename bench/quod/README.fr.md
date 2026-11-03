@@ -88,6 +88,47 @@ L'agent ne tâtonne plus avec un shell, des chemins et des fichiers temporaires 
 `quod_check` et lit une réponse structurée. Un essai par tâche là encore : une tendance, pas une
 mesure.
 
+### Trois essais, Dafny, et un autre fournisseur
+
+[t6-haiku](../runs/t6-haiku) : Haiku, trois essais des six tâches dans chacun des trois bras, avec
+le compilateur 0.1.3. Le bras Dafny est celui de la phase 0 (shell, `dafny verify`) ; ses contrats
+ont ensuite été soumis à [dafny-complete](../../tools/dafny-complete/)
+([résultats](../runs/t6-haiku/dafny-complete.jsonl)).
+
+| | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| Acceptés par le vérificateur | 18/18 | 16/18 | 18/18 |
+| Passent tous les tests cachés | 18/18 | 17/18 | 18/18 |
+| Contrat déterminé | 17/18 | 12/18 | 9/18 (dafny-complete) |
+| Style des contrats | 10 propriétés, 8 modèles | 12 propriétés, 6 modèles | — |
+| Temps, coût (18 essais) | 54 min, 0,54 USD | 71 min, 1,15 USD | 17 min, 0,24 USD |
+
+- **Aucun bug échappé, dans aucun bras** : toute solution acceptée passe les tests cachés.
+- **L'avantage de MCP vu dans quod4-haiku-mcp ne tient pas** sur trois essais. À travers MCP,
+  l'agent écrit plus de contrats par propriétés, plus durs à prouver et à déterminer : deux
+  solutions gardent des obligations non conclues (merge_intervals, rotate), cinq contrats une
+  complétude non conclue.
+- **Dafny est plus rapide et moins cher**, et ses contrats en disent moins. Sur les 18,
+  dafny-complete en trouve 3 sous-spécifiés (tous binary_search : n'importe quel indice d'un
+  doublon est accepté, ce que la tâche permet ; Dafny n'a pas de `loose` pour le dire) et ne peut
+  pas en décider 6 (merge_intervals, rle_encode). En Quod, le contrôle de complétude fait partie de
+  l'acceptation : l'agent continue tant qu'elle n'est pas décidée.
+
+[t6-qwen14b](../runs/t6-qwen14b) : un autre fournisseur, Qwen 2.5 Coder 14B exécuté en local par
+Ollama, dans le bras `quod-mcp` (l'agent est [ollama_agent.py](../verifbench/ollama_agent.py), un
+client MCP avec les mêmes outils), trois essais des six tâches. **0/18** : chaque essai s'arrête à
+40 tours, 13 des 18 fichiers finaux sur une erreur de syntaxe. La plupart sont des habitudes de
+Dafny : clauses de contrat dans le corps, `;` après une clause, `for`, `let result`, `return` dans
+un ensures. L'analyseur nomme désormais chacune et dit quoi écrire à la place.
+
+[t6-qwen14b-hints](../runs/t6-qwen14b-hints), le même passage avec ces messages : **0/18 encore**.
+Les habitudes que les messages nomment disparaissent presque des fichiers finaux (5 clauses dans
+le corps deviennent 0, 3 `let result` deviennent 0), mais d'autres prennent leur place (une
+expression au milieu d'un bloc, `:` pour `in`, `|s|` pour `len(s)`), et 3 fichiers mettent encore
+un `;` après une clause. Le modèle corrige l'erreur qu'on lui montre et en commet une autre ; 15
+des 18 fichiers finaux finissent sur une erreur de syntaxe. Un langage qu'aucun modèle n'a vu
+demande, pour l'instant, un modèle capable de suivre une référence qu'il lit pour la première fois.
+
 ## Ce que leur écriture a changé dans le vérificateur
 
 - **Les séquences sont axiomatisées** (comme le fait Dafny), au lieu d'utiliser la théorie des

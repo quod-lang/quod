@@ -85,6 +85,46 @@ same compiler as quod3-haiku.
 The agent no longer gropes with a shell, paths and temporary files: it calls `quod_check` and
 reads a structured answer. One trial per task again: a direction, not a measure.
 
+### Three trials, Dafny, and another vendor
+
+[t6-haiku](../runs/t6-haiku): Haiku, three trials of the six tasks in each of three arms, with
+the 0.1.3 compiler. The Dafny arm is the one of Phase 0 (shell, `dafny verify`); its contracts
+were then given to [dafny-complete](../../tools/dafny-complete/)
+([results](../runs/t6-haiku/dafny-complete.jsonl)).
+
+| | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| Accepted by the verifier | 18/18 | 16/18 | 18/18 |
+| Pass all the hidden tests | 18/18 | 17/18 | 18/18 |
+| Contract determined | 17/18 | 12/18 | 9/18 (dafny-complete) |
+| Contract style | 10 properties, 8 model | 12 properties, 6 model | — |
+| Time, cost (18 runs) | 54 min, 0.54 USD | 71 min, 1.15 USD | 17 min, 0.24 USD |
+
+- **No escaped bug in any arm**: every accepted solution passes the hidden tests.
+- **The MCP advantage of quod4-haiku-mcp does not hold** over three trials. Through MCP the agent
+  writes more contracts by properties, which are harder to prove and to determine: two solutions
+  are left with inconclusive obligations (merge_intervals, rotate), five contracts with
+  inconclusive completeness.
+- **Dafny is faster and cheaper**, and its contracts say less. Of the 18, dafny-complete finds 3
+  underspecified (all binary_search: any index of a duplicate is accepted, which the task allows;
+  Dafny has no `loose` to say so) and cannot decide 6 (merge_intervals, rle_encode). In Quod the
+  completeness check is part of acceptance, so the agent keeps working until it is decided.
+
+[t6-qwen14b](../runs/t6-qwen14b): another vendor, Qwen 2.5 Coder 14B run locally through Ollama,
+in the `quod-mcp` arm (the agent is [ollama_agent.py](../verifbench/ollama_agent.py), an MCP
+client with the same tools), three trials of the six tasks. **0/18**: every run stops at 40
+turns, 13 of the 18 final files on a syntax error. Most of these are Dafny habits: contract
+clauses in the body, `;` after a clause, `for`, `let result`, `return` in an ensures. The parser
+now names each of them and says what to write instead.
+
+[t6-qwen14b-hints](../runs/t6-qwen14b-hints), the same run with those messages: **0/18 again**.
+The habits that the messages name almost vanish from the final files (5 clauses in the body
+become 0, 3 `let result` become 0), but others take their place (an expression in the middle of a
+block, `:` for `in`, `|s|` for `len(s)`), and 3 files still put `;` after a clause. The model fixes
+the error it is shown and makes another; 15 of the 18 final files end on a syntax error. A
+language that no model has seen needs, for now, a model that can follow a reference it reads for
+the first time.
+
 ## What writing them changed in the verifier
 
 - **Sequences are axiomatized** (as Dafny does), instead of using Z3's sequence theory, which
