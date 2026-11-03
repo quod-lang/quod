@@ -258,7 +258,8 @@ quod reference [SECTION]   # the language reference, or one section of it
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.
 
-`--timeout` limits each proof obligation (10 s by default); `--budget` limits the whole check
+`--timeout` limits each try of the solver on a proof obligation (10 s by default; an obligation
+gets a second try, on a fresh solver, only when the first gave up quickly, not after a timeout); `--budget` limits the whole check
 (300 s by default, 0 for none), since an agent waits for the whole of it before going on.
 Functions are checked in the order of the file. The obligations left when the budget is used
 up are not sent to the solver: one diagnostic per function reports how many, with the status

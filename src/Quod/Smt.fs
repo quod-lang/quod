@@ -261,15 +261,25 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
     /// Check, and when the answer is unknown, check again on a fresh solver (see frames). For
     /// proof obligations only: a search for a model (completeness) wants the first, quick
     /// "unknown" and its candidate model.
-    member s.CheckBoth(?again: unit -> bool) : CheckResult =
+    /// `retry` says, from the first answer, whether to try again and with what time limit
+    /// (milliseconds): by default always, with the same limit.
+    member s.CheckBoth(?retry: CheckResult -> int option) : CheckResult =
         match s.Check() with
-        | Unknown _ when defaultArg again (fun () -> true) () ->
-            raw "(reset)"
-            for frame in frames do
-                for command in frame do raw command
-            raw "(check-sat)"
-            dirty <- true
-            readResult ()
+        | Unknown _ as first ->
+            match (defaultArg retry (fun _ -> Some currentTimeout)) first with
+            | None -> first
+            | Some ms ->
+                raw "(reset)"
+                for frame in frames do
+                    for command in frame do raw command
+                raw ("(set-option :timeout " + string ms + ")")
+                raw "(check-sat)"
+                dirty <- true
+                let saved = currentTimeout
+                currentTimeout <- ms
+                let answer = readResult ()
+                currentTimeout <- saved
+                answer
         | r -> r
 
     /// Values of terms in the current model, as S-expressions.

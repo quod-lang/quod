@@ -593,15 +593,18 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             for f in List.rev kept do
                 a.Send("(assert " + f + ")")
             a.Send("(assert (not " + o.Goal + "))")
-            // first (onlyComplete): a quick try, 1 s, the shared session follows; a second try
-            // after the shared session gave up: the usual time limit. Within the budget.
-            let limit = min (if onlyComplete then min 1000 a.DefaultTimeout else a.DefaultTimeout) (defaultArg v.Remaining Int32.MaxValue)
+            // the usual time limit, within the budget: with all its facts this is the only try (the
+            // shared session holds the same problem, plus axioms that cannot help); without, a second
+            // try after a quick "unknown" of the shared session (test of 0.1.2: a hard obligation
+            // cost 2 x timeout + 1 s, so fewer functions fitted in a budget)
+            let limit = min a.DefaultTimeout (defaultArg v.Remaining Int32.MaxValue)
             a.SetTimeout(max 1 limit)
             let answer = a.Check()
             a.SetTimeout a.DefaultTimeout
             let outcome =
                 match answer with
                 | Unsat -> Some(Unsat, [])
+                | Unknown _ when complete -> Some(answer, []) // the verdict: the shared session is not tried
                 | Sat when complete ->
                     // the parameters this obligation is about, from the second process's model
                     let ps =
@@ -913,15 +916,21 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         z3.Send("(assert (not " + o.Goal + "))")
         // an obligation about integers and booleans only, with all its facts: the second process
         // first (the same problem, without the axioms); otherwise as a second try
+        // A try again (a fresh solver, or the second process) only after a quick "unknown", not
+        // after a timeout: a hard obligation would pay its time limit twice. Within the budget.
+        let retryLimit (first: CheckResult) =
+            match first, v.Remaining with
+            | Unknown "timeout", _ -> None
+            | _, Some r when r <= 0 -> None
+            | _, Some r -> Some(min r z3.DefaultTimeout)
+            | _, None -> Some z3.DefaultTimeout
         let answer, isolatedCex =
             match v.Isolated(st, o, true) with
             | Some(r, cex) -> r, Some cex
             | None ->
-                // the second try on a fresh solver only within the budget (it used to overrun it by
-                // one time limit: test of 0.1.1)
-                let first = v.BudgetedCheck(fun () -> z3.CheckBoth(fun () -> not v.OverBudget))
+                let first = v.BudgetedCheck(fun () -> z3.CheckBoth retryLimit)
                 match first with
-                | Unknown _ ->
+                | Unknown why when why <> "timeout" && not v.OverBudget ->
                     match v.Isolated(st, o, false) with
                     | Some(r, cex) -> r, Some cex
                     | None -> first, None
@@ -929,6 +938,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         match answer with
         | Unsat -> proved <- proved + 1
         | Sat when isolatedCex.IsSome -> v.Report(o, "refuted", "cannot prove: " + o.Label, isolatedCex.Value, evidence = "solver")
+        // from the second process: no candidate model to read in the shared session
+        | Unknown why when isolatedCex.IsSome ->
+            let reason = if why = "timeout" then "timeout" else reasonText why
+            v.Report(o, "inconclusive", "could not prove " + o.Label + (if why = "timeout" then " within the time limit" else "") + v.NoCounterexample(), [], reason = reason)
         | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample(), evidence = "solver")
         | Unknown "timeout" ->
             v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [], reason = "timeout")

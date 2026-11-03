@@ -268,7 +268,9 @@ quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.
 
-`--timeout` limite chaque obligation de preuve (10 s par défaut) ; `--budget` limite la
+`--timeout` limite chaque essai du solveur sur une obligation de preuve (10 s par défaut ; une
+obligation n'a droit à un second essai, sur un solveur neuf, que si le premier a abandonné vite,
+pas après un dépassement de temps) ; `--budget` limite la
 vérification entière (300 s par défaut, 0 pour aucune limite), car un agent l'attend en entier
 avant de continuer. Les fonctions sont vérifiées dans l'ordre du fichier. Les obligations qui
 restent quand le budget est épuisé ne sont pas envoyées au solveur : un diagnostic par fonction
