@@ -1173,17 +1173,62 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             let total = z3.Check() = Unsat
             z3.SetTimeout z3.DefaultTimeout
             z3.Pop()
-            if total then
+            // A relation whose every part concerns one result only (`a < len(xs) && b < len(xs)`)
+            // relates nothing: it restates properties of each result, which the ensures already
+            // give, so it accepts any two acceptable results as surely as `true` (first-user
+            // test of 0.1.0). Testing it under the ensures would not do: any loose that passes
+            // the completeness check holds under them, `(r1 == -1) == (r2 == -1)` included.
+            let rec conjuncts (e: TExpr) =
+                match e.Kind with
+                | ELogic(OAnd, a, b) -> conjuncts a @ conjuncts b
+                | _ -> [ e ]
+            let relates (c: TExpr) = mentions l.Left c && mentions l.Right c
+            let unrelated = not total && not (conjuncts l.Relation |> List.exists relates)
+            if total || unrelated then
                 diags.Add
                     { File = file; Span = f.Span; Kind = "completeness"; Status = "loose-accepts-all"; Severity = Warning
                       Fn = Some f.Name; Property = Some "the 'loose' relation restricts the results"
                       Counterexample = []
                       Reason = None; Evidence = None; Message =
-                        "the 'loose' relation holds for any two results, whatever the ensures say: it declares every result acceptable, "
-                        + "so the completeness check proves nothing. Say what two acceptable results have in common, or remove 'loose'" }
+                        (if total then "the 'loose' relation holds for any two results, whatever the ensures say"
+                         else "the 'loose' relation does not relate the two results: each of its parts concerns one of them, so it accepts any two results the ensures accept")
+                        + ": it declares every result acceptable, so the completeness check proves nothing. "
+                        + "Say what two acceptable results have in common (for two indices of a maximum: xs[" + l.Left + "] == xs[" + l.Right + "]), or remove 'loose'" }
         | None -> ()
         for ens in f.Ensures do
             assume <- v.Expr(ens, env.Add("result", r1), [], silent) :: v.Expr(ens, env.Add("result", r2), [], silent) :: assume
+        // An index result: the quantifiers of the ensures, instantiated at both results. "The
+        // first maximum" (forall i in 0..result: xs[i] < xs[result]) is unique because each
+        // result, as i, is below the other: the solver rarely picks these instances by itself
+        // (first-user test of 0.1.0). Instances of what is assumed: nothing new is assumed.
+        match f.Ret with
+        | TyInt | TyNat ->
+            // only where the result is an index (xs[result]) or a bound (0..result): elsewhere
+            // (max_subarray: result is a sum) the instances are noise that hides the proof
+            let rec indexed (e: TExpr) =
+                match e.Kind with
+                | EIndex(s, { Kind = EResult }) -> true
+                | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> indexed a || indexed b
+                | ESlice(a, b, c) -> indexed a || Option.exists indexed b || Option.exists indexed c
+                | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> indexed a
+                | EIf(a, b, c) | EQuant(_, _, a, b, c) -> indexed a || indexed b || indexed c
+                | ESeq xs | ETuple xs | ECall(_, xs) -> List.exists indexed xs
+                | EInt _ | EBool _ | EVar _ | EResult -> false
+            let isResult (e: TExpr) = match e.Kind with EResult | EToNat { Kind = EResult } -> true | _ -> false
+            let rec foralls (e: TExpr) =
+                match e.Kind with
+                | ELogic(OAnd, a, b) -> foralls a @ foralls b
+                | EQuant(Syntax.Forall, name, lo, hi, body) when indexed body || isResult lo || isResult hi -> [ name, lo, hi, body ]
+                | _ -> []
+            for ens in f.Ensures do
+                for (name, lo, hi, body) in foralls ens do
+                    for result in [ r1; r2 ] do
+                        for at in [ r1; r2 ] do
+                            let en = env.Add("result", result)
+                            let l, h = v.Expr(lo, en, [], silent), v.Expr(hi, en, [], silent)
+                            let b = v.Expr(body, en.Add(name, at), [], silent)
+                            assume <- ("(=> (and (<= " + l + " " + at + ") (< " + at + " " + h + ")) " + b + ")") :: assume
+        | _ -> ()
         let goal =
             match f.Loose with
             | Some l -> v.Expr(l.Relation, env.Add(l.Left, r1).Add(l.Right, r2), [], silent)
@@ -1288,7 +1333,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 report "inconclusive" Warning "completeness not decided within the time limit (the contract may well be complete)" []
                 false
             | _, None ->
-                report "inconclusive" Warning "completeness not decided: no confirmed witness, no uniqueness proof (the contract may well be complete; a lemma may be needed)" []
+                report "inconclusive" Warning ("completeness not decided: the solver found neither two results the contract accepts nor a proof that they are equal (the contract may well be complete). "
+                        + "Try to find two different results it accepts on a small input; if there are none, state the result more directly: for an index, what holds before it and at it") []
                 false
         current <- None
         z3.Pop()

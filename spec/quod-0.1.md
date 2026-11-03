@@ -174,6 +174,14 @@ What a proof needs beyond the contracts is written in the code, and checked like
   and the two results), with no need to run the function. `unknown`: ⚠️ inconclusive (a warning,
   not an error).
 - An underspecified function does not compile, unless its freedom is declared with `loose`.
+- A `loose` that declares every result acceptable is a **warning** (`loose-accepts-all`): a
+  relation that holds for any two results (`loose (a, b) => true`), or one whose parts each
+  concern one result only (`a < len(xs) && b < len(xs)`, which the ensures already give). Either
+  way the completeness check proves nothing. A relation says what two acceptable results have
+  in common: `xs[a] == xs[b]` for two indices of a maximum.
+- When the result is an index (`xs[result]`, `0..result`), the quantifiers of the `ensures` are
+  also given to the solver at both results: "the first index of a maximum" is then recognised
+  as determined.
 
 ### Contract style
 

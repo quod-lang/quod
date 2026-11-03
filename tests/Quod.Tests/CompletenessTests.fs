@@ -126,3 +126,33 @@ let ``a loose relation that accepts any two results is reported`` () =
     Assert.True(ds |> List.exists (fun d -> d.Status = "loose-accepts-all" && d.Severity = Warning))
     let legit = verifyAll (firstIndex "  loose (r1, r2) => (r1 == -1) == (r2 == -1)\n")
     Assert.False(legit |> List.exists (fun d -> d.Status = "loose-accepts-all"))
+[<Fact>]
+let ``a loose relation whose parts each concern one result relates nothing, and is reported`` () =
+    // the first-user test of 0.1.0: some index of a maximum, with a loose as empty as `true`
+    let someMax (loose: string) =
+        "fn some_max(xs: seq<int>) -> nat requires len(xs) > 0\n"
+        + "  ensures result < len(xs) ensures forall i in 0..len(xs): xs[i] <= xs[result]\n" + loose
+        + "{ let mut best = 0; let mut k = 1;\n"
+        + "  while k < len(xs) invariant 1 <= k <= len(xs) invariant 0 <= best < k invariant forall i in 0..k: xs[i] <= xs[best] decreases len(xs) - k\n"
+        + "  { if xs[k] >= xs[best] { best = k; } k = k + 1; }\n"
+        + "  return best; }"
+    let empty = verifyAll (someMax "  loose (a, b) => a < len(xs) && b < len(xs)\n")
+    let d = empty |> List.find (fun d -> d.Status = "loose-accepts-all")
+    Assert.Contains("does not relate the two results", d.Message)
+    // what two indices of a maximum have in common: a relation, not reported
+    let related = verifyAll (someMax "  loose (a, b) => xs[a] == xs[b]\n")
+    Assert.False(related |> List.exists (fun d -> d.Status = "loose-accepts-all"))
+
+[<Fact>]
+let ``the first index of a maximum is determined, in two clauses or in one`` () =
+    // first-user test of 0.1.0: undecided until the quantifiers of the ensures were instantiated
+    // at both results in the completeness query
+    let argmax (ensures: string) =
+        "fn argmax(xs: seq<int>) -> nat requires len(xs) > 0 ensures result < len(xs)\n" + ensures
+        + "{ let mut best = 0; let mut k = 1;\n"
+        + "  while k < len(xs) invariant 1 <= k <= len(xs) invariant 0 <= best < k invariant forall i in 0..k: xs[i] <= xs[best]\n"
+        + "    invariant forall i in 0..best: xs[i] < xs[best] decreases len(xs) - k\n"
+        + "  { if xs[k] > xs[best] { best = k; } k = k + 1; }\n"
+        + "  return best; }"
+    assertDetermined (argmax "  ensures forall i in 0..len(xs): xs[i] <= xs[result]\n  ensures forall i in 0..result: xs[i] < xs[result]\n")
+    assertDetermined (argmax "  ensures forall i in 0..len(xs): xs[i] < xs[result] || (xs[i] == xs[result] && result <= i)\n")

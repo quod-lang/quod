@@ -179,6 +179,14 @@ Ce dont une preuve a besoin au-delà des contrats s'écrit dans le code, et se v
   les deux résultats), sans avoir à exécuter la fonction. `unknown` : ⚠️ non conclu (un
   avertissement, pas une erreur).
 - Une fonction sous-spécifiée ne compile pas, sauf liberté déclarée avec `loose`.
+- Un `loose` qui déclare tout résultat acceptable est un **avertissement** (`loose-accepts-all`) :
+  une relation vraie pour deux résultats quelconques (`loose (a, b) => true`), ou dont chaque
+  partie ne concerne qu'un résultat (`a < len(xs) && b < len(xs)`, que l'ensures garantit déjà).
+  Dans les deux cas, le contrôle de complétude ne prouve rien. Une relation dit ce que deux
+  résultats acceptables ont en commun : `xs[a] == xs[b]` pour deux indices d'un maximum.
+- Quand le résultat est un indice (`xs[result]`, `0..result`), les quantificateurs de l'`ensures`
+  sont aussi donnés au solveur aux deux résultats : « le premier indice d'un maximum » est alors
+  reconnu comme déterminé.
 
 ### Style des contrats
 
