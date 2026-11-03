@@ -92,23 +92,51 @@ the 0.1.3 compiler. The Dafny arm is the one of Phase 0 (shell, `dafny verify`);
 were then given to [dafny-complete](../../tools/dafny-complete/)
 ([results](../runs/t6-haiku/dafny-complete.jsonl)).
 
+The arms do not measure the same thing. In the two Quod arms the completeness check is part of
+`quod check`: the agent reads its diagnostics while it writes, and a contract it refutes
+(underspecified) is rejected; a completeness it cannot decide is only a warning. In the Dafny arm
+the agent writes without that check, and completeness is measured afterwards. The gap between
+the arms is the effect of checking completeness while writing, which is what Quod is about, not a
+measure of what the two languages can express. A Dafny arm with dafny-complete in the loop would
+be the comparison of the languages; it was not run.
+
 | | quod (shell) | quod-mcp | dafny |
 |---|---|---|---|
 | Accepted by the verifier | 18/18 | 16/18 | 18/18 |
 | Pass all the hidden tests | 18/18 | 17/18 | 18/18 |
-| Contract determined | 17/18 | 12/18 | 9/18 (dafny-complete) |
+| Contract determined | 17/18 | 12/18 | 9/18, or 12/18 with the freedom the task allows |
 | Contract style | 10 properties, 8 model | 12 properties, 6 model | — |
 | Time, cost (18 runs) | 54 min, 0.54 USD | 71 min, 1.15 USD | 17 min, 0.24 USD |
+| Cost per solution accepted and determined | 0.03 USD | 0.10 USD | 0.02 USD (on 12) |
+
+The second Dafny figure counts as determined the three binary_search contracts that
+dafny-complete finds underspecified: they accept any index of a duplicate, which the task allows,
+and Dafny has no `loose` to declare it. In Quod the same freedom, declared by `loose`, counts as
+determined.
+
+Contract determined, by task (three trials each):
+
+| Task | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| binary_search | 3 | 3 | 0 (3 with the allowed freedom) |
+| merge_intervals | 3 | 2 (1 rejected) | 0 (3 not decided) |
+| rle_encode | 2 (1 not decided) | 1 (2 not decided) | 0 (3 not decided) |
+| bounded_queue | 3 | 3 | 3 |
+| max_subarray | 3 | 1 (2 not decided) | 3 |
+| rotate | 3 | 2 (1 rejected) | 3 |
 
 - **No escaped bug in any arm**: every accepted solution passes the hidden tests.
-- **The MCP advantage of quod4-haiku-mcp does not hold** over three trials. Through MCP the agent
-  writes more contracts by properties, which are harder to prove and to determine: two solutions
-  are left with inconclusive obligations (merge_intervals, rotate), five contracts with
-  inconclusive completeness.
-- **Dafny is faster and cheaper**, and its contracts say less. Of the 18, dafny-complete finds 3
-  underspecified (all binary_search: any index of a duplicate is accepted, which the task allows;
-  Dafny has no `loose` to say so) and cannot decide 6 (merge_intervals, rle_encode). In Quod the
-  completeness check is part of acceptance, so the agent keeps working until it is decided.
+- **Through MCP the agent does worse than through the shell on every line**: accepted, determined,
+  time and cost. The advantage seen in quod4-haiku-mcp, one trial per task, does not hold. Why is
+  not measured. The MCP arm writes a few more contracts by properties (12 against 10), which are
+  harder to determine; it also has no shell and no QUOD.md, and reads the reference through a
+  tool. Each of these is a hypothesis.
+- **Dafny is three times faster and half as expensive.** At equal criteria the gap in contracts
+  (17 against 12) comes from two tasks, merge_intervals and rle_encode, whose Dafny contracts
+  dafny-complete cannot decide; on the four others the arms are level. Quod's advantage is the
+  quality of the contract, not its cost.
+- Three trials of six tasks are 18 runs, but the trials of one task are not independent: these
+  are directions on six tasks, not rates.
 
 [t6-qwen14b](../runs/t6-qwen14b): another vendor, Qwen 2.5 Coder 14B run locally through Ollama,
 in the `quod-mcp` arm (the agent is [ollama_agent.py](../verifbench/ollama_agent.py), an MCP

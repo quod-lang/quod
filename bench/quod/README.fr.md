@@ -95,24 +95,51 @@ le compilateur 0.1.3. Le bras Dafny est celui de la phase 0 (shell, `dafny verif
 ont ensuite été soumis à [dafny-complete](../../tools/dafny-complete/)
 ([résultats](../runs/t6-haiku/dafny-complete.jsonl)).
 
+Les bras ne mesurent pas la même chose. Dans les deux bras Quod, le contrôle de complétude fait
+partie de `quod check` : l'agent lit ses diagnostics pendant qu'il écrit, et un contrat réfuté
+(sous-spécifié) est rejeté ; une complétude non décidée n'est qu'un avertissement. Dans le bras
+Dafny, l'agent écrit sans ce contrôle, et la complétude est mesurée après coup. L'écart entre les
+bras est l'effet d'un contrôle de complétude pendant l'écriture, qui est la raison d'être de Quod,
+pas une mesure de ce que les deux langages savent exprimer. Un bras Dafny avec dafny-complete dans
+la boucle serait la comparaison des langages ; il n'a pas été mesuré.
+
 | | quod (shell) | quod-mcp | dafny |
 |---|---|---|---|
 | Acceptés par le vérificateur | 18/18 | 16/18 | 18/18 |
 | Passent tous les tests cachés | 18/18 | 17/18 | 18/18 |
-| Contrat déterminé | 17/18 | 12/18 | 9/18 (dafny-complete) |
+| Contrat déterminé | 17/18 | 12/18 | 9/18, ou 12/18 avec la liberté que la tâche permet |
 | Style des contrats | 10 propriétés, 8 modèles | 12 propriétés, 6 modèles | — |
 | Temps, coût (18 essais) | 54 min, 0,54 USD | 71 min, 1,15 USD | 17 min, 0,24 USD |
+| Coût par solution acceptée et déterminée | 0,03 USD | 0,10 USD | 0,02 USD (sur 12) |
+
+Le second chiffre de Dafny compte comme déterminés les trois contrats de binary_search que
+dafny-complete trouve sous-spécifiés : ils acceptent n'importe quel indice d'un doublon, ce que la
+tâche permet, et Dafny n'a pas de `loose` pour le déclarer. En Quod, la même liberté, déclarée par
+`loose`, compte comme déterminée.
+
+Contrat déterminé, par tâche (trois essais chacune) :
+
+| Tâche | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| binary_search | 3 | 3 | 0 (3 avec la liberté permise) |
+| merge_intervals | 3 | 2 (1 rejeté) | 0 (3 non décidés) |
+| rle_encode | 2 (1 non décidé) | 1 (2 non décidés) | 0 (3 non décidés) |
+| bounded_queue | 3 | 3 | 3 |
+| max_subarray | 3 | 1 (2 non décidés) | 3 |
+| rotate | 3 | 2 (1 rejeté) | 3 |
 
 - **Aucun bug échappé, dans aucun bras** : toute solution acceptée passe les tests cachés.
-- **L'avantage de MCP vu dans quod4-haiku-mcp ne tient pas** sur trois essais. À travers MCP,
-  l'agent écrit plus de contrats par propriétés, plus durs à prouver et à déterminer : deux
-  solutions gardent des obligations non conclues (merge_intervals, rotate), cinq contrats une
-  complétude non conclue.
-- **Dafny est plus rapide et moins cher**, et ses contrats en disent moins. Sur les 18,
-  dafny-complete en trouve 3 sous-spécifiés (tous binary_search : n'importe quel indice d'un
-  doublon est accepté, ce que la tâche permet ; Dafny n'a pas de `loose` pour le dire) et ne peut
-  pas en décider 6 (merge_intervals, rle_encode). En Quod, le contrôle de complétude fait partie de
-  l'acceptation : l'agent continue tant qu'elle n'est pas décidée.
+- **À travers MCP, l'agent fait moins bien qu'à travers le shell sur chaque ligne** : acceptés,
+  déterminés, temps et coût. L'avantage vu dans quod4-haiku-mcp, sur un essai par tâche, ne tient
+  pas. La cause n'est pas mesurée. Le bras MCP écrit un peu plus de contrats par propriétés (12
+  contre 10), plus durs à déterminer ; il n'a pas non plus de shell ni de QUOD.md, et lit la
+  référence à travers un outil. Chacune de ces causes est une hypothèse.
+- **Dafny est trois fois plus rapide et deux fois moins cher.** À critère égal, l'écart sur les
+  contrats (17 contre 12) vient de deux tâches, merge_intervals et rle_encode, dont dafny-complete
+  ne peut pas décider les contrats Dafny ; sur les quatre autres, les bras sont à égalité.
+  L'avantage de Quod est la qualité du contrat, pas son coût.
+- Trois essais de six tâches font 18 essais, mais les essais d'une même tâche ne sont pas
+  indépendants : ce sont des tendances sur six tâches, pas des taux.
 
 [t6-qwen14b](../runs/t6-qwen14b) : un autre fournisseur, Qwen 2.5 Coder 14B exécuté en local par
 Ollama, dans le bras `quod-mcp` (l'agent est [ollama_agent.py](../verifbench/ollama_agent.py), un
