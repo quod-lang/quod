@@ -197,3 +197,15 @@ let ``every example prints back to a program with the same structure`` () =
         let once = programText (parseProgram f (File.ReadAllText f))
         let twice = programText (parseProgram f once)
         Assert.Equal(once, twice)
+
+[<Fact>]
+let ``the habits of a model that writes Dafny get a hint that says what to write`` () =
+    // VerifBench, Qwen 2.5 Coder 14B: most of its files ended on one of these
+    let inBody = syntaxErrorOf "fn f(x: int) -> int {\n  requires x > 0;\n  return x; }"
+    Assert.Contains("contract clauses go between the signature and the body", inBody.Message)
+    let semicolon = syntaxErrorOf "fn f(x: int) -> int requires x > 0; { x }"
+    Assert.Contains("no ';' after a contract clause", semicolon.Message)
+    let forLoop = syntaxErrorOf "fn f(xs: seq<int>) -> int ensures result == max(xs[i] for i in 0..len(xs)) { 0 }"
+    Assert.Contains("Quod has no 'for'", forLoop.Message)
+    let letResult = syntaxErrorOf "fn f(x: int) -> int { let result = x; return result; }"
+    Assert.Contains("'result' names the returned value", letResult.Message)

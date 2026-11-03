@@ -49,6 +49,17 @@ type private Parser(file: string, toks: Token[]) =
         | TkIdent "method", _ | TkIdent "function", _ | TkIdent "predicate", _ -> " (every function is declared with 'fn')"
         | TkIdent "var", _ -> " (local variables are declared with 'let' or 'let mut')"
         | TkIdent "and", _ | TkIdent "or", _ | TkIdent "not", _ -> " (use '&&', '||' and '!')"
+        // the habits of a model that writes Dafny (VerifBench, Qwen 2.5 Coder 14B: 13 of 18 files
+        // ended on a syntax error, most of them these)
+        | TkKeyword "requires", _ | TkKeyword "ensures", _ | TkKeyword "decreases", _ ->
+            " (contract clauses go between the signature and the body, each without ';': "
+            + "'fn f(x: int) -> int requires P ensures Q { ... }')"
+        | TkKeyword "invariant", _ -> " (loop invariants go between 'while c' and the '{' of the loop, without ';')"
+        | TkIdent "for", _ ->
+            " (Quod has no 'for': write a 'while' loop with 'invariant' and 'decreases'; in a contract, a quantifier "
+            + "'forall i in lo..hi: P', or a helper function)"
+        | TkKeyword "return", _ -> " (in an ensures, the returned value is 'result')"
+        | TkKeyword "result", _ -> " ('result' names the returned value, in ensures only: give the local another name, e.g. 'res')"
         | _ -> ""
 
     /// `:=` (Dafny's assignment) is lexed as ':' '=': catch it before ':' is read as a type.
@@ -490,6 +501,8 @@ type private Parser(file: string, toks: Token[]) =
                 if dec.IsSome then p.Fail(s, "a function has at most one 'decreases' clause")
                 dec <- Some(p.Expr())
             | _ -> go <- false
+        if p.IsSym ";" then
+            p.Fail(p.Peek.Span, "no ';' after a contract clause: write the next clause, or the body '{', directly")
         if not (p.IsSym "{") then
             p.FailHere "a contract clause ('requires', 'ensures', 'loose', 'decreases') or the body '{'"
         let items = p.Block()
