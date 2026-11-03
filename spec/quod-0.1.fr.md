@@ -121,6 +121,12 @@ return e;              // ou une expression finale à la fin du corps
 - Obligations : `requires` de chaque appel, `ensures` à chaque retour, `invariant` de boucle (à
   l'entrée et préservé), `decreases` (boucles et récursion), bornes des séquences, diviseurs non
   nuls, affectations à un `nat`, `assert`.
+- **Les obligations arithmétiques, à part.** Une obligation qui ne porte que sur des entiers et des
+  booléens est aussi posée à un second processus z3, qui ne contient aucun axiome du programme
+  (ceux des séquences sont quantifiés, et avec eux z3 n'emploie pas son solveur pour
+  l'arithmétique non linéaire) : d'abord brièvement quand tous ses faits sont arithmétiques, et à
+  nouveau quand le solveur partagé abandonne. Un bug comme `a == b * b * b` reçoit le même verdict,
+  quoi que le fichier contienne d'autre.
 - **Contre-exemples par exécution.** Avant de solliciter le solveur, le compilateur exécute chaque
   fonction sur de petites entrées qui satisfont son `requires` : les valeurs nulles, chaque
   constante entière du programme et ses voisines (`c - 1`, `c`, `c + 1`), puis des valeurs

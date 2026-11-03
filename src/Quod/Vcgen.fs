@@ -499,6 +499,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     let clock = Diagnostics.Stopwatch.StartNew()
     let mutable skippedHere = 0
     let mutable skipped = 0
+    /// The sort of each integer or boolean constant (to declare it again elsewhere), and a second
+    /// z3 process without the axioms of the program, started when first needed (see Isolated).
+    let scalarSorts = Dictionary<string, string>()
+    let mutable arith: Session option = None
     /// Inputs tried (valid or not), for the message when few satisfy the requires.
     let mutable concreteTries = 0
     /// The branches of the current function that no run took ("line 4 (condition true)").
@@ -507,6 +511,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
 
     member _.Diagnostics = List.ofSeq diags
     member _.NotAttempted = skipped
+
+    /// Stop the second z3 process, if one was started.
+    member _.Close() =
+        arith |> Option.iter (fun (a: Session) -> (a :> IDisposable).Dispose())
+        arith <- None
 
     /// Milliseconds left in the budget (None: no budget).
     member _.Remaining : int option =
@@ -546,7 +555,66 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     member v.Const(baseName: string, t: Ty) : string =
         let name = v.Fresh baseName
         z3.Send("(declare-const " + name + " " + sortOf t + ")")
+        match t with
+        | TyInt | TyNat | TyBool -> scalarSorts.[name] <- sortOf t
+        | _ -> ()
         name
+
+    /// The obligation again, without the axioms of the program, when it is about integers and
+    /// booleans only. The axioms of sequences are quantified, and with them in the context z3 no
+    /// longer uses its solver for nonlinear arithmetic: `a == b * b * b` was refuted in 0.04 s
+    /// alone in its file, and timed out next to a function on sequences (first-user test of
+    /// 0.1.1). The facts that mention anything else are left out: a proof with fewer facts is
+    /// still a proof, but a model of fewer facts is a counterexample only if none was left out.
+    /// Some(result, counterexample) when this says more than the shared session did.
+    member v.Isolated(st: State, o: Obligation, onlyComplete: bool) : (CheckResult * (string * string) list) option =
+        let operators =
+            set [ "and"; "or"; "not"; "=>"; "="; "<"; "<="; ">"; ">="; "+"; "-"; "*"; "div"; "mod"; "ite"
+                  "true"; "false"; "distinct"; "abs" ]
+        let symbols (term: string) =
+            term.Replace("(", " ").Replace(")", " ").Split([| ' '; '\n'; '\t'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
+            |> Array.filter (fun t -> not (operators.Contains t) && not (Char.IsDigit t.[0]))
+        let scalar (term: string) = symbols term |> Array.forall scalarSorts.ContainsKey
+        let kept = if scalar o.Goal then st.Assume |> List.filter scalar else []
+        let complete = kept.Length = st.Assume.Length
+        if not (scalar o.Goal) || v.OverBudget || (onlyComplete && not complete) then None
+        else
+            let a =
+                match arith with
+                | Some a -> a
+                | None ->
+                    let a = z3.Fork()
+                    arith <- Some a
+                    a
+            a.Push()
+            for c in (o.Goal :: kept) |> Seq.collect symbols |> Seq.distinct do
+                a.Send("(declare-const " + c + " " + scalarSorts.[c] + ")")
+            for f in List.rev kept do
+                a.Send("(assert " + f + ")")
+            a.Send("(assert (not " + o.Goal + "))")
+            // first (onlyComplete): a quick try, 1 s, the shared session follows; a second try
+            // after the shared session gave up: the usual time limit. Within the budget.
+            let limit = min (if onlyComplete then min 1000 a.DefaultTimeout else a.DefaultTimeout) (defaultArg v.Remaining Int32.MaxValue)
+            a.SetTimeout(max 1 limit)
+            let answer = a.Check()
+            a.SetTimeout a.DefaultTimeout
+            let outcome =
+                match answer with
+                | Unsat -> Some(Unsat, [])
+                | Sat when complete ->
+                    // the parameters this obligation is about, from the second process's model
+                    let ps =
+                        paramsOf.[current.Value.Fn.Name]
+                        |> List.filter (fun (sym, _) -> scalarSorts.ContainsKey sym && (o.Goal :: kept |> List.exists (fun f -> (symbols f) |> Array.contains sym)))
+                    let values = a.Values(ps |> List.map fst)
+                    let cex =
+                        List.zip ps (if values.Length = ps.Length then values else [])
+                        |> List.choose (fun ((sym, ty), x) ->
+                            valueOf ty x |> Option.map (fun value -> sym.Substring(0, sym.IndexOf '@'), Eval.valueText value))
+                    Some(Sat, cex)
+                | _ -> None
+            a.Pop()
+            outcome
 
     // --- expressions ------------------------------------------------------------------
 
@@ -842,8 +910,22 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         for a in List.rev st.Assume do
             z3.Send("(assert " + a + ")")
         z3.Send("(assert (not " + o.Goal + "))")
-        match v.BudgetedCheck z3.CheckBoth with
+        // an obligation about integers and booleans only, with all its facts: the second process
+        // first (the same problem, without the axioms); otherwise as a second try
+        let answer, isolatedCex =
+            match v.Isolated(st, o, true) with
+            | Some(r, cex) -> r, Some cex
+            | None ->
+                let first = v.BudgetedCheck z3.CheckBoth
+                match first with
+                | Unknown _ ->
+                    match v.Isolated(st, o, false) with
+                    | Some(r, cex) -> r, Some cex
+                    | None -> first, None
+                | r -> r, None
+        match answer with
         | Unsat -> proved <- proved + 1
+        | Sat when isolatedCex.IsSome -> v.Report(o, "refuted", "cannot prove: " + o.Label, isolatedCex.Value, evidence = "solver")
         | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample(), evidence = "solver")
         | Unknown "timeout" ->
             v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [], reason = "timeout")
@@ -1425,6 +1507,7 @@ let verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : 
         v.Define f
     for f in prog.Fns do
         v.Function f
+    v.Close()
     // a lemma has no result to determine: it is a proof, its ensures are what it proves
     let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
     let determined = withContract |> List.filter v.Completeness |> List.length

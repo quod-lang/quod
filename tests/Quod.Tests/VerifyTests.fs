@@ -284,3 +284,13 @@ let ``when no run breaks an obligation, the message names the branches no run to
         |> List.exactlyOne
     Assert.Equal("inconclusive", d.Status)
     Assert.Contains("no run took the 'if' at line 2 (condition true)", d.Message)
+
+[<Fact>]
+let ``an arithmetic bug is refuted whatever the file holds besides`` () =
+    // first-user test of 0.1.1: refuted alone, a timeout next to a function on sequences (whose
+    // quantified axioms keep z3 from its nonlinear solver)
+    let add = "fn add(a: int, b: int) -> int ensures result == a + b { if a == b * b * b && b > 2 { return a + b + 1; } return a + b; }\n"
+    let neighbour = "fn first_or_zero(xs: seq<int>) -> int ensures len(xs) > 0 ==> result == xs[0] ensures len(xs) == 0 ==> result == 0 { if len(xs) > 0 { xs[0] } else { 0 } }\n"
+    for src in [ add; add + neighbour; neighbour + add ] do
+        let d = assertRefuted "postcondition" src
+        Assert.Equal<(string * string) list>([ "a", "27"; "b", "3" ], d.Counterexample)

@@ -219,6 +219,13 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     /// The time limit given at start, to restore after a temporary change.
     member _.DefaultTimeout = timeoutMs
 
+    /// A second z3 process with the same settings and an empty context (Init done): for a query
+    /// that must not see the axioms of the program.
+    member _.Fork() : Session =
+        let s = new Session(z3Path, timeoutMs, None)
+        s.Init()
+        s
+
     member _.Push() =
         restore ()
         log |> Option.iter (fun w -> w.WriteLine "(push 1)")

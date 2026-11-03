@@ -117,6 +117,11 @@ return e;              // or a final expression at the end of the body
 - Obligations: `requires` of each call, `ensures` at each return, loop `invariant` (on entry and
   preserved), `decreases` (loops and recursion), sequence bounds, non-zero divisors, `nat`
   assignments, `assert`.
+- **Arithmetic obligations, apart.** An obligation about integers and booleans only is also put
+  to a second z3 process that holds none of the program's axioms (those of sequences are
+  quantified, and with them z3 does not use its solver for nonlinear arithmetic): first briefly
+  when all its facts are arithmetic, and again when the shared solver gives up. A bug like
+  `a == b * b * b` gets the same verdict whatever else the file holds.
 - **Counterexamples by execution.** Before asking the solver, the compiler runs each function on
   small inputs that satisfy its `requires`: zero values, each integer constant of the program and
   its neighbours (`c - 1`, `c`, `c + 1`), then random values (ints in -6..6 or a constant,
