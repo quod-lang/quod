@@ -183,7 +183,7 @@ let main argv =
     | [ "check"; file ] -> checkCommand file o
     | [ "build"; file ] -> buildCommand file o
     | [ "--version" ] ->
-        Console.WriteLine("quod 0.1.0-dev")
+        Console.WriteLine("quod " + Diagnostics.quodVersion)
         0
     | _ ->
         Console.Error.WriteLine(usage)

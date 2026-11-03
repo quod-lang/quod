@@ -1,0 +1,146 @@
+# Build quod as a Native AOT binary on each system, run the tests with the pinned z3, package
+# quod with that z3 next to it, and check the package in a clean directory. On a tag v*, publish
+# the packages as a GitHub release.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "tests/**", "examples/**", ".github/workflows/release.yml"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  Z3_VERSION: "4.12.1"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            z3: x64-win
+          - os: ubuntu-22.04
+            rid: linux-x64
+            z3: x64-glibc-2.35
+          - os: macos-14
+            rid: osx-arm64
+            z3: arm64-osx-11.0
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Native AOT prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Get z3 ${{ env.Z3_VERSION }}
+        run: |
+          name="z3-${Z3_VERSION}-${{ matrix.z3 }}"
+          curl -sSL -o z3.zip "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${name}.zip"
+          unzip -q z3.zip
+          mkdir z3dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # z3.exe needs the C++ runtime that z3 ships next to it
+            cp "$name"/bin/{z3.exe,msvcp140.dll,vcruntime140.dll,vcruntime140_1.dll} z3dist/
+          else
+            cp "$name/bin/z3" z3dist/
+            chmod +x z3dist/z3
+          fi
+          cp "$name/LICENSE.txt" z3dist/LICENSE-z3.txt
+          ./z3dist/z3 -version
+          # a path .NET understands: D:/a/... on Windows, not Git Bash's /d/a/...
+          dir=$( (pwd -W 2>/dev/null || pwd) )
+          echo "QUOD_Z3=$dir/z3dist/z3$([ "$RUNNER_OS" = "Windows" ] && echo .exe)" >> "$GITHUB_ENV"
+
+      - name: Tests
+        run: dotnet test tests/Quod.Tests -c Release -p:PublishAot=false
+
+      - name: Native AOT build
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export PATH="/c/Program Files (x86)/Microsoft Visual Studio/Installer:$PATH"
+          fi
+          dotnet publish src/Quod -c Release -r ${{ matrix.rid }} -o publish
+
+      - name: Package
+        run: |
+          version=$(sed -n 's/^let quodVersion = "\(.*\)"/\1/p' src/Quod/Diagnostics.fs)
+          pkg="quod-${version}-${{ matrix.rid }}"
+          mkdir "$pkg"
+          if [ "$RUNNER_OS" = "Windows" ]; then cp publish/quod.exe "$pkg/"; else cp publish/quod "$pkg/"; fi
+          cp z3dist/* "$pkg/"
+          cp LICENSE NOTICE "$pkg/"
+          cp -r examples "$pkg/examples"
+          cat > "$pkg/README.txt" <<EOF
+          quod ${version}: https://github.com/quod-lang/quod
+
+          quod check FILE.quod                   prove the contracts, check that they are complete
+          quod build FILE.quod --target python   then generate a Python module
+          quod --help
+
+          z3 ${Z3_VERSION} is next to quod (MIT license: LICENSE-z3.txt). quod is Apache-2.0
+          (LICENSE, NOTICE). Try: quod check examples/binary_search.quod
+          EOF
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "$pkg.zip" "$pkg" > /dev/null
+          else
+            tar czf "$pkg.tar.gz" "$pkg"
+          fi
+          echo "PKG=$pkg" >> "$GITHUB_ENV"
+
+      - name: Check the package in a clean directory
+        run: |
+          mkdir clean
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            (cd clean && 7z x "../$PKG.zip" > /dev/null)
+            exe=quod.exe
+          else
+            tar xzf "$PKG.tar.gz" -C clean
+            exe=quod
+          fi
+          cd "clean/$PKG"
+          unset QUOD_Z3
+          ./$exe --version
+          ./$exe check examples/binary_search.quod | tee out.txt
+          grep -q "^verified" out.txt
+          ./$exe build examples/prefix_sums.quod --target python -o out
+          python -c "import sys; sys.path.insert(0, 'out'); import prefix_sums as m; xs = list(range(5000)); print(m.range_sum(xs, m.prefix_sums(xs), 0, 5000))"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Quod ${GITHUB_REF_NAME#v}" --notes-file "$notes"
