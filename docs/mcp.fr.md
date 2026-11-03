@@ -70,6 +70,11 @@ attend l'appel d'outil (la ligne de commande a 300 s) : les obligations restante
 l'argument `budget`, et `quod mcp --budget 120` change la valeur par défaut (`--timeout` aussi,
 10 s par obligation).
 
+Les appels d'outils s'exécutent un à la fois, pendant que le serveur continue de lire : `ping`,
+`tools/list` et les ressources reçoivent une réponse immédiate, `notifications/cancelled` arrête
+l'appel qu'il désigne (z3 est arrêté, et aucune réponse n'est envoyée), et un appel qui fournit un
+`progressToken` reçoit une notification de progression après chaque fonction vérifiée.
+
 ## Pour l'agent : une section pour AGENTS.md ou CLAUDE.md
 
 La copier dans le fichier d'instructions du projet, et adapter la dernière étape. Elle est en

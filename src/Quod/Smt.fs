@@ -92,7 +92,8 @@ let findZ3 (explicitPath: string option) : string option =
 
 /// A running `z3 -in` process. Commands are written as SMT-LIB text; answers are read back
 /// as balanced S-expressions. `log` receives every command, to replay a session by hand.
-type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
+/// `cancel` stops it: z3 is killed, and every later command fails (SmtFailure "cancelled").
+type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Threading.CancellationToken) =
     let psi = ProcessStartInfo(z3Path, "-in -smt2")
     do
         psi.RedirectStandardInput <- true
@@ -103,6 +104,11 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     let mutable input = proc.StandardInput
     let mutable output = proc.StandardOutput
     do input.AutoFlush <- false
+    let mutable cancelled = false
+    let registration =
+        cancel.Register(fun () ->
+            cancelled <- true
+            try proc.Kill true with _ -> ())
 
     /// Read one complete answer: an atom line, or a parenthesised block spanning lines.
     let readAnswerFrom (first: string option) : string =
@@ -118,7 +124,9 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
                     given <- None
                     l
                 | None -> output.ReadLine()
-            if isNull line then raise (SmtFailure("z3 stopped unexpectedly: " + proc.StandardError.ReadToEnd()))
+            if isNull line then
+                if cancelled then raise (SmtFailure "cancelled")
+                raise (SmtFailure("z3 stopped unexpectedly: " + proc.StandardError.ReadToEnd()))
             let t = line.Trim()
             if t <> "" then
                 sb.AppendLine(line) |> ignore
@@ -144,7 +152,9 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     /// (lazily, so that the model of the retry can still be read).
     let mutable dirty = false
 
-    let raw (command: string) = input.WriteLine command
+    let raw (command: string) =
+        if cancelled then raise (SmtFailure "cancelled")
+        input.WriteLine command
 
     let replayFrames () =
         for k in 0 .. frames.Count - 1 do
@@ -166,6 +176,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     let readFirstLine () : string option =
         let t = output.ReadLineAsync()
         if t.Wait(2 * currentTimeout + 5000) then Some t.Result
+        elif cancelled then raise (SmtFailure "cancelled")
         else
             (try proc.Kill true with _ -> ())
             (try t.Wait 2000 |> ignore with _ -> ())
@@ -192,6 +203,8 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
             let r = readAnswer ()
             Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
         | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+
+    new(z3Path: string, timeoutMs: int, log: TextWriter option) = new Session(z3Path, timeoutMs, log, Threading.CancellationToken.None)
 
     member _.Send(command: string) =
         restore ()
@@ -222,7 +235,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     /// A second z3 process with the same settings and an empty context (Init done): for a query
     /// that must not see the axioms of the program.
     member _.Fork() : Session =
-        let s = new Session(z3Path, timeoutMs, None)
+        let s = new Session(z3Path, timeoutMs, None, cancel)
         s.Init()
         s
 
@@ -248,9 +261,9 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
     /// Check, and when the answer is unknown, check again on a fresh solver (see frames). For
     /// proof obligations only: a search for a model (completeness) wants the first, quick
     /// "unknown" and its candidate model.
-    member s.CheckBoth() : CheckResult =
+    member s.CheckBoth(?again: unit -> bool) : CheckResult =
         match s.Check() with
-        | Unknown _ ->
+        | Unknown _ when defaultArg again (fun () -> true) () ->
             raw "(reset)"
             for frame in frames do
                 for command in frame do raw command
@@ -278,4 +291,5 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option) =
                 input.Flush()
                 if not (proc.WaitForExit 2000) then proc.Kill()
             with _ -> ()
+            registration.Dispose()
             proc.Dispose()

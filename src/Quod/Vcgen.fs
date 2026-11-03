@@ -916,7 +916,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             match v.Isolated(st, o, true) with
             | Some(r, cex) -> r, Some cex
             | None ->
-                let first = v.BudgetedCheck z3.CheckBoth
+                // the second try on a fresh solver only within the budget (it used to overrun it by
+                // one time limit: test of 0.1.1)
+                let first = v.BudgetedCheck(fun () -> z3.CheckBoth(fun () -> not v.OverBudget))
                 match first with
                 | Unknown _ ->
                     match v.Isolated(st, o, false) with
@@ -1494,7 +1496,12 @@ type VerifyResult =
 /// 3. definitions of those that terminate;
 /// 4. every function, with all the definitions that are safe to know.
 /// Within a time budget (seconds, 0: none), functions in the order of the file.
-let verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : VerifyResult =
+let rec verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : VerifyResult =
+    verifyWith file prog z3 budgetSeconds (fun _ _ _ -> ())
+
+/// The same, telling `progress done total what` after each function checked and each contract
+/// whose completeness was checked (`quod mcp` sends it on as MCP progress notifications).
+and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) (progress: int -> int -> string -> unit) : VerifyResult =
     let v = Verifier(file, prog, z3, budgetSeconds * 1000)
     z3.Init()
     v.Prelude()
@@ -1505,11 +1512,20 @@ let verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : 
     let terminating = recursive |> List.filter (fun f -> f.Decreases.IsSome && v.Termination f)
     for f in terminating do
         v.Define f
-    for f in prog.Fns do
+    let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
+    let total = prog.Fns.Length + withContract.Length
+    for (k, f) in List.indexed prog.Fns do
         v.Function f
+        progress (k + 1) total ("checked the obligations of " + f.Name)
     v.Close()
     // a lemma has no result to determine: it is a proof, its ensures are what it proves
-    let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
-    let determined = withContract |> List.filter v.Completeness |> List.length
+    let determined =
+        withContract
+        |> List.indexed
+        |> List.filter (fun (k, f) ->
+            let d = v.Completeness f
+            progress (prog.Fns.Length + k + 1) total ("checked the completeness of " + f.Name)
+            d)
+        |> List.length
     { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length
       Lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.length; NotAttempted = v.NotAttempted }

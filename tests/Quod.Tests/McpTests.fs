@@ -89,3 +89,22 @@ let ``quod_reference gives the language reference, or one section of it`` () =
     Assert.DoesNotContain("## Completeness", one.GetProperty("reference").GetString())
     let r = request 9 "tools/call" "{\"name\": \"quod_reference\", \"arguments\": {\"section\": \"no such thing\"}}"
     Assert.True(r.GetProperty("result").GetProperty("isError").GetBoolean())
+
+[<Fact>]
+let ``a cancelled check stops at once: z3 is killed`` () =
+    // test of 0.1.1: a cancelled call ran to its end; quod mcp now cancels it (notifications/cancelled)
+    let slow = String.concat "\n" [ for k in 0 .. 7 -> "fn f" + string k + "(a: int) -> int requires a > 0 ensures result == 0 { (a * a * a - a + 6 * " + string k + ") % 6 }" ]
+    use cts = new System.Threading.CancellationTokenSource()
+    cts.CancelAfter 1000
+    let clock = System.Diagnostics.Stopwatch.StartNew()
+    match Quod.Pipeline.check "slow.quod" slow { settings with Cancel = cts.Token } with
+    | Quod.Pipeline.Failure(message, _) -> Assert.Contains("cancelled", message)
+    | _ -> failwith "expected the check to be cancelled"
+    Assert.True(clock.Elapsed.TotalSeconds < 5.0, "cancelled after " + string clock.Elapsed.TotalSeconds + " s")
+
+[<Fact>]
+let ``progress is told after each function`` () =
+    let told = ResizeArray<int * int>()
+    match Quod.Pipeline.check "p.quod" clamp { settings with Progress = fun d t _ -> told.Add((d, t)) } with
+    | Quod.Pipeline.Checked _ -> Assert.Equal<(int * int) list>([ 1, 2; 2, 2 ], List.ofSeq told)
+    | _ -> failwith "expected a check"

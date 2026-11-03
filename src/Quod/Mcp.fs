@@ -390,17 +390,83 @@ let handle (settings: Pipeline.Settings) (line: string) : string option =
         | m, _ -> error id -32601 ("method not found: " + m)
 
 /// Serve on stdin/stdout until stdin closes. Logs go to stderr only: stdout is the protocol.
+/// Tool calls run one at a time on a worker thread, so that the reader stays responsive (test of
+/// 0.1.1): ping, tools/list and the resources are answered at once, even during a long check,
+/// and notifications/cancelled stops the call it names (z3 is killed, and no response is sent,
+/// as MCP asks). A call that gives a progressToken gets a progress notification after each
+/// function checked.
 let serve (settings: Pipeline.Settings) : int =
     use input = new StreamReader(Console.OpenStandardInput(), UTF8Encoding(false))
     use output = new StreamWriter(Console.OpenStandardOutput(), UTF8Encoding(false))
     output.AutoFlush <- true
+    let gate = obj ()
+    let write (message: string) = lock gate (fun () -> output.Write(message + "\n"))
+    /// Tool calls not answered yet, by the JSON text of their id: to cancel them.
+    let pending = Collections.Concurrent.ConcurrentDictionary<string, Threading.CancellationTokenSource>()
+    let calls = new Collections.Concurrent.BlockingCollection<string * string * JsonElement option>()
+    let worker =
+        Threading.Thread(
+            (fun () ->
+                for (line, id, token) in calls.GetConsumingEnumerable() do
+                    match pending.TryGetValue id with
+                    | true, cts when not cts.IsCancellationRequested ->
+                        let progress (d: int) (t: int) (what: string) =
+                            token |> Option.iter (fun tok ->
+                                write (
+                                    json (fun w ->
+                                        w.WriteStartObject()
+                                        w.WriteString("jsonrpc", "2.0")
+                                        w.WriteString("method", "notifications/progress")
+                                        w.WriteStartObject "params"
+                                        w.WritePropertyName "progressToken"
+                                        tok.WriteTo w
+                                        w.WriteNumber("progress", d)
+                                        w.WriteNumber("total", t)
+                                        w.WriteString("message", what)
+                                        w.WriteEndObject()
+                                        w.WriteEndObject())))
+                        let response =
+                            try handle { settings with Cancel = cts.Token; Progress = progress } line
+                            with e ->
+                                Console.Error.WriteLine("quod mcp: " + e.Message)
+                                None
+                        if not cts.IsCancellationRequested then response |> Option.iter write
+                        pending.TryRemove id |> ignore
+                        cts.Dispose()
+                    | _ -> pending.TryRemove id |> ignore),
+            256 * 1024 * 1024)
+    worker.IsBackground <- true
+    worker.Start()
     let mutable line = input.ReadLine()
     while not (isNull line) do
         if line.Trim() <> "" then
             try
-                match handle settings line with
-                | Some r -> output.Write(r + "\n")
-                | None -> ()
+                let route =
+                    try
+                        use doc = JsonDocument.Parse line
+                        let root = doc.RootElement
+                        let method' = match root.TryGetProperty "method" with | true, m when m.ValueKind = JsonValueKind.String -> m.GetString() | _ -> ""
+                        let id = match root.TryGetProperty "id" with | true, i -> Some(i.GetRawText()) | _ -> None
+                        let params' = match root.TryGetProperty "params" with | true, p when p.ValueKind = JsonValueKind.Object -> Some p | _ -> None
+                        let cancelled =
+                            params' |> Option.bind (fun p -> match p.TryGetProperty "requestId" with | true, r -> Some(r.GetRawText()) | _ -> None)
+                        let token =
+                            params'
+                            |> Option.bind (fun p -> match p.TryGetProperty "_meta" with | true, m when m.ValueKind = JsonValueKind.Object -> Some m | _ -> None)
+                            |> Option.bind (fun m -> match m.TryGetProperty "progressToken" with | true, t -> Some(t.Clone()) | _ -> None)
+                        Some(method', id, cancelled, token)
+                    with :? JsonException -> None
+                match route with
+                | Some("notifications/cancelled", _, Some requestId, _) ->
+                    match pending.TryGetValue requestId with
+                    | true, cts -> (try cts.Cancel() with :? ObjectDisposedException -> ())
+                    | _ -> ()
+                | Some("tools/call", Some id, _, token) ->
+                    pending.[id] <- new Threading.CancellationTokenSource()
+                    calls.Add((line, id, token))
+                | _ -> handle settings line |> Option.iter write
             with e -> Console.Error.WriteLine("quod mcp: " + e.Message)
         line <- input.ReadLine()
+    calls.CompleteAdding()
+    worker.Join()
     0

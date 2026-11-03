@@ -67,6 +67,11 @@ the tool call (the command line has 300 s): obligations left when it is used up 
 `not-attempted`, not as failures. An agent can ask for more with the `budget` argument, and
 `quod mcp --budget 120` changes the default (`--timeout` too, 10 s per obligation).
 
+Tool calls run one at a time, while the server keeps reading: `ping`, `tools/list` and the
+resources are answered at once, `notifications/cancelled` stops the call it names (z3 is killed,
+and no response is sent), and a call that gives a `progressToken` gets a progress notification
+after each function checked.
+
 ## For the agent: a section for AGENTS.md or CLAUDE.md
 
 Copy it into the instructions file of your project, and adapt the last step.
