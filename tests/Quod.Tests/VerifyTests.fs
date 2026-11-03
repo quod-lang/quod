@@ -231,6 +231,33 @@ let ``a solver's counterexample that the function does not break is unconfirmed:
     Assert.Contains("does not break it when the function runs on these inputs", d.Message)
 
 [<Fact>]
+let ``an unconfirmed counterexample shows the loop state the solver assumed`` () =
+    // review of 0.1.3: the inputs alone (n = 0) showed nothing wrong; s = -1 does
+    let d =
+        verify
+            ("fn sum_to(n: nat) -> nat {\n"
+             + "  let mut s = 0; let mut k = 0;\n"
+             + "  while k < n invariant k <= n decreases n - k { k = k + 1; s = s + k; }\n"
+             + "  return s; }")
+        |> List.find (fun d -> d.Evidence = Some "unconfirmed")
+    Assert.Contains("The solver assumed", d.Message)
+    Assert.Matches("s = -\\d+", d.Message)
+
+[<Fact>]
+let ``an exists that the solver cannot prove gets the witness rule`` () =
+    let d =
+        verify
+            ("fn max_of(xs: seq<int>) -> int requires len(xs) > 0\n"
+             + "  ensures forall i in 0..len(xs): xs[i] <= result ensures exists i in 0..len(xs): xs[i] == result {\n"
+             + "  let mut m = xs[0]; let mut i = 1;\n"
+             + "  while i < len(xs) invariant 1 <= i && i <= len(xs) invariant forall j in 0..i: xs[j] <= m decreases len(xs) - i\n"
+             + "  { if xs[i] > m { m = xs[i]; } i = i + 1; }\n"
+             + "  return m; }")
+        |> List.find (fun d -> d.Property = Some "postcondition (ensures #2)")
+    Assert.Equal("inconclusive", d.Status)
+    Assert.Contains("give the solver its witness", d.Message)
+
+[<Fact>]
 let ``an inconclusive proof gives the solver's reason`` () =
     // a^3 + b^3 = c^3 has no solution in positive integers: nonlinear, beyond the solver
     let ds =

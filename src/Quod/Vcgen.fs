@@ -126,6 +126,13 @@ let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : strin
 
 type private Obligation = { Goal: string; Label: string; Span: Span }
 
+/// The solver rarely finds the witness of an `exists` by itself (review of 0.1.3: the agent was
+/// told only that the proof needs a hint).
+let private existsHint =
+    ". The property is an 'exists': give the solver its witness. Keep the index in a local "
+    + "(e.g. 'let mut w = 0;', set where the value is found), state it in the loop invariant "
+    + "('xs[w] == m'), and the ensures follows"
+
 /// What translating an expression produces besides its term: obligations (each already closed
 /// under the guards of its position) and facts (valid implications, e.g. callee contracts).
 type private Collector() =
@@ -574,7 +581,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// 0.1.1). The facts that mention anything else are left out: a proof with fewer facts is
     /// still a proof, but a model of fewer facts is a counterexample only if none was left out.
     /// Some(result, counterexample) when this says more than the shared session did.
-    member v.Isolated(st: State, o: Obligation, onlyComplete: bool) : (CheckResult * (string * Eval.Value) list) option =
+    member v.Isolated(st: State, o: Obligation, onlyComplete: bool)
+        : (CheckResult * (string * Eval.Value) list * (string * string) list) option =
         let operators =
             set [ "and"; "or"; "not"; "=>"; "="; "<"; "<="; ">"; ">="; "+"; "-"; "*"; "div"; "mod"; "ite"
                   "true"; "false"; "distinct"; "abs" ]
@@ -609,8 +617,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             a.SetTimeout a.DefaultTimeout
             let outcome =
                 match answer with
-                | Unsat -> Some(Unsat, [])
-                | Unknown _ when complete -> Some(answer, []) // the verdict: the shared session is not tried
+                | Unsat -> Some(Unsat, [], [])
+                | Unknown _ when complete -> Some(answer, [], []) // the verdict: the shared session is not tried
                 | Sat when complete ->
                     // the parameters this obligation is about, from the second process's model
                     let ps =
@@ -621,10 +629,30 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                         List.zip ps (if values.Length = ps.Length then values else [])
                         |> List.choose (fun ((sym, ty), x) ->
                             valueOf ty x |> Option.map (fun value -> sym.Substring(0, sym.IndexOf '@'), value))
-                    Some(Sat, cex)
+                    let declared = (o.Goal :: kept) |> Seq.collect symbols |> set
+                    Some(Sat, cex, v.State(st, a, fun term -> declared.Contains term))
                 | _ -> None
             a.Pop()
             outcome
+
+    /// The values of the function's integer and boolean locals in the model of `session`, at the
+    /// obligation: with an unconfirmed counterexample, the state the solver assumed (review of
+    /// 0.1.3: the inputs alone, n = 0, showed nothing wrong; the loop state s = -1 did).
+    member v.State(st: State, session: Smt.Session, known: string -> bool) : (string * string) list =
+        let ps = set [ for p in current.Value.Fn.Params -> p.Name ]
+        let locals =
+            st.Env
+            |> Map.toList
+            |> List.filter (fun (name, term) -> not (ps.Contains name) && scalarSorts.ContainsKey term && known term)
+        if locals.IsEmpty then []
+        else
+            let values = session.Values(locals |> List.map snd)
+            if values.Length <> locals.Length then []
+            else
+                List.zip locals values
+                |> List.choose (fun ((name, term), x) ->
+                    let t = if scalarSorts.[term] = "Bool" then TyBool else TyInt
+                    valueOf t x |> Option.map (fun value -> name, Eval.valueText value))
 
     // --- expressions ------------------------------------------------------------------
 
@@ -933,24 +961,24 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         beforeSolver (o.Label + ", solver, up to " + string ((min z3.DefaultTimeout (defaultArg v.Remaining Int32.MaxValue)) / 1000) + " s")
         let answer, isolatedCex =
             match v.Isolated(st, o, true) with
-            | Some(r, cex) -> r, Some cex
+            | Some(r, cex, state) -> r, Some(cex, state)
             | None ->
                 let first = v.BudgetedCheck(fun () -> z3.CheckBoth retryLimit)
                 match first with
                 | Unknown why when why <> "timeout" && not v.OverBudget ->
                     match v.Isolated(st, o, false) with
-                    | Some(r, cex) -> r, Some cex
+                    | Some(r, cex, state) -> r, Some(cex, state)
                     | None -> first, None
                 | r -> r, None
         afterSolver ()
         match answer with
         | Unsat -> proved <- proved + 1
-        | Sat when isolatedCex.IsSome -> v.ReportModel(o, isolatedCex.Value)
+        | Sat when isolatedCex.IsSome -> v.ReportModel(o, fst isolatedCex.Value, snd isolatedCex.Value)
         // from the second process: no candidate model to read in the shared session
         | Unknown why when isolatedCex.IsSome ->
             let reason = if why = "timeout" then "timeout" else reasonText why
             v.Report(o, "inconclusive", "could not prove " + o.Label + (if why = "timeout" then " within the time limit" else "") + v.NoCounterexample(), [], reason = reason)
-        | Sat -> v.ReportModel(o, v.CounterexampleValues())
+        | Sat -> v.ReportModel(o, v.CounterexampleValues(), v.State(st, z3, fun _ -> true))
         | Unknown "timeout" ->
             v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [], reason = "timeout")
         | Unknown why ->
@@ -1034,7 +1062,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
 
     /// A model of the negated obligation, confirmed by running the function on it (test of 0.1.2:
     /// the agent had to run quod_run itself to know whether the counterexample was real).
-    member v.ReportModel(o: Obligation, model: (string * Eval.Value) list) =
+    member v.ReportModel(o: Obligation, model: (string * Eval.Value) list, state: (string * string) list) =
         let text = model |> List.map (fun (n, x) -> n, Eval.valueText x)
         match v.Replay(o, model) with
         | Some true ->
@@ -1042,14 +1070,19 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         | Some false ->
             v.Report(o, "inconclusive",
                      "cannot prove: " + o.Label + ". The solver's counterexample below does not break it when the function runs on these inputs: "
-                     + "the property may hold, and the proof needs a stronger invariant, an assert or a lemma", text, evidence = "unconfirmed")
+                     + "the property may hold, and the proof needs a stronger invariant, an assert or a lemma"
+                     + (if state.IsEmpty then ""
+                        else ". The solver assumed " + (state |> List.map (fun (n, x) -> n + " = " + x) |> String.concat ", ")
+                             + " here, a state no run reaches: the invariant must rule it out"),
+                     text, evidence = "unconfirmed")
         | None -> v.Report(o, "refuted", "cannot prove: " + o.Label, text, evidence = "solver")
 
     member v.Report(o: Obligation, status: string, message: string, cex: (string * string) list, ?reason: string, ?evidence: string) =
         diags.Add
             { File = file; Span = o.Span; Kind = "proof"; Status = status; Severity = Error
               Fn = Some current.Value.Fn.Name; Property = Some o.Label; Counterexample = cex
-              Reason = reason; Evidence = (if cex.IsEmpty then None else evidence); Message = message }
+              Reason = reason; Evidence = (if cex.IsEmpty then None else evidence)
+              Message = message + (if status = "inconclusive" && o.Goal.Contains "(exists ((" then existsHint else "") }
 
     /// Translate e on the current path: check its obligations, assume its facts.
     member v.Eval(st: State, e: TExpr) : State * string =
