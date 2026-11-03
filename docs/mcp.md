@@ -69,8 +69,9 @@ the tool call (the command line has 300 s): obligations left when it is used up 
 
 Tool calls run one at a time, while the server keeps reading: `ping`, `tools/list` and the
 resources are answered at once, `notifications/cancelled` stops the call it names (z3 is killed,
-and no response is sent), and a call that gives a `progressToken` gets a progress notification
-after each function checked.
+and no response is sent), and a call that gives a `progressToken` gets progress notifications:
+when each function and each completeness check starts and ends, and when a try of the solver has
+run for a second (`f: invariant #2, solver, up to 10 s`).
 
 ## For the agent: a section for AGENTS.md or CLAUDE.md
 

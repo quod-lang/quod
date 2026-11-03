@@ -16,7 +16,7 @@ type Settings =
       /// Stops the check: z3 is killed, and check ends with Failure "cancelled" (quod mcp)
       Cancel: Threading.CancellationToken
       /// Told `done total what` as the check goes on (quod mcp: progress notifications)
-      Progress: int -> int -> string -> unit }
+      Progress: float -> int -> string -> unit }
 
 let defaultSettings =
     { Z3 = None; Timeout = 10; Budget = 300; SmtLog = None; Cancel = Threading.CancellationToken.None; Progress = fun _ _ _ -> () }

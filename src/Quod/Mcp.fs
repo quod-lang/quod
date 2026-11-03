@@ -441,7 +441,7 @@ let serve (settings: Pipeline.Settings) : int =
                 for (line, id, token) in calls.GetConsumingEnumerable() do
                     match pending.TryGetValue id with
                     | true, cts when not cts.IsCancellationRequested ->
-                        let progress (d: int) (t: int) (what: string) =
+                        let progress (d: float) (t: int) (what: string) =
                             token |> Option.iter (fun tok ->
                                 write (
                                     json (fun w ->

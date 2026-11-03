@@ -503,6 +503,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// z3 process without the axioms of the program, started when first needed (see Isolated).
     let scalarSorts = Dictionary<string, string>()
     let mutable arith: Session option = None
+    /// Told before and after each try of the solver (`quod mcp` turns a long one into a progress
+    /// notification)
+    let mutable beforeSolver: string -> unit = ignore
+    let mutable afterSolver: unit -> unit = ignore
     /// Inputs tried (valid or not), for the message when few satisfy the requires.
     let mutable concreteTries = 0
     /// The branches of the current function that no run took ("line 4 (condition true)").
@@ -511,6 +515,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
 
     member _.Diagnostics = List.ofSeq diags
     member _.NotAttempted = skipped
+    member _.BeforeSolver with set (f: string -> unit) = beforeSolver <- f
+    member _.AfterSolver with set (f: unit -> unit) = afterSolver <- f
 
     /// Stop the second z3 process, if one was started.
     member _.Close() =
@@ -924,6 +930,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | _, Some r when r <= 0 -> None
             | _, Some r -> Some(min r z3.DefaultTimeout)
             | _, None -> Some z3.DefaultTimeout
+        beforeSolver (o.Label + ", solver, up to " + string ((min z3.DefaultTimeout (defaultArg v.Remaining Int32.MaxValue)) / 1000) + " s")
         let answer, isolatedCex =
             match v.Isolated(st, o, true) with
             | Some(r, cex) -> r, Some cex
@@ -935,6 +942,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                     | Some(r, cex) -> r, Some cex
                     | None -> first, None
                 | r -> r, None
+        afterSolver ()
         match answer with
         | Unsat -> proved <- proved + 1
         | Sat when isolatedCex.IsSome -> v.Report(o, "refuted", "cannot prove: " + o.Label, isolatedCex.Value, evidence = "solver")
@@ -1513,10 +1521,50 @@ type VerifyResult =
 let rec verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : VerifyResult =
     verifyWith file prog z3 budgetSeconds (fun _ _ _ -> ())
 
-/// The same, telling `progress done total what` after each function checked and each contract
-/// whose completeness was checked (`quod mcp` sends it on as MCP progress notifications).
-and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) (progress: int -> int -> string -> unit) : VerifyResult =
+/// The same, telling `progress done total what` as it goes (`quod mcp` sends it on as MCP progress
+/// notifications): when it starts and ends each function and each completeness check, and when a
+/// try of the solver has run for a second (a quick one is not told). `done` grows at each call (MCP
+/// asks it): k + 1 when the k-th step (0-based) ends, between k and k + 1 while it runs (test of
+/// 0.1.2: notifications only at the end of each function told nothing during a long one).
+and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) (progress: float -> int -> string -> unit) : VerifyResult =
     let v = Verifier(file, prog, z3, budgetSeconds * 1000)
+    let mutable step = 0
+    let mutable within = 0
+    let mutable stepName = ""
+    let clock = Diagnostics.Stopwatch.StartNew()
+    let mutable lastTold = -1000L
+    let mutable total = 0
+    let gate = obj ()
+    let tell (what: string) =
+        lock gate (fun () ->
+            within <- within + 1
+            lastTold <- clock.ElapsedMilliseconds
+            progress (float step + 1.0 - 1.0 / float (within + 1)) total what)
+    let start (what: string) (name: string) =
+        lock gate (fun () ->
+            within <- 0
+            stepName <- name)
+        tell what
+    let finish (what: string) =
+        lock gate (fun () ->
+            step <- step + 1
+            lastTold <- clock.ElapsedMilliseconds
+            progress (float step) total what)
+    // a try of the solver still running after a second is told, once
+    let mutable running: (string * int64) option = None
+    v.BeforeSolver <- (fun what -> lock gate (fun () -> running <- Some(stepName + ": " + what, clock.ElapsedMilliseconds)))
+    v.AfterSolver <- (fun () -> lock gate (fun () -> running <- None))
+    use _watch =
+        new Threading.Timer(
+            (fun _ ->
+                let due = lock gate (fun () ->
+                    match running with
+                    | Some(what, t) when clock.ElapsedMilliseconds - t >= 1000L ->
+                        running <- None
+                        Some what
+                    | _ -> None)
+                due |> Option.iter tell),
+            null, 250, 250)
     z3.Init()
     v.Prelude()
     let exprFns = prog.Fns |> List.filter (fun f -> f.IsExprFn)
@@ -1527,18 +1575,19 @@ and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int
     for f in terminating do
         v.Define f
     let withContract = prog.Fns |> List.filter (fun f -> not f.Ensures.IsEmpty && not f.IsLemma)
-    let total = prog.Fns.Length + withContract.Length
-    for (k, f) in List.indexed prog.Fns do
+    total <- prog.Fns.Length + withContract.Length
+    for f in prog.Fns do
+        start ("checking the obligations of " + f.Name) f.Name
         v.Function f
-        progress (k + 1) total ("checked the obligations of " + f.Name)
+        finish ("checked the obligations of " + f.Name)
     v.Close()
     // a lemma has no result to determine: it is a proof, its ensures are what it proves
     let determined =
         withContract
-        |> List.indexed
-        |> List.filter (fun (k, f) ->
+        |> List.filter (fun f ->
+            start ("checking the completeness of " + f.Name) f.Name
             let d = v.Completeness f
-            progress (prog.Fns.Length + k + 1) total ("checked the completeness of " + f.Name)
+            finish ("checked the completeness of " + f.Name)
             d)
         |> List.length
     { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length

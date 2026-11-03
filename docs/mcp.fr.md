@@ -73,7 +73,9 @@ l'argument `budget`, et `quod mcp --budget 120` change la valeur par défaut (`-
 Les appels d'outils s'exécutent un à la fois, pendant que le serveur continue de lire : `ping`,
 `tools/list` et les ressources reçoivent une réponse immédiate, `notifications/cancelled` arrête
 l'appel qu'il désigne (z3 est arrêté, et aucune réponse n'est envoyée), et un appel qui fournit un
-`progressToken` reçoit une notification de progression après chaque fonction vérifiée.
+`progressToken` reçoit des notifications de progression : au début et à la fin de chaque fonction et
+de chaque contrôle de complétude, et quand un essai du solveur dure depuis une seconde
+(`f: invariant #2, solver, up to 10 s`).
 
 ## Pour l'agent : une section pour AGENTS.md ou CLAUDE.md
 

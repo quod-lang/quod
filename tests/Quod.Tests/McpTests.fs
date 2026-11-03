@@ -103,10 +103,16 @@ let ``a cancelled check stops at once: z3 is killed`` () =
     Assert.True(clock.Elapsed.TotalSeconds < 5.0, "cancelled after " + string clock.Elapsed.TotalSeconds + " s")
 
 [<Fact>]
-let ``progress is told after each function`` () =
-    let told = ResizeArray<int * int>()
-    match Quod.Pipeline.check "p.quod" clamp { settings with Progress = fun d t _ -> told.Add((d, t)) } with
-    | Quod.Pipeline.Checked _ -> Assert.Equal<(int * int) list>([ 1, 2; 2, 2 ], List.ofSeq told)
+let ``progress is told when each step starts and ends, and always grows`` () =
+    let told = ResizeArray<float * int * string>()
+    match Quod.Pipeline.check "p.quod" clamp { settings with Progress = fun d t what -> told.Add((d, t, what)) } with
+    | Quod.Pipeline.Checked _ ->
+        let values = [ for (d, _, _) in told -> d ]
+        Assert.True(List.pairwise values |> List.forall (fun (a, b) -> b > a), sprintf "%A" values)
+        Assert.Equal(2.0, List.last values)
+        Assert.All(told, fun (_, t, _) -> Assert.Equal(2, t))
+        let (_, _, first) = told.[0]
+        Assert.Equal("checking the obligations of clamp", first)
     | _ -> failwith "expected a check"
 
 [<Fact>]
