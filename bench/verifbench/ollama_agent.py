@@ -121,6 +121,13 @@ def calls_in_text(content: str, names: set[str]) -> list[dict]:
     return found
 
 
+def journal(**entry: object) -> None:
+    """One line per turn and per tool call on stderr, which run.py keeps as agent_stderr.txt:
+    what the model did, to tell a model that does not call the tools from one that misreads
+    their answers."""
+    print(json.dumps(entry, ensure_ascii=False), file=sys.stderr, flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -144,7 +151,10 @@ def main() -> None:
             tokens_in += r.get("prompt_eval_count") or 0
             tokens_out += r.get("eval_count") or 0
             msg = r["message"]
-            calls = msg.get("tool_calls") or calls_in_text(msg.get("content") or "", names)
+            native = msg.get("tool_calls")
+            calls = native or calls_in_text(msg.get("content") or "", names)
+            journal(turn=turns, text=(msg.get("content") or "")[:2000], calls=len(calls or []),
+                    calls_in_text=bool(calls) and not native)
             messages.append({"role": "assistant", "content": msg.get("content") or "", **({"tool_calls": calls} if calls else {})})
             if not calls:
                 final = msg.get("content") or ""
@@ -160,6 +170,9 @@ def main() -> None:
                 out = file_tool(name, args) if name in {"read_file", "write_file", "list_files"} \
                     else mcp.call(name, args) if name in names else "error: unknown tool " + name
                 messages.append({"role": "tool", "content": out[:20000], "tool_name": name})
+                journal(turn=turns, tool=name, args={k: (v if len(str(v)) <= 4000 else str(v)[:4000] + "...")
+                                                     for k, v in args.items()} if isinstance(args, dict) else args,
+                        out=out[:1500], out_len=len(out))
         else:
             final = "stopped: max turns"
     except Exception as e:  # the run is recorded, not lost
