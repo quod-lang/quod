@@ -158,10 +158,10 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    outil livré : [dafny-complete](tools/dafny-complete/).
 1. **Quod 0.1** ([publié](https://github.com/quod-lang/quod/releases/latest)) : fonctions pures sur entiers, booléens,
    séquences et tuples, avec contrats, lemmes (des preuves, effacées du code généré), contrôle de
-   complétude et génération Python.
-2. **Quod 0.2** : un serveur MCP, pour que les agents écrivent et vérifient du Quod comme un
-   outil, et une génération C#, pour livrer des fonctions prouvées dans des bases de code .NET
-   existantes.
+   complétude et génération Python ; depuis la 0.1.1, un serveur MCP, pour que les agents écrivent
+   et vérifient du Quod comme un outil ([docs/mcp.fr.md](docs/mcp.fr.md)).
+2. **Quod 0.2** : une génération C#, pour livrer des fonctions prouvées dans des bases de code
+   .NET existantes.
 3. **Quod 0.3** : chaînes, types algébriques, modules, génériques.
 4. **Quod 0.4** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,

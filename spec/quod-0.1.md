@@ -321,7 +321,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 | Version | Planned content |
 |---|---|
-| 0.2 | an MCP server, so that agents write and check Quod as a tool; a C# backend |
+| 0.2 | a C# backend (the MCP server came with 0.1.1) |
 | 0.3 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
