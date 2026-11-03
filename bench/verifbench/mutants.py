@@ -37,7 +37,9 @@ OPERATORS = [
     (r"&&", "||"),
 ]
 
-CONTRACT = re.compile(r"^\s*(fn |requires|ensures|invariant|decreases|loose|//)")
+# Signatures and contracts are not mutated: only the code is (a `lemma` signature, like a `fn`
+# one, would only yield mutants that do not parse).
+CONTRACT = re.compile(r"^\s*(fn |lemma |requires|ensures|invariant|decreases|loose|//)")
 
 
 def mutants(source: str) -> list[tuple[str, str]]:
