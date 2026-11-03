@@ -14,7 +14,7 @@ installer.
 |---|---|
 | `quod_check` | Types, preuves (z3) et complétude d'un programme donné par `source` (son texte) ou `path`. Renvoie les diagnostics, avec contre-exemples, et une ligne de résumé qui commence par `verified` ou `rejected`. Options : `timeout`, `budget`. |
 | `quod_build` | Vérifie, puis renvoie le module Python généré, sous forme de texte (aucun fichier écrit). Seul un programme vérifié est compilé, sauf si `runtime_checks` vaut vrai. |
-| `quod_run` | Exécute une fonction sur des arguments donnés (nombres, booléens, tableaux JSON), en vérifiant au passage chaque assertion, invariant, borne et contrat. Renvoie le résultat, ou l'obligation qui échoue. |
+| `quod_run` | Exécute une fonction sur des arguments donnés (nombres, booléens, tableaux JSON), en vérifiant au passage chaque assertion, invariant, borne et contrat. Renvoie le résultat, ou l'obligation qui échoue, avec son texte (et la valeur renvoyée, pour une postcondition). |
 | `quod_reference` | La référence du langage, ou l'une de ses sections (`section` : `Hints and lemmas`, `Contract style`...). Aussi une ressource : `quod://reference`. |
 
 Chaque outil renvoie un texte pour l'agent, et les mêmes faits en JSON (`structuredContent`).

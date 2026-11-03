@@ -76,8 +76,12 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
     /// The branches taken: (span of the `if`, value of its condition). Reported when no run
     /// broke an obligation: a branch no run took is where a bug may hide (first-user test).
     let taken = System.Collections.Generic.HashSet<Quod.Syntax.Span * bool>()
+    /// The last result whose postconditions were checked: the value a broken postcondition is
+    /// about (quod_run reports it).
+    let mutable checkedResult: Value option = None
 
     member _.Taken = taken
+    member _.CheckedResult = checkedResult
 
     new(fns: Map<string, TFn>) = Evaluator(fns, false)
 
@@ -283,6 +287,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
                         raise (CannotEvaluate "no return")
                     with Returned(v, span) -> v, span
             if checking then
+                checkedResult <- Some result
                 for (ens, k) in List.zip f.Ensures [ 1 .. f.Ensures.Length ] do
                     ev.Require(ens, env.Add("result", result), "postcondition (ensures #" + string k + ")", span)
             result

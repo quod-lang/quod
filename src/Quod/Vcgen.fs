@@ -541,7 +541,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                   Fn = Some f.Name; Property = Some "time budget"; Counterexample = []; Reason = Some "budget"; Evidence = None
                   Message =
                     string skippedHere + " proof obligation(s) not attempted: the time budget of the check ("
-                    + string (budgetMs / 1000) + " s, --budget) was used up before them. Check this function in a file of its own, or raise the budget" }
+                    + string (budgetMs / 1000) + " s) was used up before them. Check this function in a file of its own, or raise the budget "
+                    + "(the budget argument of quod_check through MCP, --budget on the command line)" }
             skippedHere <- 0
     member _.Proved = proved
 
@@ -1278,7 +1279,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 { File = file; Span = f.Span; Kind = "completeness"; Status = "not-attempted"; Severity = Warning
                   Fn = Some f.Name; Property = Some "the contract determines a unique result"; Counterexample = []
                   Reason = Some "budget"; Evidence = None
-                  Message = "completeness not checked: the time budget of the check (--budget) was used up" }
+                  Message = "completeness not checked: the time budget of the check was used up (raise it with the budget argument of quod_check through MCP, --budget on the command line)" }
             false
         else
         z3.Push()

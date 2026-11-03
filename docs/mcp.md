@@ -13,7 +13,7 @@ with z3 next to it: nothing else to install.
 |---|---|
 | `quod_check` | Types, proofs (z3) and completeness of a program given as `source` (its text) or `path`. Returns the diagnostics, with counterexamples, and a summary line that starts with `verified` or `rejected`. Options: `timeout`, `budget`. |
 | `quod_build` | Checks, then returns the generated Python module as text (no file written). Only a verified program is built, unless `runtime_checks` is true. |
-| `quod_run` | Runs one function on given arguments (JSON numbers, booleans, arrays), checking every assertion, invariant, bound and contract on the way. Returns the result, or the obligation that fails. |
+| `quod_run` | Runs one function on given arguments (JSON numbers, booleans, arrays), checking every assertion, invariant, bound and contract on the way. Returns the result, or the obligation that fails, with its text (and the value returned, for a postcondition). |
 | `quod_reference` | The language reference, or one `section` of it (`Hints and lemmas`, `Contract style`...). Also a resource: `quod://reference`. |
 
 Each tool returns a text for the agent and the same facts as JSON (`structuredContent`).

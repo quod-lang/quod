@@ -26,9 +26,11 @@ let reference =
          use reader = new StreamReader(stream, Encoding.UTF8)
          let spec = reader.ReadToEnd().Replace("\r\n", "\n")
          let body = spec.Substring(spec.IndexOf "## The language", spec.IndexOf "## Not in 0.1" - spec.IndexOf "## The language")
-         "# Quod " + quodVersion + " reference\n\n"
-         + body.Replace("](kernel.md)", "](https://github.com/quod-lang/quod/blob/main/spec/kernel.md)").TrimEnd()
-         + "\n")
+         // without the vocabulary of the design documents, which an agent does not read
+         let body =
+             body.Replace(" (pillar 5)", "").Replace(" (the ⚠️ status of [principle 2](kernel.md))", "")
+                 .Replace("](kernel.md)", "](https://github.com/quod-lang/quod/blob/main/spec/kernel.md)")
+         "# Quod " + quodVersion + " reference\n\n" + body.TrimEnd() + "\n")
 
 /// One section of the reference: the first heading (## or ###) that contains `title`, up to the
 /// next heading of the same level or above.
@@ -193,6 +195,11 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
                     w.WriteEndObject())
               IsError = false }
 
+/// "an int", "a nat", "a seq<int>": a type in a sentence.
+let private aType (t: Ty) =
+    let text = tyText t
+    (if text.StartsWith "i" then "an " else "a ") + text
+
 /// Run one function on given arguments with the evaluator, checking every obligation on the way
 /// (as `quod check` does before asking the solver): its result, or the obligation it breaks.
 let private run (args: JsonElement) : ToolResult =
@@ -218,7 +225,7 @@ let private run (args: JsonElement) : ToolResult =
         List.map2 (fun (p: TParam) x ->
             match readValue p.Ty x with
             | Some v -> v
-            | None -> failTool ("argument '" + p.Name + "' is not a " + tyText p.Ty + ": " + x.GetRawText())) f.Params given
+            | None -> failTool ("argument '" + p.Name + "' is not " + aType p.Ty + ": " + x.GetRawText())) f.Params given
     let fns = typed.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
     let plain = Eval.Evaluator(fns)
     let env = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
@@ -230,7 +237,7 @@ let private run (args: JsonElement) : ToolResult =
           Structured = json (fun w -> w.WriteStartObject(); w.WriteString("status", status); extra w; w.WriteEndObject())
           IsError = false }
     match notFit, failedRequires with
-    | Some(p, v), _ -> outcome "invalid-input" ("argument '" + p.Name + "' = " + Eval.valueText v + " is not a " + tyText p.Ty) ignore
+    | Some(p, v), _ -> outcome "invalid-input" ("argument '" + p.Name + "' = " + Eval.valueText v + " is not " + aType p.Ty) ignore
     | _, Some(k, r) ->
         outcome "requires-false" ("the requires #" + string (k + 1) + " does not hold for these arguments: " + Printer.exprText (toSyntax r))
             (fun w -> w.WriteNumber("requires", k + 1))
@@ -241,8 +248,32 @@ let private run (args: JsonElement) : ToolResult =
             outcome "ok" (name + " returns " + Eval.valueText v) (fun w -> w.WritePropertyName "result"; writeValue w v)
         with
         | Eval.Violation(label, span) ->
-            outcome "violation" (file + "(" + string span.Start.Line + "," + string span.Start.Col + "): " + label + " fails on these arguments")
-                (fun w -> w.WriteString("property", label); w.WriteNumber("line", span.Start.Line); w.WriteNumber("col", span.Start.Col))
+            // what was broken: the clause of a postcondition, else the source line; and for a
+            // postcondition, the value returned (test of 0.1.1: the agent had to reread the source)
+            let ensuresNumber =
+                if label.StartsWith "postcondition (ensures #" then
+                    match Int32.TryParse(label.Substring(24).TrimEnd(')')) with
+                    | true, k when k >= 1 && k <= f.Ensures.Length -> Some k
+                    | _ -> None
+                else None
+            let returned = if ensuresNumber.IsSome then ev.CheckedResult else None
+            let what =
+                match ensuresNumber with
+                | Some k -> Printer.exprText (toSyntax f.Ensures.[k - 1])
+                | None ->
+                    let lines = src.Replace("\r\n", "\n").Split('\n')
+                    if span.Start.Line >= 1 && span.Start.Line <= lines.Length then lines.[span.Start.Line - 1].Trim() else ""
+            let call = name + "(" + String.Join(", ", values |> List.map Eval.valueText) + ")"
+            let text =
+                file + "(" + string span.Start.Line + "," + string span.Start.Col + "): " + call
+                + (match returned with Some v -> " returned " + Eval.valueText v + ", but " | None -> ": ")
+                + label + " fails: `" + what + "`"
+            outcome "violation" text (fun w ->
+                w.WriteString("property", label)
+                w.WriteString("text", what)
+                returned |> Option.iter (fun v -> w.WritePropertyName "returned"; writeValue w v)
+                w.WriteNumber("line", span.Start.Line)
+                w.WriteNumber("col", span.Start.Col))
         | Eval.CannotEvaluate why -> outcome "not-evaluated" ("could not run '" + name + "': " + why) (fun w -> w.WriteString("reason", why))
 
 let private referenceTool (args: JsonElement) : ToolResult =
@@ -277,7 +308,7 @@ let private tools =
       + ",\"target\": {\"type\": \"string\", \"enum\": [\"python\"]}, \"runtime_checks\": {\"type\": \"boolean\"}}}"
       "quod_run",
       "Run one function of a Quod program on given arguments, checking every assertion, invariant, bound and contract on the way, without the solver. "
-      + "Integers are JSON numbers (or strings for big ones), sequences and tuples are arrays. Returns the result, or the obligation that fails.",
+      + "Integers are JSON numbers (or strings for big ones), sequences and tuples are arrays. Returns the result, or the obligation that fails, with its text (and the value returned, for a postcondition).",
       "{\"type\": \"object\", \"properties\": {" + programProperties
       + ",\"function\": {\"type\": \"string\"}, \"args\": {\"type\": \"array\", \"description\": \"One JSON value per parameter, in order\"}}, \"required\": [\"function\"]}"
       "quod_reference",

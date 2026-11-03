@@ -108,3 +108,21 @@ let ``progress is told after each function`` () =
     match Quod.Pipeline.check "p.quod" clamp { settings with Progress = fun d t _ -> told.Add((d, t)) } with
     | Quod.Pipeline.Checked _ -> Assert.Equal<(int * int) list>([ 1, 2; 2, 2 ], List.ofSeq told)
     | _ -> failwith "expected a check"
+
+[<Fact>]
+let ``a broken postcondition in quod_run comes with the value returned and the clause`` () =
+    // test of 0.1.1: the agent had to reread the source to know what was expected
+    let add = "fn add(a: int, b: int) -> int ensures result == a + b { if a == b * b * b && b > 2 { return a + b + 1; } return a + b; }"
+    let r, text = call "quod_run" (withArgs add "\"function\": \"add\", \"args\": [27, 3]")
+    Assert.Equal("violation", r.GetProperty("status").GetString())
+    Assert.Equal(31, r.GetProperty("returned").GetInt32())
+    Assert.Equal("result == a + b", r.GetProperty("text").GetString())
+    Assert.Contains("add(27, 3) returned 31, but postcondition (ensures #1) fails: `result == a + b`", text)
+
+[<Fact>]
+let ``the reference served to agents has no vocabulary of the design documents`` () =
+    let all, _ = call "quod_reference" "{}"
+    let text = all.GetProperty("reference").GetString()
+    Assert.DoesNotContain("pillar", text)
+    Assert.DoesNotContain("principle 2", text)
+    Assert.Contains("## Completeness, built in", text)
