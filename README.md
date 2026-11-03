@@ -8,7 +8,7 @@
 > **Status: Quod 0.1, young but real.** The compiler checks types, proves contracts with Z3,
 > checks that every contract determines its result, and compiles to Python. An AI agent wrote
 > the six VerifBench tasks in Quod from the language reference alone, and all six pass the hidden
-> tests. No release yet: build it from source (below).
+> tests. [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
 
 ## Thesis
 
@@ -89,12 +89,22 @@ documentation, not run-time checks.
 | [bench/](bench/) | **VerifBench**: Phase 0 (Python vs Dafny, written by agents), and [the six tasks in Quod](bench/quod/), by hand and by an agent |
 | [tools/dafny-complete/](tools/dafny-complete/) | The first building block, for Dafny: a spec-completeness checker that finds concrete witnesses of underspecified contracts |
 
-## Build and try
+## Install and try
 
-You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) and the native toolchain that
-Native AOT uses (on Windows, the C++ tools of Visual Studio) to build, and
+[Download the package for your system](https://github.com/quod-lang/quod/releases/latest) (Windows x64, Linux x64,
+macOS on Apple silicon), unpack it, and run `quod` from that folder: z3 is next to it, nothing else
+to install. On macOS the binaries are not signed: run `xattr -d com.apple.quarantine quod z3` in
+the folder first.
+
+```bash
+quod check examples/binary_search.quod
+quod build examples/prefix_sums.quod --target python
+```
+
+To build from source, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download) and the
+native toolchain that Native AOT uses (on Windows, the C++ tools of Visual Studio), and
 [Z3](https://github.com/Z3Prover/z3/releases) to verify (on the `PATH`, next to `quod`, or in
-`QUOD_Z3`).
+`QUOD_Z3`; the releases use 4.12.1, also on PyPI as `z3-solver`).
 
 ```bash
 dotnet publish src/Quod -c Release -r win-x64 -o artifacts/aot
@@ -139,14 +149,15 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 
 0. **Measure** (done): does verification reduce escaped bugs, and at what cost?
    First tool shipped: [dafny-complete](tools/dafny-complete/).
-1. **Quod 0.1** (nearly done): pure functions on integers, booleans, sequences and tuples, with
-   contracts, lemmas (proofs erased from the generated code), the completeness check and a Python
-   backend. Left: JSON diagnostics polish and Native AOT releases for Windows, Linux and macOS.
-2. **Quod 0.2**: strings, algebraic types, modules, generics, an MCP server for agents.
-3. **Quod 0.3**: capabilities (no ambient authority: a function touches the console, files or
+1. **Quod 0.1** ([released](https://github.com/quod-lang/quod/releases/latest)): pure functions on integers, booleans,
+   sequences and tuples, with contracts, lemmas (proofs erased from the generated code), the
+   completeness check and a Python backend.
+2. **Quod 0.2**: an MCP server, so that agents write and check Quod as a tool, and a C# backend,
+   to deliver proved functions into existing .NET code bases.
+3. **Quod 0.3**: strings, algebraic types, modules, generics.
+4. **Quod 0.4**: capabilities (no ambient authority: a function touches the console, files or
    the network only through a capability it receives), sealed contracts, maps and sets.
-4. **Quod 0.4**: a C backend, towards native code and WASM.
-5. **Quod 2.0 will be written in Quod.**
+5. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
 
 Development happens in the open. If you write Dafny, or let agents write code you need to trust,
 issues and discussions are very welcome.

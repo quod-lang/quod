@@ -8,8 +8,7 @@ et **vérifié par la machine**. Le programme arrive avec sa démonstration.
 > **État : Quod 0.1, jeune mais réel.** Le compilateur vérifie les types, prouve les contrats avec
 > Z3, contrôle que chaque contrat détermine son résultat, et compile vers Python. Un agent IA a
 > écrit les six tâches VerifBench en Quod à partir de la seule référence du langage, et les six
-> passent les tests cachés. Pas encore de version publiée : il se compile depuis les sources
-> (voir plus bas).
+> passent les tests cachés. [Le télécharger](https://github.com/quod-lang/quod/releases/latest) : z3 est inclus.
 
 ## Thèse
 
@@ -91,12 +90,23 @@ deviennent de la documentation, pas des vérifications à l'exécution.
 | [bench/](bench/README.fr.md) | **VerifBench** : la phase 0 (Python contre Dafny, écrits par des agents), et [les six tâches en Quod](bench/quod/README.fr.md), à la main et par un agent |
 | [tools/dafny-complete/](tools/dafny-complete/) | La première brique, pour Dafny : un contrôle de spec complète qui trouve des témoins concrets des contrats sous-spécifiés |
 
-## Compiler et essayer
+## Installer et essayer
 
-Il faut le [SDK .NET 10](https://dotnet.microsoft.com/download) et la chaîne native qu'utilise
-Native AOT (sous Windows, les outils C++ de Visual Studio) pour compiler, et
+[Télécharger le paquet de votre système](https://github.com/quod-lang/quod/releases/latest) (Windows x64, Linux x64, macOS
+sur puce Apple), le décompresser, et lancer `quod` depuis ce dossier : z3 est à côté, rien d'autre
+à installer. Sous macOS, les binaires ne sont pas signés : lancer d'abord
+`xattr -d com.apple.quarantine quod z3` dans le dossier.
+
+```bash
+quod check examples/binary_search.quod
+quod build examples/prefix_sums.quod --target python
+```
+
+Pour compiler depuis les sources, il faut le [SDK .NET 10](https://dotnet.microsoft.com/download)
+et la chaîne native qu'utilise Native AOT (sous Windows, les outils C++ de Visual Studio), et
 [Z3](https://github.com/Z3Prover/z3/releases) pour vérifier (sur le `PATH`, à côté de `quod`, ou
-dans `QUOD_Z3`).
+dans `QUOD_Z3` ; les versions publiées utilisent la 4.12.1, aussi sur PyPI sous le nom
+`z3-solver`).
 
 ```bash
 dotnet publish src/Quod -c Release -r win-x64 -o artifacts/aot
@@ -143,17 +153,18 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 
 0. **Mesurer** (fait) : la vérification réduit-elle les bugs échappés, à quel coût ? Premier
    outil livré : [dafny-complete](tools/dafny-complete/).
-1. **Quod 0.1** (presque terminé) : fonctions pures sur entiers, booléens, séquences et tuples,
-   avec contrats, lemmes (des preuves, effacées du code généré), contrôle de complétude et
-   génération Python. Reste : la finition des diagnostics
-   JSON et des binaires Native AOT publiés pour Windows, Linux et macOS.
-2. **Quod 0.2** : chaînes, types algébriques, modules, génériques, un serveur MCP pour les
-   agents.
-3. **Quod 0.3** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
+1. **Quod 0.1** ([publié](https://github.com/quod-lang/quod/releases/latest)) : fonctions pures sur entiers, booléens,
+   séquences et tuples, avec contrats, lemmes (des preuves, effacées du code généré), contrôle de
+   complétude et génération Python.
+2. **Quod 0.2** : un serveur MCP, pour que les agents écrivent et vérifient du Quod comme un
+   outil, et une génération C#, pour livrer des fonctions prouvées dans des bases de code .NET
+   existantes.
+3. **Quod 0.3** : chaînes, types algébriques, modules, génériques.
+4. **Quod 0.4** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
    dictionnaires et ensembles.
-4. **Quod 0.4** : une génération C, vers le code natif et WASM.
-5. **Quod 2.0 sera écrit en Quod.**
+5. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
+   Quod.**
 
 Le développement se fait en public. Si vous écrivez du Dafny, ou laissez des agents écrire du code
 auquel vous devez faire confiance, issues et discussions sont les bienvenues.

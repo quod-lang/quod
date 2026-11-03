@@ -16,14 +16,15 @@ This is the "agent first" test: if an agent cannot write Quod from a short gramm
 language must be revisited at 0.1, not at 1.0.
 
 The six tasks: `binary_search`, `merge_intervals`, `rle_encode`, `bounded_queue`, `max_subarray`,
-`rotate` (the two others, `parse_int` and `balanced`, need strings: 0.2).
+`rotate` (the two others, `parse_int` and `balanced`, need strings: 0.3).
 
 ## Technical choices
 
 - Compiler written in **F#**, shipped as a **Native AOT** binary: no .NET runtime to install.
 - Solver: **Z3**, spoken to in **SMT-LIB** through one **persistent `z3` process** per compilation
   (`push` / `pop`). See the [prototype](../proto/z3-aot/README.md).
-- First target: **Python**. C comes second (0.4).
+- First target: **Python**. Next: **C#**, to deliver proved functions into existing .NET code
+  bases (0.2). C, towards native code and WASM, comes later.
 - The compiler produces a verified intermediate representation; each target is a translator of it.
 
 ## The language
@@ -305,10 +306,10 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 | Version | Planned content |
 |---|---|
-| 0.2 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types, an MCP server for agents |
-| 0.3 | capabilities and input/output, sealed contracts, maps and sets |
-| 0.4 | C backend |
-| ... | what a compiler needs, for 2.0 |
+| 0.2 | an MCP server, so that agents write and check Quod as a tool; a C# backend |
+| 0.3 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types |
+| 0.4 | capabilities and input/output, sealed contracts, maps and sets |
+| later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 
 **Quod 2.0 will be written in Quod.** Self-hosting needs strings, algebraic types (syntax trees),
 maps, and files: those are the milestones between 0.1 and 2.0. Until then the F# compiler is kept

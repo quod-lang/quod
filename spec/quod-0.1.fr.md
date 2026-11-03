@@ -15,14 +15,15 @@ C'est le test « agent d'abord » : si un agent ne sait pas écrire du Quod à p
 courte, le pari du langage doit être revu dès la 0.1, pas à la 1.0.
 
 Les six tâches : `binary_search`, `merge_intervals`, `rle_encode`, `bounded_queue`,
-`max_subarray`, `rotate` (les deux autres, `parse_int` et `balanced`, demandent des chaînes : 0.2).
+`max_subarray`, `rotate` (les deux autres, `parse_int` et `balanced`, demandent des chaînes : 0.3).
 
 ## Choix techniques
 
 - Compilateur écrit en **F#**, distribué en binaire **Native AOT** : aucun runtime .NET à installer.
 - Solveur : **Z3**, interrogé en **SMT-LIB** via **un processus `z3` persistant** par compilation
   (`push` / `pop`). Voir le [prototype](../proto/z3-aot/README.md).
-- Première cible : **Python**. C vient en second (0.4).
+- Première cible : **Python**. Ensuite **C#**, pour livrer des fonctions prouvées dans des bases de
+  code .NET existantes (0.2). C, vers le code natif et WASM, vient plus tard.
 - Le compilateur produit une représentation intermédiaire vérifiée ; chaque cible en est un
   traducteur.
 
@@ -316,10 +317,10 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 | Version | Contenu prévu |
 |---|---|
-| 0.2 | chaînes et caractères, types algébriques (enums, `Option`), modules et imports, génériques, types raffinés généraux, un serveur MCP pour les agents |
-| 0.3 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
-| 0.4 | backend C |
-| ... | ce qu'il faut à un compilateur, pour la 2.0 |
+| 0.2 | un serveur MCP, pour que les agents écrivent et vérifient du Quod comme un outil ; un backend C# |
+| 0.3 | chaînes et caractères, types algébriques (enums, `Option`), modules et imports, génériques, types raffinés généraux |
+| 0.4 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
+| plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 
 **Quod 2.0 sera écrit en Quod.** L'auto-hébergement demande des chaînes, des types algébriques (les
 arbres syntaxiques), des tables associatives et des fichiers : ce sont les jalons entre la 0.1 et
