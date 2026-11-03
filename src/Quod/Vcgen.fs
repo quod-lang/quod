@@ -574,7 +574,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// 0.1.1). The facts that mention anything else are left out: a proof with fewer facts is
     /// still a proof, but a model of fewer facts is a counterexample only if none was left out.
     /// Some(result, counterexample) when this says more than the shared session did.
-    member v.Isolated(st: State, o: Obligation, onlyComplete: bool) : (CheckResult * (string * string) list) option =
+    member v.Isolated(st: State, o: Obligation, onlyComplete: bool) : (CheckResult * (string * Eval.Value) list) option =
         let operators =
             set [ "and"; "or"; "not"; "=>"; "="; "<"; "<="; ">"; ">="; "+"; "-"; "*"; "div"; "mod"; "ite"
                   "true"; "false"; "distinct"; "abs" ]
@@ -620,7 +620,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                     let cex =
                         List.zip ps (if values.Length = ps.Length then values else [])
                         |> List.choose (fun ((sym, ty), x) ->
-                            valueOf ty x |> Option.map (fun value -> sym.Substring(0, sym.IndexOf '@'), Eval.valueText value))
+                            valueOf ty x |> Option.map (fun value -> sym.Substring(0, sym.IndexOf '@'), value))
                     Some(Sat, cex)
                 | _ -> None
             a.Pop()
@@ -945,12 +945,12 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         afterSolver ()
         match answer with
         | Unsat -> proved <- proved + 1
-        | Sat when isolatedCex.IsSome -> v.Report(o, "refuted", "cannot prove: " + o.Label, isolatedCex.Value, evidence = "solver")
+        | Sat when isolatedCex.IsSome -> v.ReportModel(o, isolatedCex.Value)
         // from the second process: no candidate model to read in the shared session
         | Unknown why when isolatedCex.IsSome ->
             let reason = if why = "timeout" then "timeout" else reasonText why
             v.Report(o, "inconclusive", "could not prove " + o.Label + (if why = "timeout" then " within the time limit" else "") + v.NoCounterexample(), [], reason = reason)
-        | Sat -> v.Report(o, "refuted", "cannot prove: " + o.Label, v.Counterexample(), evidence = "solver")
+        | Sat -> v.ReportModel(o, v.CounterexampleValues())
         | Unknown "timeout" ->
             v.Report(o, "inconclusive", "could not prove " + o.Label + " within the time limit" + v.NoCounterexample(), [], reason = "timeout")
         | Unknown why ->
@@ -999,11 +999,51 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | _ -> None
 
     /// The parameters' values in the current model (empty when there is none).
-    member v.Counterexample() : (string * string) list =
+    member v.CounterexampleValues() : (string * Eval.Value) list =
         let ps = paramsOf.[current.Value.Fn.Name]
         let values = ps |> List.map (fun (sym, ty) -> v.ModelValue(sym, ty))
         if values |> List.exists Option.isNone then []
-        else List.zip ps values |> List.map (fun ((sym, _), value) -> (sym.Substring(0, sym.IndexOf '@'), Eval.valueText value.Value))
+        else List.zip ps values |> List.map (fun ((sym, _), value) -> sym.Substring(0, sym.IndexOf '@'), value.Value)
+
+    member v.Counterexample() : (string * string) list =
+        v.CounterexampleValues() |> List.map (fun (n, x) -> n, Eval.valueText x)
+
+    /// Run the function on the solver's model, checking every obligation: does it break this one?
+    /// Some true: yes, a certain counterexample; Some false: the run breaks nothing here (the
+    /// model is a state the code does not reach, e.g. allowed by an invariant too weak to prove the
+    /// obligation); None: the run could not tell (the model misses a parameter the run needs, or
+    /// cannot be evaluated). Parameters the obligation is not about take their zero value.
+    member v.Replay(o: Obligation, model: (string * Eval.Value) list) : bool option =
+        let f = current.Value.Fn
+        let values =
+            f.Params |> List.map (fun p -> match List.tryFind (fun (n, _) -> n = p.Name) model with Some(_, x) -> x | None -> zeroValue p.Ty)
+        let plain = Eval.Evaluator(fns)
+        let env = List.zip (f.Params |> List.map (fun p -> p.Name)) values |> Map.ofList
+        let fits = List.forall2 (fun (p: TParam) x -> plain.Fits(p.Ty, x)) f.Params values
+        if not fits || model.IsEmpty then None
+        elif not (f.Requires |> List.forall (fun r -> plain.Holds(r, env) = Some true)) then None
+        else
+            let ev = Eval.Evaluator(fns, true)
+            Eval.withBigStack (fun () ->
+                try
+                    ev.Run(f, values) |> ignore
+                    Some false
+                with
+                | Eval.Violation(label, span) -> Some(label = o.Label && span = o.Span)
+                | Eval.CannotEvaluate _ -> None)
+
+    /// A model of the negated obligation, confirmed by running the function on it (test of 0.1.2:
+    /// the agent had to run quod_run itself to know whether the counterexample was real).
+    member v.ReportModel(o: Obligation, model: (string * Eval.Value) list) =
+        let text = model |> List.map (fun (n, x) -> n, Eval.valueText x)
+        match v.Replay(o, model) with
+        | Some true ->
+            v.Report(o, "refuted", "cannot prove: " + o.Label + ": it fails when the function runs on the inputs below", text, evidence = "run")
+        | Some false ->
+            v.Report(o, "inconclusive",
+                     "cannot prove: " + o.Label + ". The solver's counterexample below does not break it when the function runs on these inputs: "
+                     + "the property may hold, and the proof needs a stronger invariant, an assert or a lemma", text, evidence = "unconfirmed")
+        | None -> v.Report(o, "refuted", "cannot prove: " + o.Label, text, evidence = "solver")
 
     member v.Report(o: Obligation, status: string, message: string, cex: (string * string) list, ?reason: string, ?evidence: string) =
         diags.Add

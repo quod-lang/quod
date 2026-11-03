@@ -236,8 +236,11 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 - `counterexample` (a proof obligation): the inputs that break it. `witness` (completeness): the
   input and the two different results the contract accepts.
 - `evidence`, with a counterexample: `run` (the function was run on these inputs and the
-  obligation broke: certain), `solver` (a model of the negated obligation), `unconfirmed` (a
-  candidate model the solver could not confirm).
+  obligation broke: certain), `unconfirmed`, `solver`. A model the solver finds is run too: if the
+  obligation breaks, the evidence is `run`; if the run breaks nothing, the model is a state the code
+  does not reach (an invariant too weak to prove the obligation, typically), and the diagnostic is
+  `inconclusive` and `unconfirmed`; `solver` when the model cannot be run. A candidate model of an
+  `unknown` is `unconfirmed` too.
 - `reason`, when the solver gave no verdict: `timeout`, or what it says (`incomplete
   quantifiers`, `incomplete (theory arithmetic)`...). In text mode, shown after `solver:`.
 - Notes (`severity: note`, not printed in text mode) tell a reviewer what the proofs cannot vouch

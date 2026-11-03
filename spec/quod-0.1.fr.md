@@ -246,8 +246,12 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 - `counterexample` (une obligation de preuve) : les entrées qui la violent. `witness` (complétude) :
   l'entrée et les deux résultats différents que le contrat accepte.
 - `evidence`, avec un contre-exemple : `run` (la fonction a été exécutée sur ces entrées et
-  l'obligation a été violée : c'est certain), `solver` (un modèle de l'obligation niée),
-  `unconfirmed` (un modèle candidat que le solveur n'a pas pu confirmer).
+  l'obligation a été violée : c'est certain), `unconfirmed`, `solver`. Un modèle trouvé par le
+  solveur est exécuté lui aussi : si l'obligation est violée, l'`evidence` est `run` ; si
+  l'exécution ne viole rien, le modèle est un état que le code n'atteint pas (typiquement un
+  invariant trop faible pour prouver l'obligation), et le diagnostic est `inconclusive` et
+  `unconfirmed` ; `solver` quand le modèle ne peut pas être exécuté. Un modèle candidat d'un
+  `unknown` est lui aussi `unconfirmed`.
 - `reason`, quand le solveur n'a pas conclu : `timeout`, ou ce qu'il en dit (`incomplete
   quantifiers`, `incomplete (theory arithmetic)`...). En mode texte, affichée après `solver:`.
 - Des notes (`severity: note`, non affichées en mode texte) disent à un relecteur ce dont les

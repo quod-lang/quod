@@ -204,16 +204,31 @@ let ``a lemma whose recursive call does not decrease gets a counterexample from 
     Assert.NotEmpty(d.Counterexample)
 
 [<Fact>]
-let ``a counterexample says where it comes from: a run, or the solver`` () =
+let ``a counterexample says where it comes from, and the solver's are confirmed by running them`` () =
     // no small input or constant of the program satisfies the requires (x > 56 with y = 8 at
     // least), and the inputs found by the solver cannot see through the call to big: the
-    // counterexample comes from the solver
+    // counterexample comes from the solver's model, then running the function on it confirms it
+    // (test of 0.1.2)
     let solver =
         assertRefuted "postcondition"
             "fn big(y: int) -> bool { y > 7 }\nfn f(x: int, y: int) -> int requires big(y) && x > 7 * y ensures result > 0 { x - 7 * y - 5 }"
-    Assert.Equal(Some "solver", solver.Evidence)
+    Assert.Equal(Some "run", solver.Evidence)
+    Assert.Contains("it fails when the function runs on the inputs below", solver.Message)
     let run = assertRefuted "postcondition" "fn g(x: int) -> int ensures result > 0 { x }"
     Assert.Equal(Some "run", run.Evidence)
+
+[<Fact>]
+let ``a solver's counterexample that the function does not break is unconfirmed: the invariant is too weak`` () =
+    let d =
+        verify
+            ("fn sum_to(n: nat) -> int ensures result == n * (n + 1) / 2 {\n"
+             + "  let mut i = 0; let mut s = 0;\n"
+             + "  while i < n invariant 0 <= i <= n decreases n - i { i = i + 1; s = s + i; }\n"
+             + "  return s; }")
+        |> List.find (fun d -> d.Property = Some "postcondition (ensures #1)")
+    Assert.Equal("inconclusive", d.Status)
+    Assert.Equal(Some "unconfirmed", d.Evidence)
+    Assert.Contains("does not break it when the function runs on these inputs", d.Message)
 
 [<Fact>]
 let ``an inconclusive proof gives the solver's reason`` () =
