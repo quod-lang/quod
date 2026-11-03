@@ -67,7 +67,7 @@ let private parseCommand (file: string) (o: Options) =
             if o.Json then report o [] else Console.Write(Printer.programText program)
             0
         with QuodError d ->
-            report o [ d ]
+            report o (Parser.syntaxDiagnostics file src d)
             1)
 
 /// Check, and report the diagnostics. Ok with the typed program and the verification result,

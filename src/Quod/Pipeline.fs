@@ -46,7 +46,7 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let verified = Vcgen.verifyWith file typed session s.Budget s.Progress
                 Checked(typed, { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed @ ContractStyle.review file typed })
     with
-    | QuodError d -> Rejected [ d ]
+    | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)
 
 let errorsOf (r: Vcgen.VerifyResult) = r.Diagnostics |> List.filter (fun d -> d.Severity = Error)

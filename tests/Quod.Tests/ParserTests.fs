@@ -209,3 +209,31 @@ let ``the habits of a model that writes Dafny get a hint that says what to write
     Assert.Contains("Quod has no 'for'", forLoop.Message)
     let letResult = syntaxErrorOf "fn f(x: int) -> int { let result = x; return result; }"
     Assert.Contains("'result' names the returned value", letResult.Message)
+
+[<Fact>]
+let ``var and for as statements say what to write`` () =
+    // review of 0.1.3: both fell on the message for an expression in the middle of a block
+    let var = syntaxErrorOf "fn f(x: int) -> int {\n  var m := x;\n  return m; }"
+    Assert.Contains("'let mut m = xs[0];'", var.Message)
+    let forLoop = syntaxErrorOf "fn f(x: int) -> int {\n  for i := 1 to x { }\n  return x; }"
+    Assert.Contains("Quod has no 'for' loop", forLoop.Message)
+
+[<Fact>]
+let ``a file that does not parse reports every habit it shows, not only the first`` () =
+    // review of 0.1.3: eight calls, one error each, to fix a function of twelve lines
+    let src =
+        "fn max_of(xs: seq<int>) -> int\n  requires |xs| > 0;\n  ensures forall i :: 0 <= i < |xs| ==> xs[i] <= result\n"
+        + "{\n  var m := xs[0];\n  for i := 1 to |xs|\n    invariant forall j :: 0 <= j < i ==> xs[j] <= m\n  {\n"
+        + "    if xs[i] > m { m := xs[i]; }\n  }\n  return m;\n}\n"
+    let ds = syntaxDiagnostics "test.quod" src (syntaxErrorOf src)
+    let has (text: string) line = Assert.Contains(ds, fun d -> d.Span.Start.Line = line && d.Message.Contains text)
+    has "len(s), not |s|" 2
+    has "no ';' after a contract clause" 2
+    has "'forall i in lo..hi: P'" 3
+    has "'let mut'" 5
+    has "no 'for' loop" 6
+    has "not ':='" 9
+    // the invariant of the for loop is where it belongs: no message about it
+    Assert.DoesNotContain(ds, fun d -> d.Message.Contains "loop invariants go")
+    // and the first error is not reported twice
+    Assert.Equal(1, ds |> List.filter (fun d -> d.Span.Start.Line = 2 && d.Message.Contains "|s|") |> List.length)

@@ -210,7 +210,7 @@ let private run (args: JsonElement) : ToolResult =
             match Typecheck.check file (Parser.parseProgram file src) with
             | t, [] -> t
             | _, errs -> failTool ("the program does not type-check:\n" + reportText errs)
-        with QuodError d -> failTool ("the program does not parse:\n" + toText d)
+        with QuodError d -> failTool ("the program does not parse:\n" + reportText (Parser.syntaxDiagnostics file src d))
     let f =
         match typed.Fns |> List.tryFind (fun f -> f.Name = name) with
         | Some f -> f

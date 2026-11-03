@@ -21,6 +21,13 @@ let private classify (items: Stmt list) : Body =
     | Some e -> ExprBody e
     | None -> StmtBody items
 
+let private varMessage =
+    "Quod declares locals with 'let', and 'let mut' for one that changes: 'let mut m = xs[0];', not 'var m := xs[0];'"
+
+let private forMessage =
+    "Quod has no 'for' loop: write 'let mut i = lo; while i < hi invariant lo <= i && i <= hi decreases hi - i "
+    + "{ ...; i = i + 1; }'"
+
 type private Parser(file: string, toks: Token[]) =
     let mutable i = 0
     let mutable lastEnd = { Line = 1; Col = 1 }
@@ -44,7 +51,7 @@ type private Parser(file: string, toks: Token[]) =
     /// Extra advice when the unexpected token looks like a Dafny or Rust habit.
     member p.Hint() : string =
         match p.Peek.Kind, (p.PeekAt 1).Kind with
-        | TkSymbol ":", TkSymbol "=" -> " (Quod uses '=' for assignment and 'let' for declarations, not ':=')"
+        | TkSymbol ":", TkSymbol "=" -> " (Quod uses '=' for assignment and 'let' for declarations, not ':=': 'let x = e;', 'let mut x = e;' for a local that changes, 'x = e;' to change it)"
         | TkSymbol ":", TkSymbol ":" -> " (quantifiers are written 'forall i in lo..hi: P', not 'forall i :: P')"
         | TkIdent "method", _ | TkIdent "function", _ | TkIdent "predicate", _ -> " (every function is declared with 'fn')"
         | TkIdent "var", _ -> " (local variables are declared with 'let' or 'let mut')"
@@ -65,7 +72,7 @@ type private Parser(file: string, toks: Token[]) =
     /// `:=` (Dafny's assignment) is lexed as ':' '=': catch it before ':' is read as a type.
     member p.RejectColonEquals() =
         if p.IsSym ":" && (p.PeekAt 1).Kind = TkSymbol "=" then
-            p.Fail(p.Peek.Span, "Quod uses '=' for assignment and 'let' for declarations, not ':='")
+            p.Fail(p.Peek.Span, "Quod uses '=' for assignment and 'let' for declarations, not ':=': 'let x = e;', 'let mut x = e;' for a local that changes, 'x = e;' to change it")
 
     member p.IsSym(s: string) = (match p.Peek.Kind with TkSymbol x when x = s -> true | _ -> false)
     member p.IsKw(k: string) = (match p.Peek.Kind with TkKeyword x when x = k -> true | _ -> false)
@@ -409,6 +416,12 @@ type private Parser(file: string, toks: Token[]) =
             let e = p.Expr()
             p.Sym ";"
             p.MkS(Return e, start)
+        // `var m := e` and `for i := a to b`, as statements (review of 0.1.3: both fell on the message
+        // for an expression in the middle of a block)
+        | TkIdent "var" when (match (p.PeekAt 1).Kind with TkIdent _ -> true | _ -> false) ->
+            p.Fail(p.Peek.Span, varMessage)
+        | TkIdent "for" when (match (p.PeekAt 1).Kind with TkIdent _ -> true | _ -> false) ->
+            p.Fail(p.Peek.Span, forMessage)
         | TkIdent _ when (p.PeekAt 1).Kind = TkSymbol ":" && (p.PeekAt 2).Kind = TkSymbol "=" ->
             p.Next() |> ignore
             p.RejectColonEquals()
@@ -527,6 +540,62 @@ type private Parser(file: string, toks: Token[]) =
 let parseProgram (file: string) (src: string) : Program =
     let toks = tokenize file src |> Array.ofList
     Parser(file, toks).Program()
+
+/// The habits of a writer of Dafny that a regular expression recognises in the source, everywhere in
+/// the file. The parser stops at its first error; when it does, these are reported with it, so that
+/// a model that brought several habits learns of them all in one answer (review of 0.1.3: eight
+/// calls to fix a function of twelve lines, one error each). Only used on a file that does not
+/// parse, so a false positive cannot reject a program.
+let habits (file: string) (src: string) : Diagnostic list =
+    let rx (pattern: string) = System.Text.RegularExpressions.Regex(pattern)
+    let clause = rx @"^\s*(requires|ensures|decreases|invariant|loose)\b"
+    let checks =
+        [ rx @"(?<![|])\|(?![|\s])[^|\n]*[^|\s]\|(?![|])", "the length of a sequence is written len(s), not |s|"
+          rx @"(?<!\bvar\s+\w+\s*)(?<!\bfor\s+\w+\s*):=", "Quod uses '=' for assignment and 'let' for declarations, not ':='"
+          rx @"^\s*ensures\b.*\breturn\b", "in an ensures, the returned value is 'result'"
+          rx @"\bforall\s+\w+(\s*:\s*\w+)?\s*::|\bexists\s+\w+(\s*:\s*\w+)?\s*::", "quantifiers are written 'forall i in lo..hi: P', not 'forall i :: P'"
+          rx @"\bvar\s+\w+", varMessage
+          rx @"\bfor\s+\w+\s*(:=|in\b)", forMessage
+          rx @"^\s*(method|function|predicate)\s+\w+", "every function is declared with 'fn'"
+          rx @"\blet\s+(mut\s+)?result\b", "'result' names the returned value, in ensures only: give the local another name, e.g. 'res'"
+          rx @"\breturns\s*\(", "the result type follows '->': 'fn f(x: int) -> int', and the ensures call it 'result'" ]
+    let lines = src.Replace("\r\n", "\n").Split('\n')
+    let found = ResizeArray<Diagnostic>()
+    let add (line: int) (col: int) (len: int) (message: string) =
+        let sp = spanOf { Line = line; Col = col } { Line = line; Col = col + len }
+        found.Add { File = file; Span = sp; Kind = "syntax"; Status = "error"; Severity = Error; Fn = None
+                    Property = None; Counterexample = []; Reason = None; Evidence = None; Message = message }
+    let mutable depth = 0 // of braces, to tell a contract clause in a body
+    let mutable whileOpen = false // between `while` and its `{`, where invariants belong
+    lines
+    |> Array.iteri (fun k raw ->
+        let text = match raw.IndexOf "//" with -1 -> raw | j -> raw.Substring(0, j)
+        let line = k + 1
+        for r, message in checks do
+            for m in r.Matches text do
+                add line (m.Index + 1) m.Length message
+        let c = clause.Match text
+        if c.Success then
+            let word = c.Groups.[1].Value
+            if depth > 0 && not (word = "invariant" || word = "decreases") then
+                add line (c.Groups.[1].Index + 1) word.Length
+                    "contract clauses go between the signature and the body, each without ';': 'fn f(x: int) -> int requires P ensures Q { ... }'"
+            elif depth > 0 && not whileOpen then
+                add line (c.Groups.[1].Index + 1) word.Length "loop invariants go between 'while c' and the '{' of the loop, without ';'"
+            let t = text.TrimEnd()
+            if t.EndsWith ";" then add line t.Length 1 "no ';' after a contract clause: write the next clause, or the body '{', directly"
+        if (rx @"\b(while|for)\b").IsMatch text then whileOpen <- true
+        for ch in text do
+            if ch = '{' then
+                depth <- depth + 1
+                whileOpen <- false
+            elif ch = '}' then depth <- max 0 (depth - 1))
+    found |> Seq.sortBy (fun d -> d.Span.Start.Line, d.Span.Start.Col) |> List.ofSeq
+
+/// The syntax error that stopped the parser, followed by the habits found elsewhere in the file.
+let syntaxDiagnostics (file: string) (src: string) (first: Diagnostic) : Diagnostic list =
+    let same (h: Diagnostic) = h.Span.Start.Line = first.Span.Start.Line && first.Message.Contains h.Message
+    first :: (habits file src |> List.filter (fun h -> not (same h)))
 
 /// Parse a single expression (used by tests and, later, by tools that check one contract).
 let parseExpression (file: string) (src: string) : Expr =
