@@ -17,7 +17,7 @@ let private usage =
     + "  --json              diagnostics as JSON\n"
     + "  --z3 PATH           the z3 executable (default: next to quod, $QUOD_Z3, then PATH)\n"
     + "  --timeout SECONDS   time limit per proof obligation (default 10)\n"
-    + "  --budget SECONDS    time limit of the whole check (default 300, 0 for none): the obligations\n"
+    + "  --budget SECONDS    time limit of the whole check (default 300, 60 for mcp, 0 for none): the obligations\n"
     + "                      left when it is used up are reported as not attempted\n"
     + "  --smt-log FILE      write every command sent to z3 to FILE\n"
     + "  --target python     code generation target (build; python is the only one in 0.1)\n"
@@ -30,7 +30,9 @@ type private Options =
       Settings: Pipeline.Settings
       Target: string
       OutDir: string option
-      RuntimeChecks: bool }
+      RuntimeChecks: bool
+      /// --budget was given (quod mcp has its own default otherwise)
+      BudgetGiven: bool }
 
 let private parseOptions (args: string list) : Options * string list =
     let rec go (o: Options) (rest: string list) (positional: string list) =
@@ -39,14 +41,14 @@ let private parseOptions (args: string list) : Options * string list =
         | "--json" :: tl -> go { o with Json = true } tl positional
         | "--z3" :: p :: tl -> go { o with Settings = { s with Z3 = Some p } } tl positional
         | "--timeout" :: n :: tl -> go { o with Settings = { s with Timeout = int n } } tl positional
-        | "--budget" :: n :: tl -> go { o with Settings = { s with Budget = int n } } tl positional
+        | "--budget" :: n :: tl -> go { o with Settings = { s with Budget = int n }; BudgetGiven = true } tl positional
         | "--smt-log" :: p :: tl -> go { o with Settings = { s with SmtLog = Some p } } tl positional
         | "--target" :: t :: tl -> go { o with Target = t } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; OutDir = None; RuntimeChecks = false } args []
+    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; OutDir = None; RuntimeChecks = false; BudgetGiven = false } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
@@ -125,7 +127,7 @@ let main argv =
     | [ "parse"; file ] -> parseCommand file o
     | [ "check"; file ] -> checkCommand file o
     | [ "build"; file ] -> buildCommand file o
-    | [ "mcp" ] -> Mcp.serve o.Settings
+    | [ "mcp" ] -> Mcp.serve (if o.BudgetGiven then o.Settings else { o.Settings with Budget = Mcp.defaultBudget })
     | "reference" :: title ->
         match Mcp.referenceText (if title.IsEmpty then None else Some(String.Join(" ", title))) with
         | Ok text ->

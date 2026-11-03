@@ -14,6 +14,11 @@ open Quod.Typed
 
 let private protocolVersions = [ "2025-06-18"; "2025-03-26"; "2024-11-05" ]
 
+/// The time budget of a check through the server, unless `quod mcp --budget` says otherwise:
+/// an agent waits for a tool call, and some clients cut long ones; it can ask for more with the
+/// `budget` argument (first-user feedback on 0.1.0).
+let defaultBudget = 60
+
 /// The language reference: the spec from "The language" to the roadmap, embedded in the binary.
 let reference =
     lazy
@@ -256,7 +261,7 @@ let private programProperties =
 
 let private budgetProperties =
     "\"timeout\": {\"type\": \"integer\", \"description\": \"Seconds per proof obligation (default 10)\"},"
-    + "\"budget\": {\"type\": \"integer\", \"description\": \"Seconds for the whole check (default 300, 0 for none)\"}"
+    + "\"budget\": {\"type\": \"integer\", \"description\": \"Seconds for the whole check (default 60, 0 for none): obligations left when it is used up are reported as not attempted\"}"
 
 /// name, description, input schema
 let private tools =

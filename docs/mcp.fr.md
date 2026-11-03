@@ -59,8 +59,16 @@ command = "/chemin/vers/quod"
 args = ["mcp"]
 ```
 
-Les arguments `path` sont relatifs au dossier de travail du serveur : celui dans lequel le client
-le lance, en général le projet.
+Le serveur parle MCP sur stdio (un message JSON-RPC par ligne). Il ne demande aucune variable
+d'environnement : z3 est trouvé à côté de `quod` (ou dans `QUOD_Z3`, puis dans le `PATH`). Les
+arguments `path` sont relatifs au dossier de travail du serveur : celui dans lequel le client le
+lance, en général le projet.
+
+Une vérification à travers le serveur a un **budget de temps de 60 s** par défaut, car un agent
+attend l'appel d'outil (la ligne de commande a 300 s) : les obligations restantes quand il est
+épuisé sont signalées `not-attempted`, pas comme des échecs. Un agent peut en demander plus avec
+l'argument `budget`, et `quod mcp --budget 120` change la valeur par défaut (`--timeout` aussi,
+10 s par obligation).
 
 ## Pour l'agent : une section pour AGENTS.md ou CLAUDE.md
 

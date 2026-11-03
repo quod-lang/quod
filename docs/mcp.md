@@ -57,8 +57,15 @@ command = "/path/to/quod"
 args = ["mcp"]
 ```
 
-`path` arguments are relative to the server's working directory: the one the client starts it in,
-usually the project.
+The server speaks MCP over stdio (one JSON-RPC message per line). It needs no environment
+variable: z3 is found next to `quod` (or in `QUOD_Z3`, then on the `PATH`). `path` arguments are
+relative to the server's working directory: the one the client starts it in, usually the
+project.
+
+A check through the server has a **time budget of 60 s** by default, since an agent waits for
+the tool call (the command line has 300 s): obligations left when it is used up are reported as
+`not-attempted`, not as failures. An agent can ask for more with the `budget` argument, and
+`quod mcp --budget 120` changes the default (`--timeout` too, 10 s per obligation).
 
 ## For the agent: a section for AGENTS.md or CLAUDE.md
 
