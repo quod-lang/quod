@@ -732,9 +732,24 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                             let b = if rnd.Next 2 = 0 then bounds.[rnd.Next bounds.Length] else bigint (rnd.Next(-100, 101))
                             z3.Send("(assert (" + (if rnd.Next 2 = 0 then ">=" else "<=") + " " + c + " " + bterm (BInt b) + "))")
                         let ints = unknowns |> Seq.filter (fun (_, t) -> t <> TyBool) |> Array.ofSeq
+                        // and the edge cases of a threshold t against the elements of a sequence: t at an
+                        // element (where `<` and `<=` differ), above all of them, below all of them
+                        let elements =
+                            f.Params |> List.collect (fun p ->
+                                match env.[p.Name] with
+                                | BSeq items -> items |> List.choose (fun x -> match x with BTerm c -> Some c | _ -> None)
+                                | _ -> [])
+                            |> Array.ofList
+                        let against (c: string) (op: string) =
+                            for x in elements do z3.Send("(assert (" + op + " " + c + " " + x + "))")
                         if attempt > 0 && ints.Length > 0 then
                             for p in f.Params do
                                 match p.Ty, env.[p.Name] with
+                                | (TyInt | TyNat), BTerm c when elements.Length > 0 && rnd.Next 2 = 0 ->
+                                    match rnd.Next 3 with
+                                    | 0 -> z3.Send("(assert (= " + c + " " + elements.[rnd.Next elements.Length] + "))")
+                                    | 1 -> against c ">"
+                                    | _ -> against c "<"
                                 | (TyInt | TyNat), BTerm c when rnd.Next 2 = 0 -> bound c
                                 | _ -> ()
                             bound (fst ints.[rnd.Next ints.Length])

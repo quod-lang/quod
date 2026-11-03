@@ -131,7 +131,8 @@ return e;              // ou une expression finale à la fin du corps
   quatre valeurs strictement croissantes à partir de 10), le solveur en trouve : pour chaque
   longueur de 0 à 6, une séquence est autant d'inconnues, les quantificateurs du `requires` se
   déplient sur l'intervalle connu, et la formule, sans quantificateurs, lui est facile ; des bornes
-  aléatoires sur les inconnues varient les entrées. Chaque obligation est vérifiée au passage, y compris que chaque appel récursif
+  aléatoires sur les inconnues varient les entrées, avec les cas limites d'un paramètre entier face aux
+  éléments d'une séquence (égal à l'un d'eux, au-dessus de tous, en dessous de tous). Chaque obligation est vérifiée au passage, y compris que chaque appel récursif
   fait diminuer la mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin).
   Une obligation violée est signalée avec ces entrées : un contre-exemple confirmé, en quelques
   millisecondes. Quand le solveur échoue ensuite sur une obligation qu'aucune exécution n'a violée,

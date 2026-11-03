@@ -125,7 +125,8 @@ return e;              // or a final expression at the end of the body
   quantified one: four strictly increasing values from 10 up), the solver finds some: for each
   length 0 to 6, a sequence is that many unknowns, the quantifiers of the `requires` unfold over
   the known range, and the formula, without quantifiers, is easy for it; random bounds on the
-  unknowns vary the inputs. Every obligation is checked on the way, including
+  unknowns vary the inputs, with the edge cases of an int parameter against the elements of a
+  sequence (equal to one, above all, below all). Every obligation is checked on the way, including
   that each recursive call makes the `decreases` measure smaller (a call that does not would run
   forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
   milliseconds. When the solver then fails on an obligation that no run broke, the message gives
