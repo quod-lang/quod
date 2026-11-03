@@ -1,0 +1,9 @@
+﻿isqrt_0.quod           alone refuted      0.2s   with neighbour refuted      0.2s
+isqrt_1.quod           alone survived     0.1s   with neighbour survived     0.2s
+isqrt_2.quod           alone refuted      0.1s   with neighbour refuted      0.1s
+isqrt_3.quod           alone refuted      0.2s   with neighbour refuted      0.2s
+isqrt_4.quod           alone refuted      0.1s   with neighbour refuted      0.1s
+isqrt_5.quod           alone refuted      0.2s   with neighbour refuted      0.2s
+isqrt_6.quod           alone refuted      0.2s   with neighbour refuted      0.2s
+
+7 mutants: same verdict alone and with the neighbour for 7

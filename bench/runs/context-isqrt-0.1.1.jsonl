@@ -1,0 +1,7 @@
+{"mutant": "isqrt_0.quod", "alone": "refuted", "alone_secs": 0.12, "with_neighbour": "refuted", "with_secs": 0.16}
+{"mutant": "isqrt_1.quod", "alone": "survived", "alone_secs": 0.12, "with_neighbour": "survived", "with_secs": 0.14}
+{"mutant": "isqrt_2.quod", "alone": "refuted", "alone_secs": 0.12, "with_neighbour": "refuted", "with_secs": 0.12}
+{"mutant": "isqrt_3.quod", "alone": "refuted", "alone_secs": 0.11, "with_neighbour": "refuted", "with_secs": 0.2}
+{"mutant": "isqrt_4.quod", "alone": "refuted", "alone_secs": 0.16, "with_neighbour": "refuted", "with_secs": 0.16}
+{"mutant": "isqrt_5.quod", "alone": "refuted", "alone_secs": 0.11, "with_neighbour": "refuted", "with_secs": 0.15}
+{"mutant": "isqrt_6.quod", "alone": "refuted", "alone_secs": 0.14, "with_neighbour": "refuted", "with_secs": 0.11}
