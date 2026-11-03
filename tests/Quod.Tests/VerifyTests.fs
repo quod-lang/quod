@@ -263,3 +263,24 @@ let ``past the time budget, obligations are reported as not attempted, not as ti
     let d = r.Diagnostics |> List.find (fun d -> d.Fn = Some "later" && d.Kind = "proof")
     Assert.Equal("not-attempted", d.Status)
     Assert.Equal(Some "budget", d.Reason)
+
+[<Fact>]
+let ``sequences as long as a constant of the program are run: requires len(xs) == 9`` () =
+    // first-user test of 0.1.0: with lengths 0 to 6 only, the function was never run
+    let d =
+        assertRefuted "postcondition"
+            ("fn sum3(xs: seq<int>) -> int requires len(xs) == 9 ensures result >= xs[0] + xs[8] - 1000 {\n"
+             + "  if xs[2] > xs[3] { return xs[0] + xs[8] - 2000; } return xs[0] + xs[8]; }")
+    Assert.Equal(Some "run", d.Evidence)
+
+[<Fact>]
+let ``when no run breaks an obligation, the message names the branches no run took`` () =
+    // a^3 + b^3 = c^3 has no solution in positive integers: the branch is never taken, and the
+    // solver cannot prove that it is not
+    let d =
+        verify
+            ("fn f(a: int, b: int, c: int) -> int requires a > 0 && b > 0 && c > 0 ensures result == 1 {\n"
+             + "  if a * a * a + b * b * b == c * c * c { return 0; } return 1; }")
+        |> List.exactlyOne
+    Assert.Equal("inconclusive", d.Status)
+    Assert.Contains("no run took the 'if' at line 2 (condition true)", d.Message)

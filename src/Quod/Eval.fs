@@ -73,6 +73,11 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
     let mutable steps = 0
     /// The functions being run (checking mode), innermost first, with their measure on entry.
     let mutable running: (TFn * BigInteger option) list = []
+    /// The branches taken: (span of the `if`, value of its condition). Reported when no run
+    /// broke an obligation: a branch no run took is where a bug may hide (first-user test).
+    let taken = System.Collections.Generic.HashSet<Quod.Syntax.Span * bool>()
+
+    member _.Taken = taken
 
     new(fns: Map<string, TFn>) = Evaluator(fns, false)
 
@@ -168,7 +173,10 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
             | OOr -> VBool(asBool a || asBool b)
             | OImplies -> VBool(not (asBool a) || asBool b)
             | OIff -> VBool(asBool a = asBool b)
-        | EIf(c, a, b) -> if asBool c then go a else go b
+        | EIf(c, a, b) ->
+            let v = asBool c
+            taken.Add((e.Span, v)) |> ignore
+            if v then go a else go b
         | EQuant(q, name, lo, hi, body) ->
             let l, h = asInt lo, asInt hi
             if h - l > maxRange then raise (CannotEvaluate "quantifier range too large")
@@ -229,8 +237,9 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         | SReturn e -> raise (Returned(ev.Expr(e, env), s.Span))
         | SIf(c, a, b) ->
             match ev.Expr(c, env) with
-            | VBool true -> ev.Block(a, env)
-            | VBool false -> ev.Block(b, env)
+            | VBool v ->
+                taken.Add((s.Span, v)) |> ignore
+                ev.Block((if v then a else b), env)
             | _ -> raise (CannotEvaluate "not a bool")
         | SWhile(cond, invs, dec, body) ->
             let numbered = List.zip invs [ 1 .. invs.Length ]

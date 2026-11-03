@@ -120,7 +120,7 @@ return e;              // or a final expression at the end of the body
 - **Counterexamples by execution.** Before asking the solver, the compiler runs each function on
   small inputs that satisfy its `requires`: zero values, each integer constant of the program and
   its neighbours (`c - 1`, `c`, `c + 1`), then random values (ints in -6..6 or a constant,
-  sequences of 0 to 5 elements). A parameter that the `requires` define from the others, such as
+  sequences of 0 to 5 elements, or as long as a constant of the program, up to 50). A parameter that the `requires` define from the others, such as
   a table of prefix sums, is built from them. When few random inputs satisfy the `requires` (a
   quantified one: four strictly increasing values from 10 up), the solver finds some: for each
   length 0 to 6, a sequence is that many unknowns, the quantifiers of the `requires` unfold over
@@ -129,7 +129,8 @@ return e;              // or a final expression at the end of the body
   that each recursive call makes the `decreases` measure smaller (a call that does not would run
   forever). A broken obligation is reported with these inputs: a confirmed counterexample, in
   milliseconds. When the solver then fails on an obligation that no run broke, the message gives
-  the facts: how many runs, out of how many inputs tried, and that none broke it. That does not
+  the facts: how many runs, out of how many inputs tried, that none broke it, and which
+  branches of the function no run took (`no run took the 'if' at line 4 (condition true)`). That does not
   show the property holds (a bug may need other inputs); if it does, the proof needs a hint. When
   no input tried satisfies the `requires`, the message says that the function was not run.
 - `--runtime-checks`: instead of refusing to build when an obligation is not proved, check the

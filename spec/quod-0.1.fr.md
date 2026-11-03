@@ -123,7 +123,8 @@ return e;              // ou une expression finale à la fin du corps
 - **Contre-exemples par exécution.** Avant de solliciter le solveur, le compilateur exécute chaque
   fonction sur de petites entrées qui satisfont son `requires` : les valeurs nulles, chaque
   constante entière du programme et ses voisines (`c - 1`, `c`, `c + 1`), puis des valeurs
-  aléatoires (entiers dans -6..6 ou une constante, séquences de 0 à 5 éléments). Un paramètre que
+  aléatoires (entiers dans -6..6 ou une constante, séquences de 0 à 5 éléments, ou aussi longues
+  qu'une constante du programme, jusqu'à 50). Un paramètre que
   le `requires` définit à partir des autres, comme une table de sommes préfixes, est construit à
   partir d'eux. Quand peu d'entrées aléatoires satisfont le `requires` (un `requires` quantifié :
   quatre valeurs strictement croissantes à partir de 10), le solveur en trouve : pour chaque
@@ -133,8 +134,9 @@ return e;              // ou une expression finale à la fin du corps
   fait diminuer la mesure `decreases` (un appel qui ne la fait pas diminuer tournerait sans fin).
   Une obligation violée est signalée avec ces entrées : un contre-exemple confirmé, en quelques
   millisecondes. Quand le solveur échoue ensuite sur une obligation qu'aucune exécution n'a violée,
-  le message donne les faits : combien d'exécutions, sur combien d'entrées essayées, et qu'aucune
-  ne l'a violée. Cela ne montre pas que la propriété est vraie (un bug peut demander d'autres
+  le message donne les faits : combien d'exécutions, sur combien d'entrées essayées, qu'aucune ne
+  l'a violée, et quelles branches de la fonction aucune exécution n'a prises
+  (`no run took the 'if' at line 4 (condition true)`). Cela ne montre pas que la propriété est vraie (un bug peut demander d'autres
   entrées) ; si elle l'est, la preuve demande une indication. Quand aucune entrée essayée ne
   satisfait le `requires`, le message dit que la fonction n'a pas été exécutée.
 - `--runtime-checks` : au lieu de refuser de compiler quand une obligation n'est pas prouvée,

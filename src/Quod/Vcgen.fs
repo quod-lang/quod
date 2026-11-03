@@ -280,7 +280,11 @@ let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Valu
     match t with
     | TyInt | TyError -> fromPool (fun _ -> true) |> Option.defaultWith (fun () -> randomValue rnd t)
     | TyNat -> fromPool (fun c -> c.Sign >= 0) |> Option.defaultWith (fun () -> randomValue rnd t)
-    | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> inputValue rnd pool e ]
+    | TySeq e ->
+        // one time in three, a length among the program's constants (requires len(xs) == 9)
+        let lengths = pool |> List.filter (fun c -> c.Sign > 0 && c <= 50I)
+        let n = if not lengths.IsEmpty && rnd.Next 3 = 0 then int lengths.[rnd.Next lengths.Length] else rnd.Next(0, 6)
+        Eval.VSeq [ for _ in 1 .. n -> inputValue rnd pool e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
     | TyBool -> randomValue rnd t
 
@@ -454,6 +458,28 @@ let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
         | Syntax.Exists -> disjB parts
     | EToNat x -> go x
 
+/// The `if`s of a function's body (statements and expressions), by their span, in order.
+let private ifSpans (f: TFn) : Span list =
+    let found = ResizeArray<Span>()
+    let rec expr (e: TExpr) =
+        match e.Kind with
+        | EIf(c, a, b) -> found.Add e.Span; expr c; expr a; expr b
+        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
+        | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
+        | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EQuant _ | EInt _ | EBool _ | EVar _ | EResult -> ()
+    let rec stmt (st: TStmt) =
+        match st.Kind with
+        | SLet(_, _, _, e) | SAssign(_, e) | SReturn e -> expr e
+        | SIf(c, a, b) -> found.Add st.Span; expr c; List.iter stmt a; List.iter stmt b
+        | SWhile(c, _, _, b) -> expr c; List.iter stmt b
+        | SAssert _ -> ()
+    match f.Body with
+    | TExprBody e -> expr e
+    | TStmtBody ss -> List.iter stmt ss
+    List.ofSeq found
+
 // --- the verifier ---------------------------------------------------------------------
 
 type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) =
@@ -475,6 +501,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     let mutable skipped = 0
     /// Inputs tried (valid or not), for the message when few satisfy the requires.
     let mutable concreteTries = 0
+    /// The branches of the current function that no run took ("line 4 (condition true)").
+    let mutable untaken: string list = []
     let constants = programConstants prog
 
     member _.Diagnostics = List.ofSeq diags
@@ -651,6 +679,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         concrete.Clear()
         concreteRuns <- 0
         concreteTries <- 0
+        untaken <- []
         Eval.withBigStack (fun () -> v.RunConcreteOnThisThread f)
 
     /// Inputs that satisfy the requires, found by the solver when random ones rarely do (a
@@ -672,7 +701,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             let seen = HashSet<string>()
             let bounds = Array.ofList (constants @ [ -10I; 0I; 10I; 50I; 100I ])
             z3.SetTimeout(min 300 z3.DefaultTimeout)
-            for length in 0 .. 6 do
+            let lengths = [ 0 .. 6 ] @ (constants |> List.filter (fun c -> c > 6I && c <= 50I) |> List.map int) |> List.distinct
+            for length in lengths do
                 // a length the requires rules out (len(xs) >= 4) is not tried again
                 let mutable feasible = true
                 for attempt in 0 .. 11 do
@@ -772,6 +802,15 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         if concreteRuns < 20 then
             for input in v.SolverInputs(f, rnd) do
                 run input
+        // the branches of f that no valid run took, for the messages (at most three)
+        if concreteRuns > 0 then
+            untaken <-
+                ifSpans f
+                |> List.collect (fun sp ->
+                    [ for outcome in [ true; false ] do
+                        if not (ev.Taken.Contains((sp, outcome))) then
+                            yield "the 'if' at line " + string sp.Start.Line + " (condition " + (if outcome then "true" else "false") + ")" ])
+                |> List.truncate 3
 
     /// Check one obligation on the current path, report it if it fails, then assume it.
     member v.Check(st: State, o: Obligation) : State =
@@ -817,6 +856,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         else
             " (no counterexample in " + string concreteRuns + " runs of the function on small inputs that satisfy its requires"
             + (if concreteRuns < 200 then ", out of " + string concreteTries + " tried" else "")
+            + (if untaken.IsEmpty then "" else "; no run took " + String.Join(", ", untaken))
             + ": a bug may need other inputs; if the property holds, the proof needs a hint, an assert or a lemma)"
 
     /// The value of a term in the current model, as a Quod value. Sequences are axiomatized,
