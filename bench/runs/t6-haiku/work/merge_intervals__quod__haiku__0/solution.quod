@@ -1,0 +1,123 @@
+// Merge a list of closed integer intervals into the sorted list of disjoint
+// intervals covering the same points. Intervals that overlap or touch at an
+// endpoint are merged; (1,2) and (3,4) are not.
+//
+// The contract states the result through a reference model written as
+// expression functions below: the result is the fold of `mstep` over the
+// insertion-sorted (by start) input. The model is short enough to read:
+//   ins   : insert x into a sequence sorted by start
+//   isort : insertion sort
+//   mstep : extend the merged list with the next interval (sorted by start)
+//   mfold : merge a sorted list left to right
+
+fn mx(a: int, b: int) -> int {
+  if a >= b { a } else { b }
+}
+
+// Insert x into s (sorted by start), placing it before the first element whose start is >= x.0.
+fn ins(x: (int, int), s: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(s)
+{
+  if len(s) == 0 { [x] }
+  else if s[0].0 < x.0 { [s[0]] + ins(x, s[1..]) }
+  else { [x] + s }
+}
+
+// Insertion sort by start.
+fn isort(s: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(s)
+{
+  if len(s) == 0 { [] }
+  else { ins(s[len(s) - 1], isort(s[..len(s) - 1])) }
+}
+
+// Append interval x to a merged list r, merging it into the last interval when they touch or overlap.
+fn mstep(r: seq<(int, int)>, x: (int, int)) -> seq<(int, int)> {
+  if len(r) == 0 { [x] }
+  else if x.0 <= r[len(r) - 1].1 {
+    r[..len(r) - 1] + [(r[len(r) - 1].0, mx(r[len(r) - 1].1, x.1))]
+  }
+  else { r + [x] }
+}
+
+// Merge a sequence sorted by start.
+fn mfold(s: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(s)
+{
+  if len(s) == 0 { [] }
+  else { mstep(mfold(s[..len(s) - 1]), s[len(s) - 1]) }
+}
+
+lemma slice_next(s: seq<(int, int)>, j: nat)
+  requires j < len(s)
+  ensures s[j..][1..] == s[j + 1..]
+{
+}
+
+// Statement functions: the code that computes the model.
+
+fn ins_step(x: (int, int), s: seq<(int, int)>) -> seq<(int, int)>
+  ensures result == ins(x, s)
+{
+  let mut out: seq<(int, int)> = [];
+  let mut j: nat = 0;
+  while j < len(s) && s[j].0 < x.0
+    invariant 0 <= j <= len(s)
+    invariant out + ins(x, s[j..]) == ins(x, s)
+    decreases len(s) - j
+  {
+    slice_next(s, j);
+    assert s[j..][0] == s[j];
+    assert ins(x, s[j..]) == [s[j]] + ins(x, s[j + 1..]);
+    out = out + [s[j]];
+    j = j + 1;
+  }
+  assert (j == len(s)) || (s[j].0 >= x.0);
+  assert ins(x, s[j..]) == [x] + s[j..];
+  return out + [x] + s[j..];
+}
+
+fn sort_by_start(iv: seq<(int, int)>) -> seq<(int, int)>
+  ensures result == isort(iv)
+{
+  let mut s: seq<(int, int)> = [];
+  let mut i: nat = 0;
+  while i < len(iv)
+    invariant 0 <= i <= len(iv)
+    invariant s == isort(iv[..i])
+    decreases len(iv) - i
+  {
+    assert iv[..i + 1][..i] == iv[..i];
+    assert iv[..i + 1][len(iv[..i + 1]) - 1] == iv[i];
+    s = ins_step(iv[i], s);
+    i = i + 1;
+  }
+  assert iv[..i] == iv;
+  return s;
+}
+
+fn merge_sorted(s: seq<(int, int)>) -> seq<(int, int)>
+  ensures result == mfold(s)
+{
+  let mut r: seq<(int, int)> = [];
+  let mut i: nat = 0;
+  while i < len(s)
+    invariant 0 <= i <= len(s)
+    invariant r == mfold(s[..i])
+    decreases len(s) - i
+  {
+    assert s[..i + 1][..i] == s[..i];
+    assert s[..i + 1][len(s[..i + 1]) - 1] == s[i];
+    r = mstep(r, s[i]);
+    i = i + 1;
+  }
+  assert s[..i] == s;
+  return r;
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  ensures result == mfold(isort(iv))
+{
+  let s = sort_by_start(iv);
+  return merge_sorted(s);
+}

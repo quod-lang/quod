@@ -1,0 +1,49 @@
+// Run-length encoding of a sequence of integers.
+
+// Prepend xs[i] to the run-length encoding `rest` of the suffix after i:
+// xs[i] joins the first run of `rest` when they have the same value.
+fn merge_head(xs: seq<int>, i: int, rest: seq<(int, int)>) -> seq<(int, int)>
+  requires 0 <= i < len(xs)
+{
+  if len(rest) > 0 {
+    if rest[0].0 == xs[i] {
+      [(xs[i], rest[0].1 + 1)] + rest[1..]
+    } else {
+      [(xs[i], 1)] + rest
+    }
+  } else {
+    [(xs[i], 1)]
+  }
+}
+
+// Specification model: the maximal runs of xs, from index i onwards.
+fn rle_from(xs: seq<int>, i: int) -> seq<(int, int)>
+  decreases (if 0 <= i && i < len(xs) { len(xs) - i } else { 0 })
+{
+  if i < len(xs) {
+    if 0 <= i {
+      merge_head(xs, i, rle_from(xs, i + 1))
+    } else {
+      []
+    }
+  } else {
+    []
+  }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures result == rle_from(xs, 0)
+{
+  // Scan from the right: acc is always the encoding of the suffix from i.
+  let mut acc: seq<(int, int)> = [];
+  let mut i: int = len(xs);
+  while i > 0
+    invariant 0 <= i <= len(xs)
+    invariant acc == rle_from(xs, i)
+    decreases i
+  {
+    i = i - 1;
+    acc = merge_head(xs, i, acc);
+  }
+  return acc;
+}

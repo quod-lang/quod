@@ -1,0 +1,47 @@
+// Sum of the elements xs[i..j) (empty when i == j).
+fn range_sum(xs: seq<int>, i: int, j: int) -> int
+  requires 0 <= i <= j <= len(xs)
+  decreases j - i
+{
+  if i == j { 0 } else { range_sum(xs, i, j - 1) + xs[j - 1] }
+}
+
+// Maximum sum over all non-empty contiguous sublists, in one pass (Kadane).
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) >= 1
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: range_sum(xs, i, j) <= result
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: range_sum(xs, i, j) == result
+{
+  let n = len(xs);
+  let mut best = xs[0];
+  let mut best_lo = 0;
+  let mut best_hi = 1;
+  let mut cur = xs[0];
+  let mut cur_lo = 0;
+  let mut i = 1;
+  while i < n
+    invariant 1 <= i <= n
+    invariant 0 <= cur_lo < i
+    invariant range_sum(xs, cur_lo, i) == cur
+    invariant forall k in 0..i: range_sum(xs, k, i) <= cur
+    invariant 0 <= best_lo < best_hi <= i
+    invariant range_sum(xs, best_lo, best_hi) == best
+    invariant forall k in 0..i: forall j in k + 1..i + 1: range_sum(xs, k, j) <= best
+    decreases n - i
+  {
+    let x = xs[i];
+    if cur > 0 {
+      cur = cur + x;
+    } else {
+      cur = x;
+      cur_lo = i;
+    }
+    if cur > best {
+      best = cur;
+      best_lo = cur_lo;
+      best_hi = i + 1;
+    }
+    i = i + 1;
+  }
+  best
+}

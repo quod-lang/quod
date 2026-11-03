@@ -1,0 +1,17 @@
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires sorted(xs)
+  ensures xs[ret] == target or ret == -1
+  decreases len(xs)
+{
+  let mut lo = 0
+  let mut hi = len(xs)
+  while lo < hi
+    invariant lo <= hi
+    invariant forall i in lo..hi: xs[i] < target
+    invariant forall i in 0..lo: xs[i] <= target
+  {
+    let mid = lo + (hi - lo) / 2
+    if xs[mid] < target { lo = mid + 1 } else { hi = mid }
+  }
+  if lo < len(xs) && xs[lo] == target { lo } else { -1 }
+}

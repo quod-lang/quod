@@ -1,0 +1,103 @@
+// Rotate a sequence to the right by k positions.
+// k may be any integer: negative values rotate left, large values wrap around.
+// Element j of xs moves to position (j + k) mod n, so
+// result[i] == xs[(i - k) mod n].
+
+// Euclidean modulo is invariant under adding a multiple of n.
+lemma mod_shift(a: int, t: int, n: int)
+  requires n > 0
+  ensures (a + n * t) % n == a % n
+{
+  let x: int = a / n + t - (a + n * t) / n;
+  assert a == n * (a / n) + a % n;
+  assert a + n * t == n * ((a + n * t) / n) + (a + n * t) % n;
+  assert n * x == (a + n * t) % n - a % n;
+  assert (a + n * t) % n - a % n < n;
+  assert (a + n * t) % n - a % n > -n;
+  if x >= 1 {
+    assert n * x >= n;
+  }
+  if x <= -1 {
+    assert n * x <= -n;
+  }
+  assert x == 0;
+}
+
+// Source position of result[j]: xs[rot_src(n, k, j)] goes to position j.
+fn rot_src(n: int, k: int, j: int) -> int
+  requires n > 0
+{
+  if j >= k % n { j - k % n } else { j - k % n + n }
+}
+
+// The index map of a single position i, for 0 <= i < n.
+lemma rot_index(n: int, k: int, i: int)
+  requires n > 0
+  requires 0 <= i < n
+  ensures (i - k) % n == rot_src(n, k, i)
+{
+  let r: int = k % n;
+  let q: int = k / n;
+  assert k == n * q + r;
+  assert 0 <= r < n;
+  assert i - k == (i - r) + n * (-q);
+  mod_shift(i - r, -q, n);
+  if i >= r {
+    assert 0 <= i - r < n;
+  }
+  if i < r {
+    assert -n <= i - r < 0;
+  }
+}
+
+// The index map holds for every position from i up to n.
+lemma rot_all(n: int, k: int, i: int)
+  requires n > 0
+  requires 0 <= i <= n
+  ensures forall j in i..n: (j - k) % n == rot_src(n, k, j)
+  decreases n - i
+{
+  if i < n {
+    rot_index(n, k, i);
+    rot_all(n, k, i + 1);
+  }
+}
+
+// The element of the rotation at one position j, for 0 <= r < n.
+lemma concat_at(xs: seq<int>, r: int, j: int)
+  requires 0 <= r < len(xs)
+  requires 0 <= j < len(xs)
+  ensures j >= r ==> (xs[len(xs) - r..] + xs[..len(xs) - r])[j] == xs[j - r]
+  ensures j < r ==> (xs[len(xs) - r..] + xs[..len(xs) - r])[j] == xs[j - r + len(xs)]
+{
+  assert len(xs[len(xs) - r..]) == r;
+  assert len(xs[..len(xs) - r]) == len(xs) - r;
+}
+
+// The rotation holds at every position from i up to n.
+lemma rot_res(xs: seq<int>, k: int, i: int)
+  requires len(xs) > 0
+  requires 0 <= i <= len(xs)
+  ensures forall j in i..len(xs): (xs[len(xs) - k % len(xs)..] + xs[..len(xs) - k % len(xs)])[j] == xs[rot_src(len(xs), k, j)]
+  decreases len(xs) - i
+{
+  if i < len(xs) {
+    concat_at(xs, k % len(xs), i);
+    rot_res(xs, k, i + 1);
+  }
+}
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i - k) % len(xs)]
+{
+  let n: int = len(xs);
+  if n == 0 {
+    return [];
+  }
+  // r in 0..n, the right rotation amount (Euclidean modulo handles negative k)
+  let r: int = k % n;
+  rot_all(n, k, 0);
+  rot_res(xs, k, 0);
+  return xs[n - r..] + xs[..n - r];
+}

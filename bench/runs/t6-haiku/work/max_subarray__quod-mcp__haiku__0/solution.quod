@@ -1,0 +1,51 @@
+// Sum of the elements xs[i..j) (i included, j excluded).
+fn range_sum(xs: seq<int>, i: int, j: int) -> int
+  requires 0 <= i && i <= j && j <= len(xs)
+  decreases j - i
+{
+  if i < j { range_sum(xs, i, j - 1) + xs[j - 1] } else { 0 }
+}
+
+// Kadane's algorithm, O(n).
+// best: the maximum sum over the non-empty sublists of xs[0..k).
+// cur:  the maximum sum of a non-empty sublist ending at index k - 1 (here, xs[cs..k)).
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) >= 1
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: range_sum(xs, i, j) == result
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: range_sum(xs, i, j) <= result
+{
+  let n = len(xs);
+  let mut best = xs[0];
+  let mut bi = 0;
+  let mut bj = 1;
+  let mut cur = xs[0];
+  let mut cs = 0;
+  let mut k = 1;
+  while k < n
+    invariant 1 <= k && k <= n
+    invariant 0 <= bi && bi < bj && bj <= k
+    invariant range_sum(xs, bi, bj) == best
+    invariant forall i in 0..k: forall j in i + 1..k + 1: range_sum(xs, i, j) <= best
+    invariant 0 <= cs && cs < k
+    invariant range_sum(xs, cs, k) == cur
+    invariant forall i in 0..k: range_sum(xs, i, k) <= cur
+    decreases n - k
+  {
+    if cur > 0 {
+      cur = cur + xs[k];
+    } else {
+      cur = xs[k];
+      cs = k;
+    }
+    if cur > best {
+      best = cur;
+      bi = cs;
+      bj = k + 1;
+    }
+    k = k + 1;
+  }
+  assert 0 <= bi && bi < bj && bj <= n;
+  assert range_sum(xs, bi, bj) == best;
+  assert exists i in 0..n: exists j in i + 1..n + 1: range_sum(xs, i, j) == best;
+  return best;
+}

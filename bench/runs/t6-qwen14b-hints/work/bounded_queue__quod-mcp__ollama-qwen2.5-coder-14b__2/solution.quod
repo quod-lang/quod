@@ -1,0 +1,8 @@
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  ensures len(result) == len(ops)
+  ensures forall i: nat, i < len(result), result[i] == if ops[i] == 0 then -1 else ops[i]
+{
+  // Implementation goes here
+  return [];
+}

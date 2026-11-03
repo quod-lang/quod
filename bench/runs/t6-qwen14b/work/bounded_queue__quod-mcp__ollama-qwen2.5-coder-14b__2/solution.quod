@@ -1,0 +1,7 @@
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+{
+  requires capacity >= 1;
+  ensures len(result) == len(ops);
+  // Implementation goes here
+  return [];
+}

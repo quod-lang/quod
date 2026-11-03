@@ -1,0 +1,23 @@
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+{
+  requires capacity >= 1;
+  ensures len(result) == len(ops);
+  var queue: seq<int> := [];
+  var output: seq<int> := [];
+  for op in ops {
+    if op > 0 {
+      if len(queue) == capacity {
+        queue := queue[1..];
+      }
+      queue := queue + [op];
+    } else {
+      if len(queue) > 0 {
+        output := output + [queue[0]];
+        queue := queue[1..];
+      } else {
+        output := output + [-1];
+      }
+    }
+  }
+  return output;
+}

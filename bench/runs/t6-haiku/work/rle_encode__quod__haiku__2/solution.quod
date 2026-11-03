@@ -1,0 +1,83 @@
+// Run-length encoding of a sequence of integers.
+
+// `v` repeated `n` times (empty when n <= 0).
+fn rep(v: int, n: int) -> seq<int>
+  decreases n
+{
+  if n <= 0 { [] } else { rep(v, n - 1) + [v] }
+}
+
+// The sequence denoted by a list of (value, count) runs.
+fn expand(rs: seq<(int, int)>) -> seq<int>
+  decreases len(rs)
+{
+  if len(rs) == 0 { [] } else { rep(rs[0].0, rs[0].1) + expand(rs[1..]) }
+}
+
+// Appending one run appends its repetition to the expansion.
+lemma expand_snoc(rs: seq<(int, int)>, p: (int, int))
+  ensures expand(rs + [p]) == expand(rs) + rep(p.0, p.1)
+  decreases len(rs)
+{
+  if len(rs) > 0 {
+    expand_snoc(rs[1..], p);
+    assert (rs + [p])[1..] == rs[1..] + [p];
+  }
+}
+
+// Appending a run with a positive count, distinct from the last value, keeps
+// the counts positive and the adjacent values distinct.
+lemma snoc_props(a: seq<(int, int)>, p: (int, int))
+  requires forall k in 0..len(a): a[k].1 >= 1
+  requires forall k in 0..len(a) - 1: a[k].0 != a[k + 1].0
+  requires p.1 >= 1
+  requires len(a) > 0 ==> a[len(a) - 1].0 != p.0
+  ensures forall k in 0..len(a) + 1: (a + [p])[k].1 >= 1
+  ensures forall k in 0..len(a): (a + [p])[k].0 != (a + [p])[k + 1].0
+{
+  assert forall k in 0..len(a): (a + [p])[k] == a[k];
+  assert (a + [p])[len(a)] == p;
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures forall i in 0..len(result): result[i].1 >= 1
+  ensures forall i in 0..len(result) - 1: result[i].0 != result[i + 1].0
+  ensures expand(result) == xs
+{
+  if len(xs) == 0 {
+    return [];
+  }
+  // `out` holds the completed runs; (v, c) is the current run, not yet in `out`.
+  let mut out: seq<(int, int)> = [];
+  let mut v: int = xs[0];
+  let mut c: int = 1;
+  let mut i: int = 1;
+  while i < len(xs)
+    invariant 1 <= i <= len(xs)
+    invariant c >= 1
+    invariant expand(out) + rep(v, c) == xs[..i]
+    invariant forall k in 0..len(out): out[k].1 >= 1
+    invariant forall k in 0..len(out) - 1: out[k].0 != out[k + 1].0
+    invariant len(out) > 0 ==> out[len(out) - 1].0 != v
+    decreases len(xs) - i
+  {
+    assert xs[..i + 1] == xs[..i] + [xs[i]];
+    if xs[i] == v {
+      assert rep(v, c + 1) == rep(v, c) + [v];
+      c = c + 1;
+    } else {
+      expand_snoc(out, (v, c));
+      snoc_props(out, (v, c));
+      out = out + [(v, c)];
+      assert out[len(out) - 1] == (v, c);
+      assert rep(xs[i], 1) == [xs[i]];
+      v = xs[i];
+      c = 1;
+    }
+    i = i + 1;
+  }
+  assert xs[..len(xs)] == xs;
+  expand_snoc(out, (v, c));
+  snoc_props(out, (v, c));
+  return out + [(v, c)];
+}

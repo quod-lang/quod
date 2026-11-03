@@ -1,0 +1,48 @@
+// Prefix sum: sum of xs[0..k).
+fn prefix(xs: seq<int>, k: int) -> int
+  requires 0 <= k && k <= len(xs)
+  decreases k
+{
+  if k == 0 { 0 } else { prefix(xs, k - 1) + xs[k - 1] }
+}
+
+// Kadane's algorithm, O(n).
+// cur: best sum of a non-empty sublist ending just before k (xs[cs..k)).
+// best: best sum found so far, witnessed by xs[bs..be).
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) >= 1
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: prefix(xs, j) - prefix(xs, i) <= result
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: result == prefix(xs, j) - prefix(xs, i)
+{
+  let mut cur = xs[0];
+  let mut cs = 0;
+  let mut best = xs[0];
+  let mut bs = 0;
+  let mut be = 1;
+  let mut k = 1;
+  while k < len(xs)
+    invariant 1 <= k && k <= len(xs)
+    invariant 0 <= cs && cs < k
+    invariant cur == prefix(xs, k) - prefix(xs, cs)
+    invariant forall i in 0..k: prefix(xs, k) - prefix(xs, i) <= cur
+    invariant 0 <= bs && bs < be && be <= k
+    invariant best == prefix(xs, be) - prefix(xs, bs)
+    invariant forall i in 0..k: forall j in i + 1..k + 1: prefix(xs, j) - prefix(xs, i) <= best
+    decreases len(xs) - k
+  {
+    let x = xs[k];
+    if cur > 0 {
+      cur = cur + x;
+    } else {
+      cur = x;
+      cs = k;
+    }
+    if cur > best {
+      best = cur;
+      bs = cs;
+      be = k + 1;
+    }
+    k = k + 1;
+  }
+  return best;
+}

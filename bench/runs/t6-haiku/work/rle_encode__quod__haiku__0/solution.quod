@@ -1,0 +1,55 @@
+// Run-length encoding of a sequence of integers.
+//
+// The specification is the model `rle_model`: a left fold that appends each value to the
+// accumulated runs, either growing the last run (same value) or starting a new run.
+
+// Append value `x` to the runs `acc`: if `x` equals the value of the last run, that run's
+// count grows by one; otherwise a new run `(x, 1)` starts.
+fn push_run(acc: seq<(int, int)>, x: int) -> seq<(int, int)>
+{
+  if len(acc) > 0 && acc[len(acc) - 1].0 == x {
+    acc[..len(acc) - 1] + [(x, acc[len(acc) - 1].1 + 1)]
+  } else {
+    acc + [(x, 1)]
+  }
+}
+
+// Fold `push_run` over the elements of `xs`, starting from the runs `acc`.
+fn rle_acc(xs: seq<int>, acc: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(xs)
+{
+  if len(xs) == 0 { acc } else { rle_acc(xs[1..], push_run(acc, xs[0])) }
+}
+
+// Specification: the run-length encoding of `xs`.
+fn rle_model(xs: seq<int>) -> seq<(int, int)>
+{
+  rle_acc(xs, [])
+}
+
+// One step of the fold, seen from the suffix: consuming `xs[i]` first is the same as
+// consuming it into the accumulator before the rest.
+lemma rle_acc_step(xs: seq<int>, i: int, acc: seq<(int, int)>)
+  requires 0 <= i < len(xs)
+  ensures rle_acc(xs[i..], acc) == rle_acc(xs[i + 1..], push_run(acc, xs[i]))
+{
+  assert xs[i..][0] == xs[i];
+  assert xs[i..][1..] == xs[i + 1..];
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures result == rle_model(xs)
+{
+  let mut runs: seq<(int, int)> = [];
+  let mut i: int = 0;
+  while i < len(xs)
+    invariant 0 <= i <= len(xs)
+    invariant rle_acc(xs[i..], runs) == rle_model(xs)
+    decreases len(xs) - i
+  {
+    rle_acc_step(xs, i, runs);
+    runs = push_run(runs, xs[i]);
+    i = i + 1;
+  }
+  runs
+}

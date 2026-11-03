@@ -1,0 +1,54 @@
+// Union of closed intervals, as disjoint intervals sorted by start.
+// Two intervals are merged when they overlap or share an endpoint: (1,3) and (3,5) give (1,5),
+// while (1,2) and (3,4) stay apart.
+//
+// The contract is a model: the result is the list obtained by inserting the intervals one by one
+// into a list kept sorted and merged. `ins` inserts one interval into such a list.
+
+// Insert e into acc, a list of intervals sorted by start and pairwise disjoint and non-touching.
+fn ins(acc: seq<(int, int)>, e: (int, int)) -> seq<(int, int)>
+  decreases len(acc)
+{
+  if len(acc) == 0 {
+    [e]
+  } else if acc[0].1 < e.0 {
+    [acc[0]] + ins(acc[1..], e)
+  } else if e.1 < acc[0].0 {
+    [e] + acc
+  } else {
+    ins(acc[1..], (if acc[0].0 < e.0 { acc[0].0 } else { e.0 }, if acc[0].1 > e.1 { acc[0].1 } else { e.1 }))
+  }
+}
+
+// The merged union of the intervals iv, built by inserting them in order.
+fn merge_model(iv: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(iv)
+{
+  if len(iv) == 0 {
+    []
+  } else {
+    ins(merge_model(iv[..len(iv) - 1]), iv[len(iv) - 1])
+  }
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall j in 0..len(iv): iv[j].0 <= iv[j].1
+  ensures result == merge_model(iv)
+{
+  let n = len(iv);
+  let mut acc: seq<(int, int)> = [];
+  let mut i = 0;
+  while i < n
+    invariant 0 <= i <= n
+    invariant acc == merge_model(iv[..i])
+    decreases n - i
+  {
+    assert iv[..i + 1][..i] == iv[..i];
+    assert iv[..i + 1][i] == iv[i];
+    assert merge_model(iv[..i + 1]) == ins(merge_model(iv[..i]), iv[i]);
+    acc = ins(acc, iv[i]);
+    i = i + 1;
+  }
+  assert iv[..n] == iv;
+  return acc;
+}

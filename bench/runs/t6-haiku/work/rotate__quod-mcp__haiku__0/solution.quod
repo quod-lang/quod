@@ -1,0 +1,131 @@
+// Rotate a sequence to the right by k positions (negative k rotates left).
+// Specification: result[i] == xs[(i - k) mod n] for every index i (Euclidean mod).
+
+// If n * x == r1 - r2 with both remainders in 0..n, then x == 0 (n > 0).
+lemma mul_unique(n: int, x: int, r1: int, r2: int)
+  requires n > 0
+  requires 0 <= r1 < n
+  requires 0 <= r2 < n
+  requires n * x == r1 - r2
+  ensures x == 0
+{
+}
+
+// Adding n to the dividend does not change its remainder modulo n.
+lemma mod_step(a: int, n: int)
+  requires n > 0
+  ensures (a + n) % n == a % n
+{
+  let q = a / n;
+  let r = a % n;
+  assert a == n * q + r;
+  assert a + n == n * (q + 1) + r;
+  let q2 = (a + n) / n;
+  let r2 = (a + n) % n;
+  assert a + n == n * q2 + r2;
+  assert n * (q + 1 - q2) == r2 - r;
+  mul_unique(n, q + 1 - q2, r2, r);
+}
+
+// Adding any multiple of n does not change the remainder modulo n.
+lemma mod_shift(a: int, n: int, t: int)
+  requires n > 0
+  ensures (a + n * t) % n == a % n
+  decreases if t >= 0 { t } else { 0 - t }
+{
+  if t > 0 {
+    let b = a + n * (t - 1);
+    assert a + n * t == b + n;
+    mod_step(b, n);
+    mod_shift(a, n, t - 1);
+    assert (a + n * t) % n == b % n;
+    assert b % n == a % n;
+  } else if t < 0 {
+    let c = a + n * (t + 1);
+    assert a + n * t + n == c;
+    mod_step(a + n * t, n);
+    mod_shift(a, n, t + 1);
+    assert (a + n * t) % n == c % n;
+    assert c % n == a % n;
+  }
+}
+
+// A value already in 0..n is its own remainder.
+lemma mod_small(a: int, n: int)
+  requires n > 0
+  requires 0 <= a < n
+  ensures a % n == a
+{
+  let q = a / n;
+  let r = a % n;
+  assert a == n * q + r;
+  mul_unique(n, q, a, r);
+}
+
+// The rotation index depends only on k modulo n.
+lemma mod_rot(i: int, k: int, n: int)
+  requires n > 0
+  ensures (i - k) % n == (i - k % n) % n
+{
+  let q = k / n;
+  assert k == n * q + k % n;
+  assert i - k == (i - k % n) + n * (0 - q);
+  mod_shift(i - k % n, n, 0 - q);
+}
+
+// One element of the rotated sequence r = xs[n-s..] + xs[..n-s], with s = k mod n.
+lemma rot_elem(xs: seq<int>, k: int, r: seq<int>, i: int)
+  requires len(xs) > 0
+  requires 0 <= i < len(xs)
+  requires r == xs[len(xs) - k % len(xs)..] + xs[..len(xs) - k % len(xs)]
+  ensures len(r) == len(xs)
+  ensures r[i] == xs[(i - k) % len(xs)]
+{
+  let n = len(xs);
+  let s = k % n;
+  let cut = n - s;
+  mod_rot(i, k, n);
+  assert 0 <= s < n;
+  assert len(xs[cut..]) == s;
+  assert len(xs[..cut]) == cut;
+  assert len(r) == n;
+  if i < s {
+    assert r[i] == xs[cut..][i];
+    assert xs[cut..][i] == xs[cut + i];
+    assert 0 <= i - s + n < n;
+    mod_step(i - s, n);
+    mod_small(i - s + n, n);
+    assert (i - s) % n == i - s + n;
+    assert xs[(i - s) % n] == xs[cut + i];
+  } else {
+    assert r[i] == xs[..cut][i - s];
+    assert xs[..cut][i - s] == xs[i - s];
+    mod_small(i - s, n);
+    assert (i - s) % n == i - s;
+  }
+}
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i - k) % len(xs)]
+{
+  let n = len(xs);
+  if n == 0 {
+    return xs;
+  }
+  // Euclidean remainder: 0 <= s < n
+  let s = k % n;
+  let cut = n - s;
+  let r = xs[cut..] + xs[..cut];
+  let mut j = 0;
+  while j < n
+    invariant 0 <= j && j <= n
+    invariant len(r) == n
+    invariant forall p in 0..j: r[p] == xs[(p - k) % n]
+    decreases n - j
+  {
+    rot_elem(xs, k, r, j);
+    j = j + 1;
+  }
+  return r;
+}

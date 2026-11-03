@@ -1,0 +1,22 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i - k) % len(xs)]
+{
+  let n = len(xs);
+  if n == 0 {
+    return [];
+  }
+  let mut out: seq<int> = [];
+  let mut i = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant n == len(xs) && n > 0
+    invariant len(out) == i
+    invariant forall j in 0..i: out[j] == xs[(j - k) % n]
+    decreases n - i
+  {
+    out = out + [xs[(i - k) % n]];
+    i = i + 1;
+  }
+  return out;
+}

@@ -1,0 +1,57 @@
+// Binary search on a sorted sequence with duplicates.
+// Returns the index of the first occurrence of target, or -1 if absent.
+
+// If xs is sorted and m is a valid index, every element up to m is <= xs[m].
+lemma le_before(xs: seq<int>, m: int)
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= m < len(xs)
+  ensures forall i in 0..m + 1: xs[i] <= xs[m]
+  decreases m
+{
+  if m > 0 {
+    le_before(xs, m - 1);
+  }
+}
+
+// If xs is sorted and m is a valid index, every element from m on is >= xs[m].
+lemma ge_after(xs: seq<int>, m: int)
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= m < len(xs)
+  ensures forall i in m..len(xs): xs[i] >= xs[m]
+  decreases len(xs) - m
+{
+  if m + 1 < len(xs) {
+    ge_after(xs, m + 1);
+  }
+}
+
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  ensures result == -1 ==> forall i in 0..len(xs): xs[i] != target
+  ensures result != -1 ==> (0 <= result && result < len(xs) && xs[result] == target && forall i in 0..result: xs[i] != target)
+{
+  let mut lo: int = 0;
+  let mut hi: int = len(xs);
+  while lo < hi
+    invariant 0 <= lo <= hi <= len(xs)
+    invariant forall i in 0..lo: xs[i] < target
+    invariant forall i in hi..len(xs): xs[i] >= target
+    decreases hi - lo
+  {
+    let mid: int = lo + (hi - lo) / 2;
+    if xs[mid] < target {
+      le_before(xs, mid);
+      lo = mid + 1;
+    } else {
+      ge_after(xs, mid);
+      hi = mid;
+    }
+  }
+  if lo < len(xs) {
+    ge_after(xs, lo);
+    if xs[lo] == target {
+      return lo;
+    }
+  }
+  return -1;
+}

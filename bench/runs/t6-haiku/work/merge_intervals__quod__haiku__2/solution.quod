@@ -1,0 +1,92 @@
+// Merge a list of closed integer intervals (a, b), a <= b, in any order, into their union:
+// a list of disjoint intervals sorted by start, where two intervals are merged when they
+// overlap or touch at an endpoint ((1,3) and (3,5) give (1,5); (1,2) and (3,4) stay apart).
+//
+// The result is the canonical list obtained by inserting the intervals one after the other
+// into a list kept sorted and non-touching (see insert_from). The functions below that
+// are expression functions are the model: the contracts say the result is that model, and
+// the loops of the code (insert_step, merge_intervals) are proved to compute it.
+
+// Insert [lo, hi] into the sorted, non-touching list r, from position j on, when the
+// intervals of r before j have already been output (cl, ch: the interval being built).
+// An interval of r is kept when it ends before cl, absorbed when it overlaps or touches
+// [cl, ch] (cl and ch are then widened), and [cl, ch] is output before the first interval
+// that starts after ch.
+fn insert_from(r: seq<(int, int)>, j: nat, cl: int, ch: int) -> seq<(int, int)>
+  requires j <= len(r)
+  decreases len(r) - j
+{
+  if j == len(r) {
+    [(cl, ch)]
+  } else if r[j].1 < cl {
+    [r[j]] + insert_from(r, j + 1, cl, ch)
+  } else if ch < r[j].0 {
+    [(cl, ch)] + r[j..]
+  } else {
+    insert_from(r, j + 1,
+      if cl < r[j].0 { cl } else { r[j].0 },
+      if ch > r[j].1 { ch } else { r[j].1 })
+  }
+}
+
+// Insert the closed interval [lo, hi] into the sorted, non-touching list r.
+fn insert_interval(r: seq<(int, int)>, lo: int, hi: int) -> seq<(int, int)>
+{
+  insert_from(r, 0, lo, hi)
+}
+
+// The union of the first n intervals of iv, by successive insertions.
+fn merge_prefix(iv: seq<(int, int)>, n: nat) -> seq<(int, int)>
+  requires n <= len(iv)
+  decreases n
+{
+  if n == 0 {
+    []
+  } else {
+    insert_interval(merge_prefix(iv, n - 1), iv[n - 1].0, iv[n - 1].1)
+  }
+}
+
+// Code version of insert_interval: a loop that walks r once, with the same case split as
+// insert_from. Invariant: the model of the whole insertion is the output so far followed
+// by the model of the rest of the walk.
+fn insert_step(r: seq<(int, int)>, lo: int, hi: int) -> seq<(int, int)>
+  ensures result == insert_interval(r, lo, hi)
+{
+  let mut out: seq<(int, int)> = [];
+  let mut j: nat = 0;
+  let mut cl = lo;
+  let mut ch = hi;
+  // the walk goes on while insert_from takes one of its first two branches
+  while j < len(r) && (r[j].1 < cl || r[j].0 <= ch)
+    invariant j <= len(r)
+    invariant insert_interval(r, lo, hi) == out + insert_from(r, j, cl, ch)
+    decreases len(r) - j
+  {
+    if r[j].1 < cl {
+      out = out + [r[j]];
+    } else {
+      cl = if cl < r[j].0 { cl } else { r[j].0 };
+      ch = if ch > r[j].1 { ch } else { r[j].1 };
+    }
+    j = j + 1;
+  }
+  out + [(cl, ch)] + r[j..]
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures result == merge_prefix(iv, len(iv))
+{
+  let mut res: seq<(int, int)> = [];
+  let mut i: nat = 0;
+  while i < len(iv)
+    invariant i <= len(iv)
+    invariant res == merge_prefix(iv, i)
+    decreases len(iv) - i
+  {
+    res = insert_step(res, iv[i].0, iv[i].1);
+    i = i + 1;
+  }
+  res
+}

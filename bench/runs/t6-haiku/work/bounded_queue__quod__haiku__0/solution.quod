@@ -1,0 +1,109 @@
+// Bounded FIFO queue simulation.
+//
+// Model: the queue contents q (oldest first) and the output produced so far.
+// A push (op > 0) on a full queue first drops the oldest element.
+// A pop (op == 0) outputs the oldest element, or -1 when the queue is empty.
+
+// Queue after pushing x: the oldest element is dropped when the queue is full.
+fn push_q(capacity: int, q: seq<int>, x: int) -> seq<int>
+  requires capacity >= 1
+{
+  if len(q) >= capacity { q[1..] + [x] } else { q + [x] }
+}
+
+// Element produced by a pop on q.
+fn pop_out(q: seq<int>) -> int {
+  if len(q) == 0 { -1 } else { q[0] }
+}
+
+// Queue after a pop on q.
+fn pop_q(q: seq<int>) -> seq<int> {
+  if len(q) == 0 { q } else { q[1..] }
+}
+
+// Output of running the operations ops[k..] starting from queue q.
+fn run_from(capacity: int, ops: seq<int>, k: int, q: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires 0 <= k
+  decreases len(ops) - k
+{
+  if k >= len(ops) {
+    []
+  } else if ops[k] > 0 {
+    run_from(capacity, ops, k + 1, push_q(capacity, q, ops[k]))
+  } else {
+    [pop_out(q)] + run_from(capacity, ops, k + 1, pop_q(q))
+  }
+}
+
+// One step of run_from, for a push operation inside the operations.
+lemma run_unfold_push(capacity: int, ops: seq<int>, k: int, q: seq<int>)
+  requires capacity >= 1
+  requires 0 <= k < len(ops)
+  requires ops[k] > 0
+  ensures run_from(capacity, ops, k, q)
+      == run_from(capacity, ops, k + 1, push_q(capacity, q, ops[k]))
+{
+}
+
+// One step of run_from, for a pop operation inside the operations.
+lemma run_unfold_pop(capacity: int, ops: seq<int>, k: int, q: seq<int>)
+  requires capacity >= 1
+  requires 0 <= k < len(ops)
+  requires ops[k] <= 0
+  ensures run_from(capacity, ops, k, q)
+      == [pop_out(q)] + run_from(capacity, ops, k + 1, pop_q(q))
+{
+}
+
+// Length facts about the queue updates, used to keep len(q) <= capacity.
+lemma push_len(capacity: int, q: seq<int>, x: int)
+  requires capacity >= 1
+  requires len(q) <= capacity
+  ensures len(push_q(capacity, q, x)) <= capacity
+{
+  if len(q) >= capacity {
+    assert len(q[1..]) == len(q) - 1;
+    assert len(q[1..] + [x]) == len(q);
+  }
+}
+
+lemma pop_len(q: seq<int>)
+  ensures len(pop_q(q)) <= len(q)
+{
+  if len(q) > 0 {
+    assert len(q[1..]) == len(q) - 1;
+  }
+}
+
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  ensures result == run_from(capacity, ops, 0, [])
+{
+  let target: seq<int> = run_from(capacity, ops, 0, []);
+  let mut q: seq<int> = [];
+  let mut out: seq<int> = [];
+  let mut i: int = 0;
+  while i < len(ops)
+    invariant 0 <= i <= len(ops)
+    invariant len(q) <= capacity
+    invariant out + run_from(capacity, ops, i, q) == target
+    decreases len(ops) - i
+  {
+    if ops[i] > 0 {
+      run_unfold_push(capacity, ops, i, q);
+      push_len(capacity, q, ops[i]);
+      q = push_q(capacity, q, ops[i]);
+    } else {
+      run_unfold_pop(capacity, ops, i, q);
+      assert out + run_from(capacity, ops, i, q)
+          == (out + [pop_out(q)]) + run_from(capacity, ops, i + 1, pop_q(q));
+      pop_len(q);
+      out = out + [pop_out(q)];
+      q = pop_q(q);
+    }
+    i = i + 1;
+  }
+  return out;
+}

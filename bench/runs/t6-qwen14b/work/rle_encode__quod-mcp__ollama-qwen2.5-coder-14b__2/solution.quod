@@ -1,0 +1,18 @@
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+{
+  if len(xs) == 0 { return []; }
+  let mut result = [];
+  let current_value = xs[0];
+  let mut count = 1;
+  for i in 1..len(xs) {
+    if xs[i] == current_value {
+      count += 1;
+    } else {
+      result = result + [(current_value, count)];
+      current_value = xs[i];
+      count = 1;
+    }
+  }
+  result = result + [(current_value, count)];
+  return result;
+}

@@ -1,0 +1,58 @@
+// Every element up to index m is <= xs[m] (xs is sorted).
+lemma sorted_prefix(xs: seq<int>, m: int)
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= m < len(xs)
+  ensures forall i in 0..m + 1: xs[i] <= xs[m]
+  decreases m
+{
+  if m > 0 {
+    sorted_prefix(xs, m - 1);
+  }
+}
+
+// Every element from index m on is >= xs[m] (xs is sorted).
+lemma sorted_suffix(xs: seq<int>, m: int)
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  requires 0 <= m < len(xs)
+  ensures forall i in m..len(xs): xs[m] <= xs[i]
+  decreases len(xs) - m
+{
+  if m + 1 < len(xs) {
+    sorted_suffix(xs, m + 1);
+  }
+}
+
+// Returns the index of the first occurrence of `target` in the sorted sequence `xs`,
+// or -1 if `target` does not occur in `xs`. Runs in O(log n).
+fn binary_search(xs: seq<int>, target: int) -> int
+  requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1]
+  ensures result == -1 || (0 <= result && result < len(xs) && xs[result] == target)
+  ensures result == -1 ==> forall i in 0..len(xs): xs[i] != target
+  ensures result != -1 ==> forall i in 0..result: xs[i] != target
+{
+  // Lower bound: lo is the first index whose element is >= target (or len(xs)).
+  let mut lo: int = 0;
+  let mut hi: int = len(xs);
+  while lo < hi
+    invariant 0 <= lo && lo <= hi && hi <= len(xs)
+    invariant forall i in 0..lo: xs[i] < target
+    invariant forall i in hi..len(xs): xs[i] >= target
+    decreases hi - lo
+  {
+    let mid: int = lo + (hi - lo) / 2;
+    sorted_prefix(xs, mid);
+    sorted_suffix(xs, mid);
+    if xs[mid] < target {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  if lo < len(xs) && xs[lo] == target {
+    return lo;
+  }
+  if lo < len(xs) {
+    sorted_suffix(xs, lo);
+  }
+  return -1;
+}

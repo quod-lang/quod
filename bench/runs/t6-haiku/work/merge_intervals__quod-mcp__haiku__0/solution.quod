@@ -1,0 +1,187 @@
+// Union of closed integer intervals, as a sorted list of disjoint,
+// non-touching intervals.
+//
+// Contract, in words:
+//  - every output interval is valid, and consecutive output intervals are
+//    separated by a strict gap (result[k].1 < result[k+1].0): canonical form;
+//  - every input interval lies inside some output interval (coverage);
+//  - every point of every output interval lies in some input interval.
+//    Points are doubled (q = 2x for the integer x, q = 2x+1 for the half-point
+//    x+1/2), so that closed intervals with integer endpoints are checked exactly.
+
+// Point q (doubled) is covered by one of the first t inputs in the order ord.
+fn covers(iv: seq<(int, int)>, ord: seq<int>, t: int, q: int) -> bool
+  requires 0 <= t && t <= len(ord)
+  requires forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+  decreases t
+{
+  if t <= 0 {
+    false
+  } else {
+    (2 * iv[ord[t - 1]].0 <= q && q <= 2 * iv[ord[t - 1]].1) || covers(iv, ord, t - 1, q)
+  }
+}
+
+// The input that covers point q among the first t inputs: a witness index.
+fn cover_idx(iv: seq<(int, int)>, ord: seq<int>, t: int, q: int) -> int
+  requires 0 <= t && t <= len(ord)
+  requires forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+  decreases t
+{
+  if t <= 0 {
+    0
+  } else {
+    if 2 * iv[ord[t - 1]].0 <= q && q <= 2 * iv[ord[t - 1]].1 { ord[t - 1] } else { cover_idx(iv, ord, t - 1, q) }
+  }
+}
+
+// For every point q (in lo..hi) covered by the first t inputs, cover_idx is a
+// valid witness: an input index whose interval contains q.
+lemma cover_idx_all(iv: seq<(int, int)>, ord: seq<int>, t: int, lo: int, hi: int)
+  requires 0 <= t && t <= len(ord)
+  requires forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+  ensures forall q in lo..hi: covers(iv, ord, t, q) ==> (0 <= cover_idx(iv, ord, t, q) && cover_idx(iv, ord, t, q) < len(iv) && 2 * iv[cover_idx(iv, ord, t, q)].0 <= q && q <= 2 * iv[cover_idx(iv, ord, t, q)].1)
+  decreases t
+{
+  if t > 0 {
+    cover_idx_all(iv, ord, t - 1, lo, hi);
+  }
+}
+
+
+// Each point q in lo..hi has a witness input (cover_idx), so it is covered by an input.
+lemma point_range(iv: seq<(int, int)>, ord: seq<int>, t: int, lo: int, hi: int)
+  requires 0 <= t && t <= len(ord)
+  requires forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+  requires forall q in lo..hi: 0 <= cover_idx(iv, ord, t, q) && cover_idx(iv, ord, t, q) < len(iv) && 2 * iv[cover_idx(iv, ord, t, q)].0 <= q && q <= 2 * iv[cover_idx(iv, ord, t, q)].1
+  ensures forall q in lo..hi: exists i in 0..len(iv): 2 * iv[i].0 <= q && q <= 2 * iv[i].1
+  decreases hi - lo
+{
+  if lo < hi {
+    point_range(iv, ord, t, lo + 1, hi);
+    let w = cover_idx(iv, ord, t, lo);
+    assert 0 <= w && w < len(iv) && 2 * iv[w].0 <= lo && lo <= 2 * iv[w].1;
+    assert exists i in 0..len(iv): 2 * iv[i].0 <= lo && lo <= 2 * iv[i].1;
+  }
+}
+
+// Same for the first m output intervals.
+lemma comps_exists(iv: seq<(int, int)>, ord: seq<int>, t: int, r: seq<(int, int)>, m: int)
+  requires 0 <= t && t <= len(ord)
+  requires forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+  requires 0 <= m && m <= len(r)
+  requires forall k in 0..m: forall q in 2 * r[k].0 .. 2 * r[k].1 + 1: 0 <= cover_idx(iv, ord, t, q) && cover_idx(iv, ord, t, q) < len(iv) && 2 * iv[cover_idx(iv, ord, t, q)].0 <= q && q <= 2 * iv[cover_idx(iv, ord, t, q)].1
+  ensures forall k in 0..m: forall q in 2 * r[k].0 .. 2 * r[k].1 + 1: exists i in 0..len(iv): 2 * iv[i].0 <= q && q <= 2 * iv[i].1
+  decreases m
+{
+  if m > 0 {
+    comps_exists(iv, ord, t, r, m - 1);
+    point_range(iv, ord, t, 2 * r[m - 1].0, 2 * r[m - 1].1 + 1);
+  }
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures forall k in 0..len(result): result[k].0 <= result[k].1
+  ensures forall k in 0..len(result) - 1: result[k].1 < result[k + 1].0
+  ensures forall i in 0..len(iv): exists k in 0..len(result): result[k].0 <= iv[i].0 && iv[i].1 <= result[k].1
+  ensures forall k in 0..len(result): forall q in 2 * result[k].0 .. 2 * result[k].1 + 1: exists i in 0..len(iv): 2 * iv[i].0 <= q && q <= 2 * iv[i].1
+{
+  // Phase 1: ord lists the input indices sorted by start (insertion sort);
+  // pos[i] is where input i sits in ord, so that ord[pos[i]] == i.
+  let mut ord: seq<int> = [];
+  let mut pos: seq<int> = [];
+  let mut n = 0;
+  while n < len(iv)
+    invariant 0 <= n && n <= len(iv)
+    invariant len(ord) == n && len(pos) == n
+    invariant forall p in 0..n: 0 <= ord[p] && ord[p] < n
+    invariant forall p in 0..n - 1: iv[ord[p]].0 <= iv[ord[p + 1]].0
+    invariant forall i in 0..n: 0 <= pos[i] && pos[i] < n && ord[pos[i]] == i
+    decreases len(iv) - n
+  {
+    let mut j = 0;
+    while j < len(ord) && iv[ord[j]].0 <= iv[n].0
+      invariant 0 <= j && j <= len(ord)
+      invariant forall p in 0..j: iv[ord[p]].0 <= iv[n].0
+      decreases len(ord) - j
+    {
+      j = j + 1;
+    }
+    // positions of the old inputs shift by one when at or after j
+    let mut np: seq<int> = [];
+    let mut i = 0;
+    while i < n
+      invariant 0 <= i && i <= n
+      invariant len(np) == i
+      invariant forall q in 0..i: np[q] == (if pos[q] >= j { pos[q] + 1 } else { pos[q] })
+      decreases n - i
+    {
+      np = np + [if pos[i] >= j { pos[i] + 1 } else { pos[i] }];
+      i = i + 1;
+    }
+    let old = ord;
+    ord = old[..j] + [n] + old[j..];
+    pos = np + [j];
+    assert forall q in 0..j: ord[q] == old[q];
+    assert forall q in j..n: ord[q + 1] == old[q];
+    assert ord[j] == n;
+    n = n + 1;
+  }
+
+  // Phase 2: sweep the sorted inputs, merging overlapping or touching ones.
+  // wit[p] is the output interval that receives the p-th sorted input.
+  let mut r: seq<(int, int)> = [];
+  let mut wit: seq<int> = [];
+  let mut t = 0;
+  while t < len(iv)
+    invariant 0 <= t && t <= len(iv)
+    invariant len(ord) == len(iv) && len(wit) == t
+    invariant forall p in 0..len(ord): 0 <= ord[p] && ord[p] < len(iv)
+    invariant forall k in 0..len(r): r[k].0 <= r[k].1
+    invariant forall k in 0..len(r) - 1: r[k].1 < r[k + 1].0
+    invariant forall p in 0..t: 0 <= wit[p] && wit[p] < len(r) && r[wit[p]].0 <= iv[ord[p]].0 && iv[ord[p]].1 <= r[wit[p]].1
+    // every point of every output interval is covered by the first t inputs
+    invariant forall k in 0..len(r): forall q in 2 * r[k].0 .. 2 * r[k].1 + 1: covers(iv, ord, t, q)
+    invariant len(r) == 0 || (t > 0 && r[len(r) - 1].0 <= iv[ord[t - 1]].0)
+    decreases len(iv) - t
+  {
+    let a = iv[ord[t]].0;
+    let b = iv[ord[t]].1;
+    if len(r) > 0 && a <= r[len(r) - 1].1 {
+      let c = r[len(r) - 1].0;
+      let d = r[len(r) - 1].1;
+      let e = if b > d { b } else { d };
+      r = r[..len(r) - 1] + [(c, e)];
+    } else {
+      r = r + [(a, b)];
+    }
+    wit = wit + [len(r) - 1];
+    t = t + 1;
+  }
+
+  // every point of every output interval is covered by an input, with a witness
+  let mut k = 0;
+  while k < len(r)
+    invariant 0 <= k && k <= len(r)
+    invariant forall k2 in 0..k: forall q in 2 * r[k2].0 .. 2 * r[k2].1 + 1: 0 <= cover_idx(iv, ord, t, q) && cover_idx(iv, ord, t, q) < len(iv) && 2 * iv[cover_idx(iv, ord, t, q)].0 <= q && q <= 2 * iv[cover_idx(iv, ord, t, q)].1
+    decreases len(r) - k
+  {
+    let mut q = 2 * r[k].0;
+    while q <= 2 * r[k].1
+      invariant 2 * r[k].0 <= q && q <= 2 * r[k].1 + 1
+      invariant forall q2 in 2 * r[k].0 .. q: 0 <= cover_idx(iv, ord, t, q2) && cover_idx(iv, ord, t, q2) < len(iv) && 2 * iv[cover_idx(iv, ord, t, q2)].0 <= q2 && q2 <= 2 * iv[cover_idx(iv, ord, t, q2)].1
+      decreases 2 * r[k].1 + 1 - q
+    {
+      assert covers(iv, ord, t, q);
+      cover_idx_all(iv, ord, t, q, q + 1);
+      q = q + 1;
+    }
+    k = k + 1;
+  }
+
+  // input i is at position pos[i] of ord, and its interval is wit[pos[i]]
+  assert forall i in 0..len(iv): 0 <= wit[pos[i]] && wit[pos[i]] < len(r) && r[wit[pos[i]]].0 <= iv[i].0 && iv[i].1 <= r[wit[pos[i]]].1;
+  comps_exists(iv, ord, t, r, len(r));
+  return r;
+}

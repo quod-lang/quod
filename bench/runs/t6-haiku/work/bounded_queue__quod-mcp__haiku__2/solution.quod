@@ -1,0 +1,92 @@
+// Queue state after a push: a full queue drops its oldest element first.
+fn push_q(cap: int, q: seq<int>, x: int) -> seq<int>
+  requires cap >= 1
+  requires len(q) <= cap
+{
+  if len(q) == cap { q[1..] + [x] } else { q + [x] }
+}
+
+// Output of running the operations ops[k..] from queue state q.
+fn run_q(cap: int, ops: seq<int>, k: int, q: seq<int>) -> seq<int>
+  requires cap >= 1
+  requires 0 <= k && k <= len(ops)
+  requires len(q) <= cap
+  decreases len(ops) - k
+{
+  if k == len(ops) {
+    []
+  } else if ops[k] > 0 {
+    run_q(cap, ops, k + 1, push_q(cap, q, ops[k]))
+  } else if len(q) == 0 {
+    [-1] + run_q(cap, ops, k + 1, q)
+  } else {
+    [q[0]] + run_q(cap, ops, k + 1, q[1..])
+  }
+}
+
+lemma unfold_push(cap: int, ops: seq<int>, k: int, q: seq<int>)
+  requires cap >= 1
+  requires 0 <= k && k < len(ops)
+  requires len(q) <= cap
+  requires ops[k] > 0
+  ensures run_q(cap, ops, k, q) == run_q(cap, ops, k + 1, push_q(cap, q, ops[k]))
+{
+}
+
+lemma unfold_empty(cap: int, ops: seq<int>, k: int, q: seq<int>)
+  requires cap >= 1
+  requires 0 <= k && k < len(ops)
+  requires len(q) <= cap
+  requires ops[k] <= 0
+  requires len(q) == 0
+  ensures run_q(cap, ops, k, q) == [-1] + run_q(cap, ops, k + 1, q)
+{
+}
+
+lemma unfold_pop(cap: int, ops: seq<int>, k: int, q: seq<int>)
+  requires cap >= 1
+  requires 0 <= k && k < len(ops)
+  requires len(q) <= cap
+  requires ops[k] <= 0
+  requires len(q) > 0
+  ensures run_q(cap, ops, k, q) == [q[0]] + run_q(cap, ops, k + 1, q[1..])
+{
+}
+
+lemma push_len(cap: int, q: seq<int>, x: int)
+  requires cap >= 1
+  requires len(q) <= cap
+  ensures len(push_q(cap, q, x)) <= cap
+{
+}
+
+// Runs ops[k..] from queue state q, by recursion on k.
+fn go(cap: int, ops: seq<int>, k: int, q: seq<int>) -> seq<int>
+  requires cap >= 1
+  requires 0 <= k && k <= len(ops)
+  requires len(q) <= cap
+  ensures result == run_q(cap, ops, k, q)
+  decreases len(ops) - k
+{
+  if k == len(ops) {
+    []
+  } else if ops[k] > 0 {
+    unfold_push(cap, ops, k, q);
+    push_len(cap, q, ops[k]);
+    return go(cap, ops, k + 1, push_q(cap, q, ops[k]));
+  } else if len(q) == 0 {
+    unfold_empty(cap, ops, k, q);
+    return [-1] + go(cap, ops, k + 1, q);
+  } else {
+    unfold_pop(cap, ops, k, q);
+    return [q[0]] + go(cap, ops, k + 1, q[1..]);
+  }
+}
+
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  requires forall i in 0..len(ops): ops[i] >= 0
+  ensures result == run_q(capacity, ops, 0, [])
+{
+  return go(capacity, ops, 0, []);
+}

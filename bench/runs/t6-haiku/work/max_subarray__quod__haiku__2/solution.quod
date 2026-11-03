@@ -1,0 +1,57 @@
+// Sum of the elements xs[i..j) (i included, j excluded).
+fn range_sum(xs: seq<int>, i: int, j: int) -> int
+  requires 0 <= i <= j <= len(xs)
+  decreases j - i
+{
+  if i == j { 0 } else { range_sum(xs, i, j - 1) + xs[j - 1] }
+}
+
+// Extending each range that ends at k by xs[k] gives the range ending at k + 1.
+lemma range_sum_snoc(xs: seq<int>, k: int)
+  requires 0 <= k < len(xs)
+  ensures forall i in 0..k: range_sum(xs, i, k + 1) == range_sum(xs, i, k) + xs[k]
+{
+}
+
+// Maximum sum of a non-empty contiguous sublist, by Kadane's algorithm.
+// cur: best sum of a non-empty range ending at k (its start is ci).
+// best: best sum of a non-empty range found so far (its bounds are bi, bj).
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures exists i in 0..len(xs): exists j in i + 1..len(xs) + 1: range_sum(xs, i, j) == result
+  ensures forall i in 0..len(xs): forall j in i + 1..len(xs) + 1: range_sum(xs, i, j) <= result
+{
+  let mut cur: int = xs[0];
+  let mut ci: int = 0;
+  let mut best: int = xs[0];
+  let mut bi: int = 0;
+  let mut bj: int = 1;
+  let mut k: int = 1;
+  assert range_sum(xs, 0, 1) == xs[0];
+  while k < len(xs)
+    invariant 1 <= k <= len(xs)
+    invariant 0 <= ci < k
+    invariant range_sum(xs, ci, k) == cur
+    invariant forall i in 0..k: range_sum(xs, i, k) <= cur
+    invariant 0 <= bi < bj <= k
+    invariant range_sum(xs, bi, bj) == best
+    invariant forall i in 0..k: forall j in i + 1..k + 1: range_sum(xs, i, j) <= best
+    decreases len(xs) - k
+  {
+    range_sum_snoc(xs, k);
+    assert range_sum(xs, k, k + 1) == xs[k];
+    if cur > 0 {
+      cur = cur + xs[k];
+    } else {
+      cur = xs[k];
+      ci = k;
+    }
+    if cur > best {
+      best = cur;
+      bi = ci;
+      bj = k + 1;
+    }
+    k = k + 1;
+  }
+  best
+}

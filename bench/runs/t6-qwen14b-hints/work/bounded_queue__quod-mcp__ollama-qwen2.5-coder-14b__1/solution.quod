@@ -1,0 +1,31 @@
+fn bounded_queue(capacity: int, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+  ensures len(result) == len(ops)
+  ensures forall i in 0..len(ops): (ops[i] == 0 ==> (result[i] == -1 || exists j in 0..capacity: result[j] == ops[i]))
+  ensures forall i in 0..capacity: exists j in 0..len(ops): (ops[j] > 0 && result[i] == ops[j])
+{
+  let mut queue: seq<int> = [];
+  let mut output: seq<int> = [];
+
+  for op in ops
+    invariant len(queue) <= capacity
+    invariant len(output) == len(ops) - len(queue)
+    invariant forall i in 0..len(queue): exists j in 0..len(ops): (ops[j] > 0 && queue[i] == ops[j])
+  {
+    if op > 0 {
+      if len(queue) == capacity {
+        queue = queue[1..];
+      }
+      queue = queue + [op];
+    } else {
+      if len(queue) == 0 {
+        output = output + [-1];
+      } else {
+        output = output + [queue[0]];
+        queue = queue[1..];
+      }
+    }
+  }
+
+  return output;
+}

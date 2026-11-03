@@ -1,0 +1,80 @@
+// Union of closed integer intervals, as the disjoint, non-touching intervals sorted by start.
+//
+// The contract is a model: the result is the sweep of the intervals sorted by start.
+// Intervals are sorted by start (insertion sort), then swept: each interval either extends the
+// last group (when it starts at or before the group's end, touching included) or opens a new one.
+
+// Insert x into xs, which is sorted by start.
+fn ins(xs: seq<(int, int)>, x: (int, int)) -> seq<(int, int)>
+  decreases len(xs)
+{
+  if len(xs) == 0 {
+    [x]
+  } else if x.0 <= xs[0].0 {
+    [x] + xs
+  } else {
+    [xs[0]] + ins(xs[1..], x)
+  }
+}
+
+// The first n intervals of iv, sorted by start.
+fn isort(iv: seq<(int, int)>, n: nat) -> seq<(int, int)>
+  requires n <= len(iv)
+  decreases n
+{
+  if n == 0 {
+    []
+  } else {
+    ins(isort(iv, n - 1), iv[n - 1])
+  }
+}
+
+// One sweep step: merge x into the last group of out, or open a new group.
+fn step(out: seq<(int, int)>, x: (int, int)) -> seq<(int, int)>
+{
+  if len(out) == 0 {
+    [x]
+  } else if x.0 <= out[len(out) - 1].1 {
+    out[..len(out) - 1] + [(out[len(out) - 1].0, if out[len(out) - 1].1 >= x.1 { out[len(out) - 1].1 } else { x.1 })]
+  } else {
+    out + [x]
+  }
+}
+
+// The sweep of the sorted sequence s.
+fn sweep(s: seq<(int, int)>) -> seq<(int, int)>
+  decreases len(s)
+{
+  if len(s) == 0 {
+    []
+  } else {
+    step(sweep(s[..len(s) - 1]), s[len(s) - 1])
+  }
+}
+
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures result == sweep(isort(iv, len(iv)))
+{
+  let mut s: seq<(int, int)> = [];
+  let mut i = 0;
+  while i < len(iv)
+    invariant 0 <= i && i <= len(iv)
+    invariant s == isort(iv, i)
+    decreases len(iv) - i
+  {
+    s = ins(s, iv[i]);
+    i = i + 1;
+  }
+  let mut out: seq<(int, int)> = [];
+  let mut j = 0;
+  while j < len(s)
+    invariant 0 <= j && j <= len(s)
+    invariant out == sweep(s[..j])
+    decreases len(s) - j
+  {
+    out = step(out, s[j]);
+    j = j + 1;
+  }
+  out
+}

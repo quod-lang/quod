@@ -1,0 +1,46 @@
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures result >= 0
+  ensures result == max_subarray_sum(xs)
+{
+  let mut max_sum = xs[0];
+  let mut current_sum = xs[0];
+  for i in 1..len(xs) {
+    current_sum = max(xs[i], current_sum + xs[i]);
+    max_sum = max(max_sum, current_sum);
+  }
+  return max_sum
+}
+
+lemma max_subarray_sum(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures result >= 0
+  decreases len(xs)
+{
+  if len(xs) == 1 { return xs[0]; }
+  let mid = len(xs) / 2;
+  let left_sum = max_subarray_sum(xs[..mid]);
+  let right_sum = max_subarray_sum(xs[mid..]);
+  let cross_sum = max_cross_sum(xs, mid);
+  return max(left_sum, max(right_sum, cross_sum))
+}
+
+lemma max_cross_sum(xs: seq<int>, mid: nat) -> int
+  requires len(xs) > 0
+  ensures result >= 0
+  decreases mid
+{
+  let mut left_sum = -inf;
+  let mut current_sum = 0;
+  for i in mid..0 {
+    current_sum += xs[i];
+    left_sum = max(left_sum, current_sum);
+  }
+  let mut right_sum = -inf;
+  current_sum = 0;
+  for i in mid..len(xs) {
+    current_sum += xs[i];
+    right_sum = max(right_sum, current_sum);
+  }
+  return left_sum + right_sum
+}

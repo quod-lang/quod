@@ -1,0 +1,6 @@
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+requires true;
+ensures true;
+{
+  return iv;
+}

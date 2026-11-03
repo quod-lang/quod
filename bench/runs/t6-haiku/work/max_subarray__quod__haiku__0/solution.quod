@@ -1,0 +1,48 @@
+// Sum of the contiguous slice xs[i..j) (empty when i == j).
+fn sum(xs: seq<int>, i: int, j: int) -> int
+  requires 0 <= i <= j <= len(xs)
+  decreases j - i
+{
+  if i < j { sum(xs, i, j - 1) + xs[j - 1] } else { 0 }
+}
+
+// Kadane's algorithm, O(n).
+// Invariants over the prefix [0, k):
+//   cur      = best sum of a non-empty slice ending at k, namely xs[cs..k)
+//   best     = best sum of a non-empty slice inside [0, k), attained by xs[bs..be)
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+  ensures forall a in 0..len(xs): forall b in a + 1..len(xs) + 1: sum(xs, a, b) <= result
+  ensures exists a in 0..len(xs): exists b in a + 1..len(xs) + 1: sum(xs, a, b) == result
+{
+  let mut k: int = 1;
+  let mut cs: int = 0;
+  let mut cur: int = xs[0];
+  let mut bs: int = 0;
+  let mut be: int = 1;
+  let mut best: int = xs[0];
+  while k < len(xs)
+    invariant 1 <= k <= len(xs)
+    invariant 0 <= cs < k
+    invariant cur == sum(xs, cs, k)
+    invariant forall a in 0..k: sum(xs, a, k) <= cur
+    invariant 0 <= bs < be <= k
+    invariant best == sum(xs, bs, be)
+    invariant forall a in 0..k: forall b in a + 1..k + 1: sum(xs, a, b) <= best
+    decreases len(xs) - k
+  {
+    if cur > 0 {
+      cur = cur + xs[k];
+    } else {
+      cur = xs[k];
+      cs = k;
+    }
+    if cur > best {
+      best = cur;
+      bs = cs;
+      be = k + 1;
+    }
+    k = k + 1;
+  }
+  best
+}

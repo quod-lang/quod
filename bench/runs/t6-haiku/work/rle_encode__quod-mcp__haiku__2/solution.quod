@@ -1,0 +1,40 @@
+// Run-length encoding of a list of integers.
+
+// Append the value v to the run-length list p: extend the last run if it
+// has the same value, otherwise start a new run of length 1.
+fn push_run(p: seq<(int, int)>, v: int) -> seq<(int, int)>
+{
+  if len(p) > 0 && p[len(p) - 1].0 == v {
+    p[..len(p) - 1] + [(v, p[len(p) - 1].1 + 1)]
+  } else {
+    p + [(v, 1)]
+  }
+}
+
+// Model: the run-length encoding of the first n elements of xs.
+fn rle_prefix(xs: seq<int>, n: nat) -> seq<(int, int)>
+  requires n <= len(xs)
+  decreases n
+{
+  if n == 0 {
+    []
+  } else {
+    push_run(rle_prefix(xs, n - 1), xs[n - 1])
+  }
+}
+
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  ensures result == rle_prefix(xs, len(xs))
+{
+  let mut out: seq<(int, int)> = [];
+  let mut i: nat = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant out == rle_prefix(xs, i)
+    decreases len(xs) - i
+  {
+    out = push_run(out, xs[i]);
+    i = i + 1;
+  }
+  return out;
+}

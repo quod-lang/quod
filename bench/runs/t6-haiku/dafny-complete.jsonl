@@ -1,0 +1,18 @@
+{"run": "binary_search__dafny__haiku__0", "task": "binary_search", "status": "underspecified", "methods": [["binary_search", "underspecified"]]}
+{"run": "binary_search__dafny__haiku__1", "task": "binary_search", "status": "underspecified", "methods": [["binary_search", "underspecified"]]}
+{"run": "binary_search__dafny__haiku__2", "task": "binary_search", "status": "underspecified", "methods": [["binary_search", "underspecified"]]}
+{"run": "bounded_queue__dafny__haiku__0", "task": "bounded_queue", "status": "determined", "methods": [["bounded_queue", "determined"]]}
+{"run": "bounded_queue__dafny__haiku__1", "task": "bounded_queue", "status": "determined", "methods": [["bounded_queue", "determined"]]}
+{"run": "bounded_queue__dafny__haiku__2", "task": "bounded_queue", "status": "determined", "methods": [["bounded_queue", "determined"]]}
+{"run": "max_subarray__dafny__haiku__0", "task": "max_subarray", "status": "determined", "methods": [["max_subarray", "determined"]]}
+{"run": "max_subarray__dafny__haiku__1", "task": "max_subarray", "status": "determined", "methods": [["max_subarray", "determined"]]}
+{"run": "max_subarray__dafny__haiku__2", "task": "max_subarray", "status": "determined", "methods": [["max_subarray", "determined"]]}
+{"run": "merge_intervals__dafny__haiku__0", "task": "merge_intervals", "status": "inconclusive", "methods": [["Sweep", "inconclusive"], ["InsertSorted", "error"], ["SortIv", "underspecified"], ["merge_intervals", "inconclusive"]]}
+{"run": "merge_intervals__dafny__haiku__1", "task": "merge_intervals", "status": "inconclusive", "methods": [["SortByStart", "underspecified"], ["merge_intervals", "inconclusive"]]}
+{"run": "merge_intervals__dafny__haiku__2", "task": "merge_intervals", "status": "inconclusive", "methods": [["merge_intervals", "inconclusive"]]}
+{"run": "rle_encode__dafny__haiku__0", "task": "rle_encode", "status": "inconclusive", "methods": [["rle_encode", "inconclusive"]]}
+{"run": "rle_encode__dafny__haiku__1", "task": "rle_encode", "status": "inconclusive", "methods": [["rle_encode", "inconclusive"]]}
+{"run": "rle_encode__dafny__haiku__2", "task": "rle_encode", "status": "inconclusive", "methods": [["rle_encode", "inconclusive"]]}
+{"run": "rotate__dafny__haiku__0", "task": "rotate", "status": "determined", "methods": [["rotate", "determined"]]}
+{"run": "rotate__dafny__haiku__1", "task": "rotate", "status": "determined", "methods": [["rotate", "determined"]]}
+{"run": "rotate__dafny__haiku__2", "task": "rotate", "status": "determined", "methods": [["rotate", "determined"]]}

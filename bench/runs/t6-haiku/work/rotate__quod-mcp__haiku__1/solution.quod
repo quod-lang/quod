@@ -1,0 +1,25 @@
+// Index in xs of the element that lands at position i after rotating
+// xs to the right by k positions (n = len(xs)).
+fn source_index(i: int, k: int, n: int) -> int
+{
+  if n == 0 { 0 } else { (i - k % n + n) % n }
+}
+
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[source_index(i, k, len(xs))]
+{
+  let n = len(xs);
+  let mut out: seq<int> = [];
+  let mut i = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant len(out) == i
+    invariant forall j in 0..i: out[j] == xs[source_index(j, k, n)]
+    decreases n - i
+  {
+    out = out + [xs[source_index(i, k, n)]];
+    i = i + 1;
+  }
+  out
+}

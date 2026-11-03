@@ -1,0 +1,49 @@
+// Sum of xs[a..b] (a included, b excluded), defined by recursion on the length.
+fn rsum(xs: seq<int>, a: int, b: int) -> int
+  requires 0 <= a && a <= b && b <= len(xs)
+  decreases b - a
+{
+  if a == b { 0 } else { rsum(xs, a, b - 1) + xs[b - 1] }
+}
+
+// Kadane's algorithm, one pass, O(n).
+// cur / cs: best sum of a non-empty subarray ending at i, and its start.
+// best / bs / be: best sum found so far, and the subarray (bs..be) achieving it.
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) >= 1
+  // no non-empty contiguous sublist sums to more than the result
+  ensures forall a in 0..len(xs): forall b in a + 1..len(xs) + 1: rsum(xs, a, b) <= result
+  // and some non-empty contiguous sublist sums to exactly the result
+  ensures exists a in 0..len(xs): exists b in a + 1..len(xs) + 1: rsum(xs, a, b) == result
+{
+  let mut best = xs[0];
+  let mut bs = 0;
+  let mut be = 1;
+  let mut cur = xs[0];
+  let mut cs = 0;
+  let mut i = 1;
+  while i < len(xs)
+    invariant 1 <= i && i <= len(xs)
+    invariant 0 <= cs && cs < i && cur == rsum(xs, cs, i)
+    invariant forall a in 0..i: rsum(xs, a, i) <= cur
+    invariant 0 <= bs && bs < be && be <= i && best == rsum(xs, bs, be)
+    invariant forall a in 0..i: forall b in a + 1..i + 1: rsum(xs, a, b) <= best
+    invariant cur <= best
+    decreases len(xs) - i
+  {
+    let x = xs[i];
+    if cur + x >= x {
+      cur = cur + x;
+    } else {
+      cur = x;
+      cs = i;
+    }
+    if cur > best {
+      best = cur;
+      bs = cs;
+      be = i + 1;
+    }
+    i = i + 1;
+  }
+  return best;
+}
