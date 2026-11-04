@@ -197,6 +197,7 @@ def build_prompt(task: Task, arm: str) -> str:
 
 def dafny_complete_on_path(where: Path) -> None:
     """`dafny-complete` for the agent, from the sources of this repository."""
+    where = where.resolve()
     where.mkdir(parents=True, exist_ok=True)
     src = ROOT.parent / "tools" / "dafny-complete" / "src"
     os.environ["PYTHONPATH"] = str(src) + os.pathsep + os.environ.get("PYTHONPATH", "")
