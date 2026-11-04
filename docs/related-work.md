@@ -48,6 +48,16 @@ benchmark.
 
 ## Other related work
 
+- **Goldweber, Yu, Vakil Ghahani, Kapritsos, IronSpec** (OSDI 2024; its section on sanity checks read): mutation testing of
+  specifications, hand-written spec-testing proofs, and an Automatic Sanity Checker that flags from the AST, without a verifier,
+  postconditions that depend on no input and outputs that no postcondition constrains. It asks nothing about uniqueness, and it is
+  cheap and complementary: its first flag would catch `ensures len(result) == 0`, which Quod's completeness check accepts.
+- **Agarwal et al., Verus-SpecGym** ([arXiv 2605.26457](https://arxiv.org/abs/2605.26457); read in part): evaluates specifications by
+  executing them on tests of valid and invalid inputs and of correct and incorrect outputs, and reports that an LLM judge misses
+  26% of the failures this evaluator catches.
+- **Languages for agents** ([agentlanguages.dev](https://agentlanguages.dev/), read 2026-11-04): among those tagged for verification,
+  Thermite's tool probes for vacuous conditions and surviving mutations, Prove generates wrong mutations of a body for its author to answer, and Vera
+  does not count a proof with an unsatisfiable precondition. None of the pages states a check that a contract determines a unique result.
 - **Endres et al., nl2postcond** (FSE 2024, [arXiv 2310.01831](https://arxiv.org/abs/2310.01831)):
   LLM-generated postconditions for mainstream languages; completeness measured by how many *code
   mutants* of a reference implementation a postcondition rejects. Needs reference code and tests.
