@@ -1,0 +1,38 @@
+fn bounded_queue(capacity: nat, ops: seq<int>) -> seq<int>
+  requires capacity >= 1
+{
+  let mut queue: seq<int> = [];
+  let mut res: seq<int> = [];
+  let mut i: nat = 0;
+  
+  while i < len(ops)
+    invariant 0 <= i && i <= len(ops)
+    invariant len(queue) <= capacity
+    decreases len(ops) - i
+  {
+    let op: int = ops[i];
+    if op > 0 {
+      // Push operation
+      if len(queue) == capacity {
+        // Queue is full, drop the oldest element
+        queue = queue[1..];
+      }
+      // Add new element to the end
+      queue = queue + [op];
+    } else {
+      // Pop operation
+      if len(queue) > 0 {
+        // Queue not empty, pop the oldest element
+        let popped: int = queue[0];
+        res = res + [popped];
+        queue = queue[1..];
+      } else {
+        // Queue empty, append -1
+        res = res + [-1];
+      }
+    }
+    i = i + 1;
+  }
+  
+  return res;
+}

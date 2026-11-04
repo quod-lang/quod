@@ -1,0 +1,21 @@
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  requires true
+{
+  let res = [] in
+  let i = 0 in
+  while i < len(xs) do
+    invariant i <= len(xs)
+    decreases len(xs) - i
+    let run_start = i in
+    let run_len = 0 in
+    while i + run_len < len(xs) && xs[i + run_len] == xs[run_start] do
+      invariant i + run_len <= len(xs)
+      invariant run_len >= 0
+      decreases len(xs) - (i + run_len)
+      run_len = run_len + 1
+    done
+    res = res + [(xs[run_start], run_len)]
+    i = i + run_len
+  done
+  res
+}

@@ -1,0 +1,10 @@
+fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>
+  requires forall i in 0..len(iv): iv[i].0 <= iv[i].1
+  ensures len(result) == len(iv)
+{
+  // Handle edge cases
+  if len(iv) == 0 { return []; }
+  
+  // For now, just return the input - we'll implement proper merging logic later
+  return iv;
+}

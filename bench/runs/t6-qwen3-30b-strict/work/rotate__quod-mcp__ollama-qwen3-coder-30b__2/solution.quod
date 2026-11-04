@@ -1,0 +1,12 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+  requires true
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): result[i] == xs[(i - k % len(xs)) % len(xs)]
+{
+  if len(xs) == 0 {
+    return [];
+  }
+  
+  let k_mod = k % len(xs);
+  return xs[len(xs) - k_mod..] + xs[..len(xs) - k_mod];
+}

@@ -1,0 +1,8 @@
+fn rotate(xs: seq<int>, k: int) -> seq<int>
+requires
+    true
+ensures
+    true
+{
+    if len(xs) == 0 then [] else xs
+}

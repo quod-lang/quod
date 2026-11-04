@@ -1,0 +1,4 @@
+fn test() -> int 
+ensures result == 1 {
+    return 1;
+}

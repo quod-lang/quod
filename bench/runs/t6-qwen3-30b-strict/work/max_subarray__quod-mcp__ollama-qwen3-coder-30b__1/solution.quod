@@ -1,0 +1,20 @@
+fn max_subarray(xs: seq<int>) -> int
+  requires len(xs) > 0
+{
+  let mut max_so_far = xs[0];
+  let mut max_ending_here = xs[0];
+  
+  let mut i = 1;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    decreases len(xs) - i
+  {
+    max_ending_here = if xs[i] > max_ending_here + xs[i] { xs[i] } else { max_ending_here + xs[i] };
+    if max_ending_here > max_so_far {
+      max_so_far = max_ending_here;
+    }
+    i = i + 1;
+  }
+  
+  return max_so_far;
+}

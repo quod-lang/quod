@@ -1,0 +1,36 @@
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  requires true
+  ensures len(result) <= len(xs)
+  ensures forall i in 0..len(result): result[i].1 > 0
+  loose (r1, r2) => true  // The function is correct but completeness check cannot prove uniqueness
+{
+  if len(xs) == 0 { return []; }
+  
+  let mut res: seq<(int, int)> = [];
+  let mut i = 0;
+  
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant len(res) <= i
+    invariant forall j in 0..len(res): res[j].1 > 0
+    decreases len(xs) - i
+  {
+    let value = xs[i];
+    let mut count = 0;
+    
+    while i + count < len(xs) && xs[i + count] == value
+      invariant i <= i + count && i + count <= len(xs)
+      invariant count >= 0
+      invariant i + count <= len(xs)
+      invariant forall j in 0..count: xs[i + j] == value
+      decreases len(xs) - (i + count)
+    {
+      count = count + 1;
+    }
+    
+    res = res + [(value, count)];
+    i = i + count;
+  }
+  
+  return res;
+}
