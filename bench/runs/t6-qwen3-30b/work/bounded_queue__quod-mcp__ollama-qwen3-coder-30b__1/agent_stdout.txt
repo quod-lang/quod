@@ -1,0 +1,1 @@
+{"type": "result", "is_error": false, "num_turns": 40, "total_cost_usd": 0, "duration_ms": 621697, "model": "qwen3-coder:30b", "usage": {"input_tokens": 473784, "output_tokens": 8517}, "permission_denials": [], "result": "stopped: max turns"}

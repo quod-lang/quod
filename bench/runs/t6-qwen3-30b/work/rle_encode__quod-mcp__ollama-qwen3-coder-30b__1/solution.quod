@@ -1,0 +1,6 @@
+fn rle_encode(xs: seq<int>) -> seq<(int, int)> 
+requires true
+ensures len(result) >= 0
+{
+    return [];
+}

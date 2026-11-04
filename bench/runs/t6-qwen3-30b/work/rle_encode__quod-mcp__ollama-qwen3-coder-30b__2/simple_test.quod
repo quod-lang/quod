@@ -1,0 +1,5 @@
+fn test_func() -> int
+  requires true
+{
+  1
+}

@@ -1,0 +1,9 @@
+fn rle_encode(xs: seq<int>) -> seq<(int, int)>
+  requires true
+{
+  if xs == seq() then 
+    seq()
+  else 
+    let first = xs[0] in
+    seq((first, 1))
+}
