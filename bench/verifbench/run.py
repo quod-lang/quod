@@ -146,7 +146,7 @@ def mcp_agent_cmd(config: Path) -> str:
 
 
 def write_mcp_config(path: Path) -> None:
-    server: dict[str, Any] = {"command": QUOD_EXE, "args": ["mcp"]}
+    server: dict[str, Any] = {"command": QUOD_EXE, "args": ["mcp", "--require-contracts"]}
     if os.environ.get("QUOD_Z3"):
         server["env"] = {"QUOD_Z3": os.environ["QUOD_Z3"]}
     path.write_text(json.dumps({"mcpServers": {"quod": server}}), encoding="utf-8")
@@ -287,7 +287,7 @@ def evaluate_quod(task: Task, workdir: Path) -> dict[str, Any]:
     res["cheats"] = []  # Quod has no assume, axiom or verification switch
     res["ensures_count"] = len(re.findall(r"\bensures\b", text))
     res["loose_count"] = len(re.findall(r"\bloose\b", text))
-    v = _sh([QUOD_EXE, "check", "solution.quod", "--json"], workdir, 600)
+    v = _sh([QUOD_EXE, "check", "solution.quod", "--json", "--require-contracts"], workdir, 600)
     try:
         diags = json.loads(v["out"]) if v["out"].strip() else []
     except json.JSONDecodeError:
@@ -300,7 +300,7 @@ def evaluate_quod(task: Task, workdir: Path) -> dict[str, Any]:
     res["verify_tail"] = (v["out"] + v["err"])[-600:]
     build = workdir / "_build"
     shutil.rmtree(build, ignore_errors=True)
-    b = _sh([QUOD_EXE, "build", "solution.quod", "-o", str(build)], workdir, 600)
+    b = _sh([QUOD_EXE, "build", "solution.quod", "-o", str(build), "--require-contracts"], workdir, 600)
     if b["code"] != 0 or not (build / "solution.py").exists():
         res["hidden"] = {"loaded": False, "error": "build failed: " + (b["out"] + b["err"])[-600:]}
         return res
@@ -312,10 +312,12 @@ def score(res: dict[str, Any]) -> dict[str, Any]:
     """Derive the headline flags from a raw evaluation."""
     h = res.get("hidden") or {}
     all_pass = bool(h.get("loaded")) and h.get("total") is not None and h["passed"] == h["total"]
-    # "accepted" = what the agent would ship: a file exists and, for Dafny, it verifies cleanly.
+    # "accepted" = what the agent would ship: a file exists and, for Dafny and Quod, it verifies
+    # cleanly and states a contract (t6-qwen3-30b: 6 files verified with no ensures at all).
     accepted = res.get("submitted", False)
     if "verified" in res:
-        accepted = accepted and res["verified"] and not res["cheats"]
+        accepted = (accepted and res["verified"] and not res["cheats"]
+                    and res.get("ensures_count", 1) > 0 and not res.get("diagnostics", {}).get("contract/none"))
     return {"accepted": accepted, "all_pass": all_pass,
             "escaped_bug": accepted and not all_pass}
 

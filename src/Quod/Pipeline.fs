@@ -12,6 +12,8 @@ type Settings =
       Timeout: int
       /// Seconds for the whole check (0: none)
       Budget: int
+      /// A function without a contract is an error (--require-contracts)
+      RequireContracts: bool
       SmtLog: string option
       /// Stops the check: z3 is killed, and check ends with Failure "cancelled" (quod mcp)
       Cancel: Threading.CancellationToken
@@ -19,7 +21,7 @@ type Settings =
       Progress: float -> int -> string -> unit }
 
 let defaultSettings =
-    { Z3 = None; Timeout = 10; Budget = 300; SmtLog = None; Cancel = Threading.CancellationToken.None; Progress = fun _ _ _ -> () }
+    { Z3 = None; Timeout = 10; Budget = 300; RequireContracts = false; SmtLog = None; Cancel = Threading.CancellationToken.None; Progress = fun _ _ _ -> () }
 
 /// What checking a file gives.
 type Outcome =
@@ -44,7 +46,9 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, s.Timeout * 1000, log, s.Cancel)
                 let verified = Vcgen.verifyWith file typed session s.Budget s.Progress
-                Checked(typed, { verified with Diagnostics = verified.Diagnostics @ ContractStyle.diagnostics file typed @ ContractStyle.review file typed })
+                let styles = ContractStyle.diagnostics file typed
+                let styles = if s.RequireContracts then ContractStyle.required file typed styles else styles
+                Checked(typed, { verified with Diagnostics = verified.Diagnostics @ styles @ ContractStyle.review file typed })
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)
@@ -91,7 +95,9 @@ and private styleSummary (r: Vcgen.VerifyResult) =
 let generate (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<string * Set<string>, string> =
     let errors = errorsOf r
     let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList
-    if errors |> List.exists (fun d -> d.Kind = "completeness") then
+    if errors |> List.exists (fun d -> d.Kind = "contract") then
+        Result.Error "not built: a function has no contract, and --require-contracts asks for one"
+    elif errors |> List.exists (fun d -> d.Kind = "completeness") then
         Result.Error "not built: an underspecified contract cannot be compiled (fix it, or declare the freedom with 'loose')"
     elif not unproved.IsEmpty && not runtimeChecks then
         Result.Error("not built: " + summary r + ". Fix the proofs, or build with --runtime-checks")

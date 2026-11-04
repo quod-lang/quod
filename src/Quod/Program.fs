@@ -19,6 +19,8 @@ let private usage =
     + "  --timeout SECONDS   time limit per proof obligation (default 10)\n"
     + "  --budget SECONDS    time limit of the whole check (default 300, 60 for mcp, 0 for none): the obligations\n"
     + "                      left when it is used up are reported as not attempted\n"
+    + "  --require-contracts a function without a contract is an error (check, build, mcp); expression\n"
+    + "                      functions that another function calls are explained by their definition\n"
     + "  --smt-log FILE      write every command sent to z3 to FILE\n"
     + "  --target python     code generation target (build; python is the only one in 0.1)\n"
     + "  -o DIR              output directory (build; default: next to FILE)\n"
@@ -42,6 +44,7 @@ let private parseOptions (args: string list) : Options * string list =
         | "--z3" :: p :: tl -> go { o with Settings = { s with Z3 = Some p } } tl positional
         | "--timeout" :: n :: tl -> go { o with Settings = { s with Timeout = int n } } tl positional
         | "--budget" :: n :: tl -> go { o with Settings = { s with Budget = int n }; BudgetGiven = true } tl positional
+        | "--require-contracts" :: tl -> go { o with Settings = { s with RequireContracts = true } } tl positional
         | "--smt-log" :: p :: tl -> go { o with Settings = { s with SmtLog = Some p } } tl positional
         | "--target" :: t :: tl -> go { o with Target = t } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional

@@ -217,3 +217,36 @@ let review (file: string) (prog: TProgram) : Diagnostic list =
                         ("the contracts of " + String.concat ", " fs + " are stated with '" + g.Name
                          + "': the proofs show that the code agrees with it, not that it says what was meant, so read it")))
     looseNotes @ reviewNotes
+
+/// The functions a function calls: in its contract, its hints and its body.
+let private callees (f: TFn) : string list =
+    let rec stmt (s: TStmt) =
+        match s.Kind with
+        | SLet(_, _, _, e) | SAssign(_, e) | SAssert e | SReturn e -> calls e
+        | SIf(c, a, b) -> calls c @ List.collect stmt a @ List.collect stmt b
+        | SWhile(c, invs, d, b) -> calls c @ List.collect calls invs @ calls d @ List.collect stmt b
+    (f.Requires @ f.Ensures @ Option.toList f.Decreases |> List.collect calls)
+    @ (f.Loose |> Option.toList |> List.collect (fun l -> calls l.Relation))
+    @ (match f.Body with
+       | TExprBody e -> calls e
+       | TStmtBody body -> List.collect stmt body)
+
+/// `--require-contracts`: a function without a contract is an error, so a verdict of `verified`
+/// means that something was proved about the result. (VerifBench run t6-qwen3-30b: 6 of the 8
+/// files accepted had no ensures at all, and a warning did not stop the agent.) An expression
+/// function no other function calls is covered too: it is not a helper its definition explains,
+/// but a result nothing is stated about. `styles` is what `diagnostics` gave.
+let required (file: string) (prog: TProgram) (styles: Diagnostic list) : Diagnostic list =
+    let message = "no ensures, and --require-contracts asks for a contract: nothing is proved about the result. State what the result is"
+    let raised =
+        styles
+        |> List.map (fun d ->
+            if d.Kind = "contract" && d.Status = "none" then { d with Severity = Error; Message = message } else d)
+    let called = prog.Fns |> List.collect (fun f -> callees f |> List.filter (fun g -> g <> f.Name)) |> Set.ofList
+    let entries =
+        prog.Fns
+        |> List.filter (fun f -> not f.IsLemma && f.IsExprFn && f.Ensures.IsEmpty && not (called.Contains f.Name))
+        |> List.map (fun f ->
+            { File = file; Span = f.Span; Kind = "contract"; Status = "none"; Severity = Error
+              Fn = Some f.Name; Property = Some "contract style"; Counterexample = []; Reason = None; Evidence = None; Message = message })
+    raised @ entries

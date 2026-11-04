@@ -20,6 +20,21 @@ let private call (tool: string) (arguments: string) : JsonElement * string =
     Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("content").[0].GetProperty("text").GetString())
     result.GetProperty "structuredContent", result.GetProperty("content").[0].GetProperty("text").GetString()
 
+/// Check or build with `--require-contracts`, as `quod mcp --require-contracts` does.
+let private strictCallWith (extra: string) (tool: string) (program: string) : JsonElement =
+    let strict = { settings with RequireContracts = true }
+    let arguments = "{" + extra + "\"source\": " + JsonSerializer.Serialize(program) + "}"
+    let line =
+        "{\"jsonrpc\": \"2.0\", \"id\": 8, \"method\": \"tools/call\", \"params\": {\"name\": \"" + tool
+        + "\", \"arguments\": " + arguments + "}}"
+    match Quod.Mcp.handle strict line with
+    | Some r -> JsonDocument.Parse(r).RootElement.GetProperty("result").GetProperty("structuredContent").Clone()
+    | None -> failwith "no response"
+
+let private strictCall = strictCallWith ""
+
+let private verified (r: JsonElement) = r.GetProperty("verified").GetBoolean()
+
 let private source (program: string) = "{\"source\": " + JsonSerializer.Serialize(program) + "}"
 
 let private clamp =
@@ -132,3 +147,43 @@ let ``the reference served to agents has no vocabulary of the design documents``
     Assert.DoesNotContain("pillar", text)
     Assert.DoesNotContain("principle 2", text)
     Assert.Contains("## Completeness, built in", text)
+
+// --- --require-contracts ------------------------------------------------------------
+
+/// A statement function without ensures, as Qwen3 wrote max_subarray (run t6-qwen3-30b).
+let private noContract =
+    "fn f(xs: seq<int>) -> int { let mut n = 0; let mut i = 0; while i < len(xs) invariant 0 <= i <= len(xs) decreases len(xs) - i { n = n + 1; i = i + 1; } return n; }"
+
+[<Fact>]
+let ``a statement function without ensures is a warning by default, an error with require-contracts`` () =
+    let plain, _ = call "quod_check" (source noContract)
+    Assert.True(verified plain)
+    let strict = strictCall "quod_check" noContract
+    Assert.False(verified strict)
+    Assert.Contains("missing (no ensures)", strict.GetProperty("summary").GetString())
+
+[<Fact>]
+let ``require-contracts does not build a function without ensures, even with run-time checks`` () =
+    let r = strictCallWith "\"runtime_checks\": true, " "quod_build" noContract
+    Assert.False(r.GetProperty("built").GetBoolean())
+    Assert.Contains("--require-contracts", r.GetProperty("summary").GetString())
+
+[<Fact>]
+let ``require-contracts refuses an expression function nothing calls`` () =
+    let plain, _ = call "quod_check" (source "fn g(x: int) -> int { x + 1 }")
+    Assert.True(verified plain)
+    Assert.False(verified (strictCall "quod_check" "fn g(x: int) -> int { x + 1 }"))
+    // recursion is not a caller
+    let recursive = "fn sum(xs: seq<int>) -> int decreases len(xs) { if len(xs) == 0 { 0 } else { sum(xs[..len(xs) - 1]) + xs[len(xs) - 1] } }"
+    Assert.False(verified (strictCall "quod_check" recursive))
+
+[<Fact>]
+let ``require-contracts keeps the expression functions a contract is stated with`` () =
+    let program =
+        "fn sum(xs: seq<int>) -> int decreases len(xs) { if len(xs) == 0 { 0 } else { sum(xs[..len(xs) - 1]) + xs[len(xs) - 1] } }\n"
+        + "fn total(xs: seq<int>) -> int ensures result == sum(xs) {\n"
+        + "  let mut s = 0; let mut i = 0;\n"
+        + "  while i < len(xs) invariant 0 <= i <= len(xs) invariant s == sum(xs[..i]) decreases len(xs) - i { s = s + xs[i]; i = i + 1; }\n"
+        + "  return s; }"
+    Assert.True(verified (strictCall "quod_check" program))
+    Assert.True(verified (strictCall "quod_check" clamp))

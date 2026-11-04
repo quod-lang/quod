@@ -42,7 +42,7 @@ class Mcp:
     """A client of `quod mcp` on stdio, one request at a time."""
 
     def __init__(self, quod: str):
-        self.p = subprocess.Popen([quod, "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        self.p = subprocess.Popen([quod, "mcp", "--require-contracts"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
         self.next = 0
         self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},

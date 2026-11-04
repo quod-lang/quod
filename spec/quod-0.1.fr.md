@@ -215,7 +215,10 @@ dans le JSON (`"kind": "contract"`) :
 - **aucun** (`none`) : une fonction à instructions sans `ensures`. Un **avertissement** : rien n'est
   prouvé sur son résultat, et ses appelants, qui ne la connaissent que par son contrat, n'en savent
   rien. (Une fonction-expression sans `ensures` n'est pas classée : le vérificateur connaît sa
-  définition.)
+  définition.) Avec
+  `--require-contracts` (`check`, `build`, `mcp`), c'est une **erreur**, tout comme une
+  fonction-expression sans `ensures` qu'aucune autre fonction n'appelle : `verified` signifie alors
+  que quelque chose a été prouvé sur chaque résultat.
 - **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
   renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`
   étant des faits, et dont le programme n'utilise jamais la valeur (`if feature_enabled() { ... }`
@@ -264,9 +267,9 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 ## Ligne de commande
 
 ```
-quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES]
-quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--json]
-quod mcp       # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
+quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES] [--require-contracts]
+quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
+quod mcp [--require-contracts]  # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 ```
 

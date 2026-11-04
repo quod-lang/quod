@@ -67,6 +67,10 @@ the tool call (the command line has 300 s): obligations left when it is used up 
 `not-attempted`, not as failures. An agent can ask for more with the `budget` argument, and
 `quod mcp --budget 120` changes the default (`--timeout` too, 10 s per obligation).
 
+`quod mcp --require-contracts` makes a function without a contract an error, so an agent cannot
+stop at a file that verifies because it states nothing. It is set on the server: the agent has no
+argument to turn it off.
+
 Tool calls run one at a time, while the server keeps reading: `ping`, `tools/list` and the
 resources are answered at once, `notifications/cancelled` stops the call it names (z3 is killed,
 and no response is sent), and a call that gives a `progressToken` gets progress notifications:

@@ -205,7 +205,10 @@ as a `note` in the JSON (`"kind": "contract"`):
   specification can stay as it is.
 - **none**: a statement function without `ensures`. A **warning**: nothing is proved about its
   result, and its callers, who know it by its contract only, know nothing about it. (An expression
-  function without `ensures` is not classified: the verifier knows its definition.)
+  function without `ensures` is not classified: the verifier knows its definition.) With
+  `--require-contracts` (`check`, `build`, `mcp`) it is an **error**, as is an expression function
+  without `ensures` that no other function calls, so `verified` means that something was proved
+  about each result.
 - **lemma written as a function** (`lemma-as-function`): a statement function returning `bool`
   that returns `true` on every path, or says `ensures result`, its other `ensures` being facts,
   and whose value the program never uses (`if feature_enabled() { ... }` uses it; a lemma could
@@ -253,9 +256,9 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 ## Command line
 
 ```
-quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS]
-quod build file.quod --target python [-o DIR] [--runtime-checks] [--json]
-quod mcp       # check, build, run and the reference, served to an AI agent (MCP, stdio)
+quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS] [--require-contracts]
+quod build file.quod --target python [-o DIR] [--runtime-checks] [--require-contracts] [--json]
+quod mcp [--require-contracts]  # check, build, run and the reference, served to an AI agent (MCP, stdio)
 quod reference [SECTION]   # the language reference, or one section of it
 ```
 
