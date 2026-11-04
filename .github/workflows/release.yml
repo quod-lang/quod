@@ -174,9 +174,13 @@ jobs:
         run: |
           dotnet pack packaging/Quod.Build -o nupkg -p:QuodVersion=$VERSION "-p:QuodTools=$(pwd -W)/tools"
           # the binaries of every system are in the package
-          for f in win-x64/quod.exe win-x64/z3.exe linux-x64/quod linux-x64/z3 osx-arm64/quod osx-arm64/z3; do
-            7z l "nupkg/Quod.Build.$VERSION.nupkg" | grep -q "tools.$f" || { echo "::error::tools/$f is not in the package"; exit 1; }
-          done
+          python -c "
+          import sys, zipfile
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          print(*[n for n in names if n.startswith('tools/')], sep='\\n')
+          missing = [f for f in sys.argv[2:] if 'tools/' + f not in names]
+          if missing: print('::error::not in the package: ' + ', '.join(missing)); sys.exit(1)
+          " "nupkg/Quod.Build.$VERSION.nupkg" win-x64/quod.exe win-x64/z3.exe linux-x64/quod linux-x64/z3 osx-arm64/quod osx-arm64/z3
           ls -l nupkg
 
       - name: Test the package in real projects
