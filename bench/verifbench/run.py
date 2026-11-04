@@ -166,6 +166,13 @@ def write_mcp_config(path: Path) -> None:
 
 
 QUOD_SIGNATURES = {
+    # the held-out suite
+    "gcd": "fn gcd(a: int, b: int) -> int",
+    "split_folds": "fn split_folds(pages: seq<int>) -> seq<(int, int)>",
+    "arbitrate_field": "fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int",
+    "transpose": "fn transpose(m: seq<seq<int>>) -> seq<seq<int>>",
+    "next_permutation": "fn next_permutation(xs: seq<int>) -> seq<int>",
+    "two_sum_sorted": "fn two_sum_sorted(xs: seq<int>, target: int) -> (int, int)",
     "binary_search": "fn binary_search(xs: seq<int>, target: int) -> int",
     "merge_intervals": "fn merge_intervals(iv: seq<(int, int)>) -> seq<(int, int)>",
     "rle_encode": "fn rle_encode(xs: seq<int>) -> seq<(int, int)>",
