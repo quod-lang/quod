@@ -217,7 +217,8 @@ dans le JSON (`"kind": "contract"`) :
   rien. (Une fonction-expression sans `ensures` n'est pas classée : le vérificateur connaît sa
   définition.) Avec
   `--require-contracts` (`check`, `build`, `mcp`), c'est une **erreur**, tout comme une
-  fonction-expression sans `ensures` qu'aucune autre fonction n'appelle : `verified` signifie alors
+  fonction-expression sans `ensures` qu'aucune autre fonction n'appelle et un `loose` qui accepte tout
+  résultat : `verified` signifie alors
   que quelque chose a été prouvé sur chaque résultat.
 - **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
   renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`

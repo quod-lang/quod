@@ -163,12 +163,8 @@ QUOD_SIGNATURES = {
 
 
 def quod_reference() -> str:
-    """The language part of the Quod 0.1 scope, from 'The language' to 'Command line': no
-    example program and no roadmap (the example of the scope is one of the tasks)."""
-    spec = (ROOT.parent / "spec" / "quod-0.1.md").read_text(encoding="utf-8")
-    body = spec[spec.index("## The language"):spec.index("## Python backend")]
-    body = body.replace("](kernel.md)", "](https://github.com/quod-lang/quod/blob/main/spec/kernel.md)")
-    return "# Quod 0.1 reference\n\n" + body.rstrip() + "\n"
+    """What `quod reference` prints, so that the shell and MCP arms read the same text."""
+    return subprocess.run([QUOD_EXE, "reference"], capture_output=True, text=True, encoding="utf-8", check=True).stdout
 
 
 CHEATS = [r"\bassume\b", r"\{:\s*axiom", r"\{:\s*verify\s+false", r"\{:\s*extern"]
@@ -317,7 +313,8 @@ def score(res: dict[str, Any]) -> dict[str, Any]:
     accepted = res.get("submitted", False)
     if "verified" in res:
         accepted = (accepted and res["verified"] and not res["cheats"]
-                    and res.get("ensures_count", 1) > 0 and not res.get("diagnostics", {}).get("contract/none"))
+                    and res.get("ensures_count", 1) > 0 and not res.get("diagnostics", {}).get("contract/none")
+                    and not res.get("diagnostics", {}).get("completeness/loose-accepts-all"))
     return {"accepted": accepted, "all_pass": all_pass,
             "escaped_bug": accepted and not all_pass}
 

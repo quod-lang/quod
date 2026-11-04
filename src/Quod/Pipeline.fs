@@ -46,9 +46,9 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, s.Timeout * 1000, log, s.Cancel)
                 let verified = Vcgen.verifyWith file typed session s.Budget s.Progress
-                let styles = ContractStyle.diagnostics file typed
-                let styles = if s.RequireContracts then ContractStyle.required file typed styles else styles
-                Checked(typed, { verified with Diagnostics = verified.Diagnostics @ styles @ ContractStyle.review file typed })
+                let found = verified.Diagnostics @ ContractStyle.diagnostics file typed
+                let found = if s.RequireContracts then ContractStyle.required file typed found else found
+                Checked(typed, { verified with Diagnostics = found @ ContractStyle.review file typed })
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)
@@ -58,12 +58,14 @@ let errorsOf (r: Vcgen.VerifyResult) = r.Diagnostics |> List.filter (fun d -> d.
 let rec summary (r: Vcgen.VerifyResult) =
     let errors = errorsOf r
     let proofErrors = errors |> List.filter (fun d -> d.Kind = "proof" && d.Status <> "not-attempted") |> List.length
-    let underspecified = errors |> List.filter (fun d -> d.Kind = "completeness") |> List.length
+    let underspecified = errors |> List.filter (fun d -> d.Kind = "completeness" && d.Status <> "loose-accepts-all") |> List.length
+    let looseAll = errors |> List.filter (fun d -> d.Status = "loose-accepts-all") |> List.length
     string r.Proved + " proof obligation(s) proved"
     + (if proofErrors > 0 then ", " + string proofErrors + " failed" else "")
     + (if r.NotAttempted > 0 then ", " + string r.NotAttempted + " not attempted (time budget used up)" else "")
     + "; " + string r.Determined + " of " + string r.WithContract + " contract(s) determine their result"
     + (if underspecified > 0 then ", " + string underspecified + " underspecified" else "")
+    + (if looseAll > 0 then ", " + string looseAll + " with a 'loose' that accepts every result" else "")
     + styleSummary r
     + (if r.Lemmas > 0 then "; " + string r.Lemmas + " lemma(s)" else "")
     + reviewSummary r

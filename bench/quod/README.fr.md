@@ -128,7 +128,8 @@ Contrat déterminé, par tâche (trois essais chacune) :
 | max_subarray | 3 | 1 (2 non décidés) | 3 |
 | rotate | 3 | 2 (1 rejeté) | 3 |
 
-- **Aucun bug échappé, dans aucun bras** : toute solution acceptée passe les tests cachés.
+- **Aucun bug échappé, dans aucun bras de ce passage** : toute solution acceptée passe les tests
+  cachés. (Un passage ultérieur d'un autre modèle en a un, ci-dessous.)
 - **À travers MCP, l'agent fait moins bien qu'à travers le shell sur chaque ligne** : acceptés,
   déterminés, temps et coût. L'avantage vu dans quod4-haiku-mcp, sur un essai par tâche, ne tient
   pas. La cause n'est pas mesurée. Le bras MCP écrit un peu plus de contrats par propriétés (12
@@ -155,6 +156,42 @@ expression au milieu d'un bloc, `:` pour `in`, `|s|` pour `len(s)`), et 3 fichie
 un `;` après une clause. Le modèle corrige l'erreur qu'on lui montre et en commet une autre ; 15
 des 18 fichiers finaux finissent sur une erreur de syntaxe. Un langage qu'aucun modèle n'a vu
 demande, pour l'instant, un modèle capable de suivre une référence qu'il lit pour la première fois.
+
+[t6-qwen14b-hints2](../runs/t6-qwen14b-hints2), avec l'analyseur de la 0.1.4, qui signale d'un coup
+toutes les habitudes d'un fichier : **1/18, et celui-là est faux.** 13 fichiers finaux finissent
+encore sur une erreur de syntaxe, 2 sur une erreur de type. Le fichier accepté est merge_intervals
+avec `ensures len(result) == 0` et `return [];` : le contrat est prouvé, détermine le résultat, et
+passe 51 des 508 tests cachés. C'est le premier bug échappé de ces passages, et il montre la limite
+du contrôle de complétude : il vérifie qu'un contrat fixe le résultat, pas qu'il dit ce que la tâche
+demande. Le journal des 7 derniers essais ([ollama_agent.py](../verifbench/ollama_agent.py) en tient
+un désormais) montre pourquoi les messages n'aident pas ce modèle : il écrit ses appels d'outils en
+JSON dans son texte, lit la référence une fois, puis réécrit le même fichier (2 écritures distinctes
+sur 39 pour max_subarray, 3 sur 39 pour binary_search).
+
+[t6-qwen3-30b](../runs/t6-qwen3-30b) : un modèle plus grand, Qwen3-Coder 30B, même protocole. Il
+appelle les outils nativement, répète rarement un fichier, et seuls 2 fichiers finaux finissent sur
+une erreur de syntaxe ; 8 des 10 rejetés butent sur les preuves ou la complétude, le vrai travail.
+8 fichiers sont vérifiés et passent tous les tests cachés, mais **6 n'ont aucun `ensures`**
+(bounded_queue et max_subarray, à chaque essai), alors que la tâche en demande : rien n'a été prouvé,
+le code était simplement juste. Seuls rotate #1 et binary_search #2 énoncent un contrat. D'où
+`--require-contracts`, qui fait d'un contrat manquant une erreur, et que le banc active désormais :
+un fichier sans contrat ne compte plus comme accepté, et ce passage compte donc **2/18** (recalculé
+à partir des évaluations enregistrées ; l'agent n'a jamais vu cette erreur). Avec l'option, les 16
+solutions que Haiku avait fait accepter à travers MCP restent vérifiées.
+
+[t6-qwen3-30b-strict](../runs/t6-qwen3-30b-strict) : le même modèle avec `--require-contracts` dans la
+boucle. **5/18, dont 4 passent tous les tests cachés.** L'erreur ne produit pas les contrats qu'elle demande :
+sur les 7 essais qui l'ont reçue, 4 finissent encore sans contrat, 1 sur une erreur de type, 1 sur une preuve
+réfutée, et 1 sur `ensures result == iv` avec `return iv;` (125 des 508 tests cachés), avec ce commentaire du
+modèle lui-même : « this is not correct ». bounded_queue et max_subarray, justes sans contrat au passage
+précédent, ne sont plus acceptés du tout. Un sixième, rle_encode, passait avec `loose (r1, r2) => true`, alors simple
+avertissement : l'option le refuse désormais, et il compte ici comme rejeté. Un essai s'est terminé sur une génération sans fin, faute de limite de tokens par réponse.
+
+**Une correction des chiffres ci-dessus.** La référence que sert `quod_reference` finissait par une solution
+complète de binary_search, à la différence du QUOD.md du bras shell. Les trois solutions de Haiku à travers MCP
+copient sa clause `loose` et son commentaire, et deux de celles de Qwen3 au dernier passage en reprennent le
+contrat. Sans cette tâche, les contrats déterminés sont 14 sur 15 par le shell, 9 sur 15 à travers MCP et 9 sur
+15 pour Dafny : **à travers MCP, l'agent est à égalité avec Dafny, pas devant**.
 
 ## Ce que leur écriture a changé dans le vérificateur
 

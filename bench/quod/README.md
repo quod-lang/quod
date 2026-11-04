@@ -125,7 +125,8 @@ Contract determined, by task (three trials each):
 | max_subarray | 3 | 1 (2 not decided) | 3 |
 | rotate | 3 | 2 (1 rejected) | 3 |
 
-- **No escaped bug in any arm**: every accepted solution passes the hidden tests.
+- **No escaped bug in any arm of this run**: every accepted solution passes the hidden tests. (A
+  later run of another model has one, below.)
 - **Through MCP the agent does worse than through the shell on every line**: accepted, determined,
   time and cost. The advantage seen in quod4-haiku-mcp, one trial per task, does not hold. Why is
   not measured. The MCP arm writes a few more contracts by properties (12 against 10), which are
@@ -152,6 +153,41 @@ block, `:` for `in`, `|s|` for `len(s)`), and 3 files still put `;` after a clau
 the error it is shown and makes another; 15 of the 18 final files end on a syntax error. A
 language that no model has seen needs, for now, a model that can follow a reference it reads for
 the first time.
+
+[t6-qwen14b-hints2](../runs/t6-qwen14b-hints2), with the 0.1.4 parser, which reports every habit
+of a file at once: **1/18, and that one is wrong.** 13 final files still end on a syntax error, 2
+on a type error. The accepted one is merge_intervals with `ensures len(result) == 0` and
+`return [];`: the contract is proved and determines the result, and passes 51 of 508 hidden tests.
+It is the first escaped bug of these runs, and it shows the limit of the completeness check: it
+checks that a contract fixes the result, not that it says what the task asks. The journal of the
+last 7 runs ([ollama_agent.py](../verifbench/ollama_agent.py) now keeps one) shows why the messages
+do not help this model: it writes its tool calls as JSON in its text, reads the reference once, and
+then rewrites the same file (2 distinct writes of 39 on max_subarray, 3 of 39 on binary_search).
+
+[t6-qwen3-30b](../runs/t6-qwen3-30b): a larger model, Qwen3-Coder 30B, same protocol. It calls the
+tools natively, rarely repeats a file, and only 2 final files end on a syntax error; 8 of the 10
+rejected end on proofs or completeness, the actual work. 8 files verified and pass all the hidden
+tests, but **6 of them have no `ensures` at all** (bounded_queue and max_subarray, every trial),
+though the task asks for one: nothing was proved, and the code was simply right. Only rotate #1 and
+binary_search #2 state a contract. Hence `--require-contracts`, which makes a missing contract an
+error, and which the bench now turns on: a file without a contract no longer counts as accepted, so
+this run counts **2/18** (rescored from its recorded evaluations; the agent never saw that error).
+With the option, the 16 solutions Haiku had accepted through MCP still verify.
+
+[t6-qwen3-30b-strict](../runs/t6-qwen3-30b-strict): the same model with `--require-contracts` in the
+loop. **5/18, 4 passing all the hidden tests.** The error does not produce the contracts it asks for: of the 7
+runs that received it, 4 still ended without a contract, 1 on a type error, 1 on a refuted proof, and 1 on
+`ensures result == iv` over `return iv;` (125 of 508 hidden tests), with the model's own comment "this is
+not correct". bounded_queue and max_subarray, right without a contract in the previous run, are no
+longer accepted at all. A sixth, rle_encode, passed under `loose (r1, r2) => true`, then only a warning: the option now refuses it,
+and it counts as rejected here. One run
+ended on a generation that never stopped, for lack of a limit on the tokens of an answer.
+
+**A correction to the figures above.** The reference that `quod_reference` serves ended with a complete
+solution of binary_search, unlike the QUOD.md of the shell arm. All three Haiku solutions through MCP copy
+its `loose` clause and its comment, and two of Qwen3's in the last run reuse the contract. Without that task,
+contracts determined are 14 of 15 through the shell, 9 of 15 through MCP and 9 of 15 for Dafny: **through MCP
+the agent is level with Dafny, not ahead of it**.
 
 ## What writing them changed in the verifier
 

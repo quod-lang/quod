@@ -235,13 +235,17 @@ let private callees (f: TFn) : string list =
 /// means that something was proved about the result. (VerifBench run t6-qwen3-30b: 6 of the 8
 /// files accepted had no ensures at all, and a warning did not stop the agent.) An expression
 /// function no other function calls is covered too: it is not a helper its definition explains,
-/// but a result nothing is stated about. `styles` is what `diagnostics` gave.
-let required (file: string) (prog: TProgram) (styles: Diagnostic list) : Diagnostic list =
+/// but a result nothing is stated about. So is a `loose` that accepts every result, the same hole
+/// under another name (run t6-qwen3-30b-strict, rle_encode: `loose (r1, r2) => true`).
+/// `found` is every diagnostic of the check, the styles included.
+let required (file: string) (prog: TProgram) (found: Diagnostic list) : Diagnostic list =
     let message = "no ensures, and --require-contracts asks for a contract: nothing is proved about the result. State what the result is"
     let raised =
-        styles
+        found
         |> List.map (fun d ->
-            if d.Kind = "contract" && d.Status = "none" then { d with Severity = Error; Message = message } else d)
+            if d.Kind = "contract" && d.Status = "none" then { d with Severity = Error; Message = message }
+            elif d.Kind = "completeness" && d.Status = "loose-accepts-all" then { d with Severity = Error }
+            else d)
     let called = prog.Fns |> List.collect (fun f -> callees f |> List.filter (fun g -> g <> f.Name)) |> Set.ofList
     let entries =
         prog.Fns

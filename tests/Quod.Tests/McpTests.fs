@@ -178,6 +178,22 @@ let ``require-contracts refuses an expression function nothing calls`` () =
     Assert.False(verified (strictCall "quod_check" recursive))
 
 [<Fact>]
+let ``require-contracts refuses a loose that accepts every result`` () =
+    let program = "fn f(x: int) -> int ensures result > x loose (a, b) => true { x + 1 }"
+    let plain, _ = call "quod_check" (source program)
+    Assert.True(verified plain)
+    Assert.False(verified (strictCall "quod_check" program))
+    Assert.False((strictCall "quod_build" program).GetProperty("built").GetBoolean())
+
+[<Fact>]
+let ``the reference served to agents has no solution of a task`` () =
+    let all, _ = call "quod_reference" "{}"
+    let text = all.GetProperty("reference").GetString()
+    for task in [ "binary_search"; "merge_intervals"; "rle_encode"; "bounded_queue"; "max_subarray"; "rotate"
+                  "gcd"; "merge_sorted"; "majority_element"; "transpose"; "next_permutation"; "two_sum_sorted" ] do
+        Assert.DoesNotContain("fn " + task + "(", text)
+
+[<Fact>]
 let ``require-contracts keeps the expression functions a contract is stated with`` () =
     let program =
         "fn sum(xs: seq<int>) -> int decreases len(xs) { if len(xs) == 0 { 0 } else { sum(xs[..len(xs) - 1]) + xs[len(xs) - 1] } }\n"

@@ -19,13 +19,15 @@ let private protocolVersions = [ "2025-06-18"; "2025-03-26"; "2024-11-05" ]
 /// `budget` argument (first-user feedback on 0.1.0).
 let defaultBudget = 60
 
-/// The language reference: the spec from "The language" to the roadmap, embedded in the binary.
+/// The language reference: the spec from "The language" to the Python backend, embedded in the
+/// binary. Not the example that follows: it is a whole solution of a VerifBench task, which agents
+/// copied (run t6-haiku, binary_search through MCP).
 let reference =
     lazy
         (use stream = Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("quod-0.1.md")
          use reader = new StreamReader(stream, Encoding.UTF8)
          let spec = reader.ReadToEnd().Replace("\r\n", "\n")
-         let body = spec.Substring(spec.IndexOf "## The language", spec.IndexOf "## Not in 0.1" - spec.IndexOf "## The language")
+         let body = spec.Substring(spec.IndexOf "## The language", spec.IndexOf "## Python backend" - spec.IndexOf "## The language")
          // without the vocabulary of the design documents, which an agent does not read
          let body =
              body.Replace(" (pillar 5)", "").Replace(" (the ⚠️ status of [principle 2](kernel.md))", "")
@@ -312,7 +314,7 @@ let private tools =
       "{\"type\": \"object\", \"properties\": {" + programProperties
       + ",\"function\": {\"type\": \"string\"}, \"args\": {\"type\": \"array\", \"description\": \"One JSON value per parameter, in order\"}}, \"required\": [\"function\"]}"
       "quod_reference",
-      "The Quod language reference: syntax, types, contracts, lemmas, verification, completeness, diagnostics, Python backend. "
+      "The Quod language reference: syntax, types, contracts, lemmas, verification, completeness, diagnostics, command line. "
       + "Read it before writing Quod. Give a section title (e.g. 'Hints and lemmas', 'Contract style') to get only that section.",
       "{\"type\": \"object\", \"properties\": {\"section\": {\"type\": \"string\"}}}" ]
 
