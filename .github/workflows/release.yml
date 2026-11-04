@@ -160,25 +160,28 @@ jobs:
         run: |
           version=$(sed -n 's/^let quodVersion = "\(.*\)"/\1/p' src/Quod/Diagnostics.fs)
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          mkdir -p tools/win-x64 tools/linux-x64 tools/osx-arm64 unpacked
+          # not tools/: the repository has one, whose files would enter the package
+          mkdir -p nuget-tools/win-x64 nuget-tools/linux-x64 nuget-tools/osx-arm64 unpacked
           7z x "dist/quod-$version-win-x64.zip" -ounpacked > /dev/null
           tar xzf "dist/quod-$version-linux-x64.tar.gz" -C unpacked
           tar xzf "dist/quod-$version-osx-arm64.tar.gz" -C unpacked
           for rid in win-x64 linux-x64 osx-arm64; do
             pkg="unpacked/quod-$version-$rid"
-            cp "$pkg"/quod* "$pkg"/z3* "$pkg"/*.dll "$pkg"/LICENSE* "$pkg"/NOTICE "tools/$rid/" 2>/dev/null || true
+            cp "$pkg"/quod* "$pkg"/z3* "$pkg"/*.dll "$pkg"/LICENSE* "$pkg"/NOTICE "nuget-tools/$rid/" 2>/dev/null || true
           done
-          ls tools/*
+          ls nuget-tools/*
 
       - name: Pack
         run: |
-          dotnet pack packaging/Quod.Build -o nupkg -p:QuodVersion=$VERSION "-p:QuodTools=$(pwd -W)/tools"
+          dotnet pack packaging/Quod.Build -o nupkg -p:QuodVersion=$VERSION "-p:QuodTools=$(pwd -W)/nuget-tools"
           # the binaries of every system are in the package
           python -c "
           import sys, zipfile
           names = zipfile.ZipFile(sys.argv[1]).namelist()
           print(*[n for n in names if n.startswith('tools/')], sep='\\n')
           missing = [f for f in sys.argv[2:] if 'tools/' + f not in names]
+          stray = [n for n in names if n.startswith('tools/') and n.split('/')[1] not in ('win-x64', 'linux-x64', 'osx-arm64')]
+          if stray: print('::error::should not be in the package: ' + ', '.join(stray[:5])); sys.exit(1)
           if missing: print('::error::not in the package: ' + ', '.join(missing)); sys.exit(1)
           " "nupkg/Quod.Build.$VERSION.nupkg" win-x64/quod.exe win-x64/z3.exe linux-x64/quod linux-x64/z3 osx-arm64/quod osx-arm64/z3
           ls -l nupkg

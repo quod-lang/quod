@@ -75,7 +75,9 @@ against `quod` separates the effect of the check from that of the language.
 
 ## Frozen version and prompts
 
-Recorded before the first run: not yet.
+- **Compiler:** tag `v0.1.5`, commit `0fa2df7`, the Windows package of its release. It is the compiler of all the runs.
+- **Prompts:** those of `bench/verifbench/run.py` at the commit of the first run. The prompt of `dafny-loop` is not written yet: no run
+  before it is recorded here.
 
 ## Corrections
 
