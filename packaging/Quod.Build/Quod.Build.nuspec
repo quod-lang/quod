@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Quod.Build</id>
+    <version>$version$</version>
+    <authors>quod-lang</authors>
+    <description>Verifies the .quod files of a project and compiles them with it: a proof that fails makes the build fail. Quod is a verified language, written by agents and checked by machines.</description>
+    <license type="expression">Apache-2.0</license>
+    <projectUrl>https://github.com/quod-lang/quod</projectUrl>
+    <readme>README.md</readme>
+    <developmentDependency>true</developmentDependency>
+    <tags>quod verification contracts msbuild</tags>
+  </metadata>
+  <files>
+    <file src="README.md" target="README.md" />
+    <file src="targets/Quod.Build.targets" target="build/Quod.Build.targets" />
+    <file src="$tools$\**\*" target="tools" />
+  </files>
+</package>

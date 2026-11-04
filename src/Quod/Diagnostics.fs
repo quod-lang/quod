@@ -46,6 +46,17 @@ let syntaxError (file: string) (span: Span) (message: string) =
 let private severityText = function Error -> "error" | Warning -> "warning" | Info -> "note"
 
 /// `file(line,col): error: message`, the format editors and agents already recognise.
+/// The code of a diagnostic in a build: what NoWarn and WarningsAsErrors understand.
+let private buildCode (d: Diagnostic) =
+    match d.Kind with
+    | "syntax" -> "QUOD0001"
+    | "type" -> "QUOD0002"
+    | "proof" -> "QUOD0003"
+    | "completeness" -> "QUOD0004"
+    | "contract" -> "QUOD0005"
+    | "loose" -> "QUOD0006"
+    | _ -> "QUOD0007"
+
 let toText (d: Diagnostic) =
     let sb = StringBuilder()
     sb.Append(d.File).Append('(').Append(d.Span.Start.Line).Append(',').Append(d.Span.Start.Col)
@@ -60,6 +71,13 @@ let toText (d: Diagnostic) =
     | Some r when r <> "timeout" && r <> "budget" -> sb.Append("\n    solver: ").Append(r) |> ignore // the message says so
     | _ -> ()
     sb.ToString()
+
+/// The format MSBuild reads, and Visual Studio's error list after it: one line, with a code.
+let toBuildText (d: Diagnostic) =
+    let text = (toText d).Replace("\r", "").Replace("\n    ", "; ").Replace("\n", " ")
+    let head = d.File + "(" + string d.Span.Start.Line + "," + string d.Span.Start.Col + "): " + severityText d.Severity + ": "
+    d.File + "(" + string d.Span.Start.Line + "," + string d.Span.Start.Col + "): " + severityText d.Severity + " " + buildCode d + ": "
+    + text.Substring head.Length
 
 /// One diagnostic as a JSON object (the --json format, and the MCP tools).
 let writeDiagnostic (w: Utf8JsonWriter) (d: Diagnostic) =

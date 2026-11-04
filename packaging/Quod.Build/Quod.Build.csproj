@@ -1,0 +1,14 @@
+<!-- Only what `dotnet pack` needs to read the nuspec: this project compiles nothing.
+     dotnet pack packaging/Quod.Build -o OUT -p:QuodVersion=X -p:QuodTools=DIR
+     DIR holds win-x64/, linux-x64/, osx-arm64/: quod and z3 for each system present. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoBuild>true</NoBuild>
+    <IsPackable>true</IsPackable>
+    <NuspecFile>Quod.Build.nuspec</NuspecFile>
+    <NuspecProperties>version=$(QuodVersion);tools=$(QuodTools)</NuspecProperties>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+</Project>

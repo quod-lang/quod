@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Verifies and generates through an Exec of quod, not a task loaded in MSBuild: the same file works
+     under the MSBuild of Visual Studio and under dotnet build, with SDK and old-style projects. -->
+<Project>
+  <PropertyGroup>
+    <QuodToolsRoot>$(MSBuildThisFileDirectory)..\tools\</QuodToolsRoot>
+    <QuodRid Condition="'$(OS)' == 'Windows_NT'">win-x64</QuodRid>
+    <QuodRid Condition="'$(QuodRid)' == '' And $([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</QuodRid>
+    <QuodRid Condition="'$(QuodRid)' == ''">linux-x64</QuodRid>
+    <QuodExeName Condition="'$(OS)' == 'Windows_NT'">quod.exe</QuodExeName>
+    <QuodExeName Condition="'$(QuodExeName)' == ''">quod</QuodExeName>
+    <QuodExe Condition="'$(QuodExe)' == ''">$(QuodToolsRoot)$(QuodRid)\$(QuodExeName)</QuodExe>
+    <QuodNamespace Condition="'$(QuodNamespace)' == ''">$(RootNamespace)</QuodNamespace>
+    <QuodNamespace Condition="'$(QuodNamespace)' == ''">Quod.Generated</QuodNamespace>
+    <QuodBudget Condition="'$(QuodBudget)' == ''">300</QuodBudget>
+    <QuodOutputDir>$(IntermediateOutputPath)quod\</QuodOutputDir>
+    <QuodArguments>--target csharp --format msbuild --namespace "$(QuodNamespace)" --budget $(QuodBudget)</QuodArguments>
+    <QuodArguments Condition="'$(QuodRequireContracts)' == 'true'">$(QuodArguments) --require-contracts</QuodArguments>
+    <QuodArguments Condition="'$(QuodCheckAllRequires)' == 'true'">$(QuodArguments) --check-requires all</QuodArguments>
+    <QuodArguments>$(QuodArguments) $(QuodBuildOptions)</QuodArguments>
+  </PropertyGroup>
+
+  <!-- .NET Framework projects do not reference BigInteger's assembly by default. -->
+  <Target Name="QuodFrameworkReferences" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework' And '@(QuodCompile)' != ''">
+    <ItemGroup>
+      <Reference Include="System.Numerics" Exclude="@(Reference)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="QuodGenerate"
+          Inputs="@(QuodCompile);$(QuodExe)"
+          Outputs="@(QuodCompile->'$(QuodOutputDir)%(RecursiveDir)%(Filename).g.cs')">
+    <!-- a NuGet package does not keep the execute permission -->
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="chmod +x &quot;$(QuodExe)&quot; &quot;$(QuodToolsRoot)$(QuodRid)/z3&quot;" />
+    <Exec Command="&quot;$(QuodExe)&quot; build &quot;%(QuodCompile.FullPath)&quot; $(QuodArguments) --output-file &quot;$(QuodOutputDir)%(QuodCompile.RecursiveDir)%(QuodCompile.Filename).g.cs&quot;" />
+  </Target>
+
+  <Target Name="QuodAddGenerated" BeforeTargets="CoreCompile" DependsOnTargets="QuodGenerate" Condition="'@(QuodCompile)' != ''">
+    <ItemGroup>
+      <QuodGenerated Include="@(QuodCompile->'$(QuodOutputDir)%(RecursiveDir)%(Filename).g.cs')" />
+      <Compile Include="@(QuodGenerated)" />
+      <FileWrites Include="@(QuodGenerated)" />
+    </ItemGroup>
+  </Target>
+</Project>

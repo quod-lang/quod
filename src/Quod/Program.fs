@@ -27,6 +27,8 @@ let private usage =
     + "  --namespace NAME    namespace of the generated C# (default Quod.Generated)\n"
     + "  --check-requires all  in C#, also check the quantified requires when a public method is called\n"
     + "  -o DIR              output directory (build; default: next to FILE)\n"
+    + "  --output-file FILE  the generated file itself (build), instead of -o\n"
+    + "  --format msbuild    diagnostics as MSBuild reads them, each with a code QUOD0001...\n"
     + "  --runtime-checks    build even if some proofs fail: their contracts become run-time\n"
     + "                      assertions (an underspecified contract still blocks the build)"
 
@@ -37,6 +39,8 @@ type private Options =
       Namespace: string option
       AllRequires: bool
       OutDir: string option
+      OutputFile: string option
+      BuildFormat: bool
       RuntimeChecks: bool
       /// --budget was given (quod mcp has its own default otherwise)
       BudgetGiven: bool }
@@ -55,14 +59,16 @@ let private parseOptions (args: string list) : Options * string list =
         | "--namespace" :: n :: tl -> go { o with Namespace = Some n } tl positional
         | "--check-requires" :: "all" :: tl -> go { o with AllRequires = true } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
+        | "--output-file" :: f :: tl -> go { o with OutputFile = Some f } tl positional
+        | "--format" :: "msbuild" :: tl -> go { o with BuildFormat = true } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; RuntimeChecks = false; BudgetGiven = false } args []
+    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; OutputFile = None; BuildFormat = false; RuntimeChecks = false; BudgetGiven = false } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
-    else for d in ds do if d.Severity <> Info then Console.Error.WriteLine(toText d) // notes: in the summary
+    else for d in ds do if d.Severity <> Info then Console.Error.WriteLine((if o.BuildFormat then toBuildText else toText) d) // notes: in the summary
 
 let private withFile (file: string) (action: string -> int) =
     if File.Exists file then action (File.ReadAllText file)
@@ -126,7 +132,8 @@ let private buildCommand (file: string) (o: Options) =
                         match target with
                         | Pipeline.Python -> Path.GetFileNameWithoutExtension file + ".py"
                         | Pipeline.CSharp _ -> CodegenCSharp.outputFile file
-                    let written = Path.Combine(dir, name)
+                    let written = defaultArg o.OutputFile (Path.Combine(dir, name))
+                    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath written)) |> ignore
                     File.WriteAllText(written, code)
                     if not o.Json then
                         Console.WriteLine("built " + written + " (" + Pipeline.summary result + ")")

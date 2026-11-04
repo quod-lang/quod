@@ -184,6 +184,8 @@ pour la raison qui exclut `assert` en Python.
 
 Par étapes, chacune utile seule :
 
+Les étapes 1 à 3 sont faites : le paquet est dans `packaging/Quod.Build`, testé par `packaging/test_package.py`.
+
 1. **`quod build --target csharp`** et l'argument `target` de l'outil MCP `quod_build`. `Pipeline.generate`
    reçoit la cible au lieu d'appeler directement le générateur Python.
 2. **Un paquet NuGet `Quod.Build`** avec une cible MSBuild : les `<QuodCompile Include="**/*.quod" />` sont
