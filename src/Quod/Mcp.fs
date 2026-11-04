@@ -164,9 +164,10 @@ let private check (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
           IsError = false }
 
 let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
-    match str args "target" with
-    | Some t when t <> "python" -> failTool ("unknown target '" + t + "' (Quod 0.1 generates python only)")
-    | _ -> ()
+    let target =
+        match Pipeline.targetOf (defaultArg (str args "target") "python") (str args "namespace") (str args "check_requires" = Some "all") with
+        | Ok t -> t
+        | Result.Error why -> failTool why
     let file, src = program args
     let notBuilt (why: string) (ds: Diagnostic list) =
         { Text = (match reportText ds with "" -> why | r -> r + "\n" + why)
@@ -176,7 +177,7 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
     | Pipeline.Failure(message, _) -> failTool message
     | Pipeline.Rejected ds -> notBuilt ("not built: " + string ds.Length + " syntax or type error(s)") ds
     | Pipeline.Checked(typed, r) ->
-        match Pipeline.generate file typed r (bool' args "runtime_checks") with
+        match Pipeline.generate target file typed r (bool' args "runtime_checks") with
         | Result.Error why -> notBuilt why r.Diagnostics
         | Ok(code, unproved) ->
             let line =
@@ -188,7 +189,7 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
                     w.WriteStartObject()
                     w.WriteBoolean("built", true)
                     w.WriteString("summary", line)
-                    w.WriteString("language", "python")
+                    w.WriteString("language", (match target with Pipeline.Python -> "python" | Pipeline.CSharp _ -> "csharp"))
                     w.WriteString("code", code)
                     w.WriteStartArray("runtime_checked")
                     for f in unproved do w.WriteStringValue f
@@ -304,10 +305,12 @@ let private tools =
       + "Returns the diagnostics and a summary line that starts with 'verified' or 'rejected'. Fix the program until it is verified.",
       "{\"type\": \"object\", \"properties\": {" + programProperties + "," + budgetProperties + "}}"
       "quod_build",
-      "Check a Quod program, then generate its Python module (returned as text, no file is written). Only a verified program is built, "
+      "Check a Quod program, then generate its Python module or C# class (returned as text, no file is written). Only a verified program is built, "
       + "unless runtime_checks is true: the contracts that are not proved are then checked at run time (an underspecified contract still blocks the build).",
       "{\"type\": \"object\", \"properties\": {" + programProperties + "," + budgetProperties
-      + ",\"target\": {\"type\": \"string\", \"enum\": [\"python\"]}, \"runtime_checks\": {\"type\": \"boolean\"}}}"
+      + ",\"target\": {\"type\": \"string\", \"enum\": [\"python\", \"csharp\"]}, \"runtime_checks\": {\"type\": \"boolean\"}, "
+      + "\"namespace\": {\"type\": \"string\", \"description\": \"C#: the namespace of the class\"}, "
+      + "\"check_requires\": {\"type\": \"string\", \"enum\": [\"all\"], \"description\": \"C#: also check the quantified requires when a public method is called\"}}}"
       "quod_run",
       "Run one function of a Quod program on given arguments, checking every assertion, invariant, bound and contract on the way, without the solver. "
       + "Integers are JSON numbers (or strings for big ones), sequences and tuples are arrays. Returns the result, or the obligation that fails, with its text (and the value returned, for a postcondition).",

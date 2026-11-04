@@ -186,6 +186,16 @@ let ``require-contracts refuses a loose that accepts every result`` () =
     Assert.False((strictCall "quod_build" program).GetProperty("built").GetBoolean())
 
 [<Fact>]
+let ``quod_build generates C# on request, and refuses an unknown target`` () =
+    let args = "{\"target\": \"csharp\", \"namespace\": \"Acme.Rules\", \"source\": " + JsonSerializer.Serialize(clamp) + "}"
+    let r, _ = call "quod_build" args
+    Assert.True(r.GetProperty("built").GetBoolean())
+    Assert.Equal("csharp", r.GetProperty("language").GetString())
+    Assert.Contains("namespace Acme.Rules", r.GetProperty("code").GetString())
+    let bad = request 9 "tools/call" ("{\"name\": \"quod_build\", \"arguments\": {\"target\": \"cobol\", \"source\": " + JsonSerializer.Serialize(clamp) + "}}")
+    Assert.True(bad.GetProperty("result").GetProperty("isError").GetBoolean())
+
+[<Fact>]
 let ``the reference served to agents has no solution of a task`` () =
     let all, _ = call "quod_reference" "{}"
     let text = all.GetProperty("reference").GetString()

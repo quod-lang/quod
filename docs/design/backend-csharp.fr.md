@@ -1,6 +1,6 @@
 # Backend C# : note de conception
 
-État : orientations décidées, rien n'est implémenté. Écrite sur Quod 0.1.4.
+État : le générateur et ses tests sont faits ; l'intégration à .NET (paquet, MSBuild) reste à faire.
 
 ## But
 
@@ -57,7 +57,8 @@ d'un programme déjà prouvé. Ces types serviraient aussi l'interopérabilité,
 
 Un fichier `Nom.g.cs` par fichier Quod. Une classe statique `Nom` dans un espace de noms (`--namespace`,
 `Quod.Generated` par défaut). Chaque fonction donne une méthode publique en PascalCase, qui contrôle la
-frontière, et une méthode privée au nom d'origine, celle que le code Quod appelle, récursion comprise :
+frontière, et une méthode privée `_quod_f_nom`, celle que le code Quod appelle, récursion comprise (un préfixe,
+car C# refuse d'appeler une méthode qu'une variable locale du même nom cache) :
 c'est la structure à deux étages du backend Python. Les lemmes ne sont pas générés.
 
 Source ([bench/quod/binary_search](../../bench/quod/binary_search/solution.quod)), sans ses invariants :
@@ -241,6 +242,11 @@ de chacun.
   confiance à rendre visible dans le rapport, comme `loose`.
 
 ## Lots proposés
+
+Les lots 1 à 5 sont faits : les six solutions de référence passent tous leurs tests cachés à travers C#
+(`verifbench.hidden_csharp`), et les programmes du dépôt rendent les mêmes résultats que l'évaluateur, en .NET 10
+comme en `net472` avec C# 7.3. Les noms privés de l'exemple ci-dessus sont devenus `_quod_f_nom`, `_quod_div` et
+`_quod_mod`. L'argument `target` du MCP (dans le lot 6) est fait aussi.
 
 1. Extraire ce qui est commun à Python (`appendable`, le filtrage des lemmes) ; aucun changement de comportement.
 2. `CodegenCSharp.fs` et `--target csharp` : entiers, booléens, séquences, tuples, sans `--runtime-checks`.

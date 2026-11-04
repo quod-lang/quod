@@ -92,9 +92,21 @@ and private styleSummary (r: Vcgen.VerifyResult) =
         |> List.map (fun (n, text) -> string n + text)
     if parts.IsEmpty then "" else "; contracts: " + String.Join(", ", parts)
 
+type Target =
+    | Python
+    | CSharp of CodegenCSharp.Options
+
+/// The target named on the command line or in a tool call.
+let targetOf (name: string) (ns: string option) (allRequires: bool) : Result<Target, string> =
+    match name with
+    | "python" -> Ok Python
+    | "csharp" ->
+        Ok(CSharp { Namespace = defaultArg ns CodegenCSharp.defaultOptions.Namespace; CheckAllRequires = allRequires })
+    | t -> Result.Error("unknown target '" + t + "' (python or csharp)")
+
 /// What `build` does with a checked program: the generated code, with the functions whose
 /// contracts are checked at run time (--runtime-checks), or why it is not built.
-let generate (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<string * Set<string>, string> =
+let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<string * Set<string>, string> =
     let errors = errorsOf r
     let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList
     if errors |> List.exists (fun d -> d.Kind = "contract") then
@@ -104,4 +116,6 @@ let generate (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (run
     elif not unproved.IsEmpty && not runtimeChecks then
         Result.Error("not built: " + summary r + ". Fix the proofs, or build with --runtime-checks")
     else
-        Ok(CodegenPython.generate file typed unproved, unproved)
+        match target with
+        | Python -> Ok(CodegenPython.generate file typed unproved, unproved)
+        | CSharp options -> CodegenCSharp.generate file typed unproved options |> Result.map (fun code -> code, unproved)

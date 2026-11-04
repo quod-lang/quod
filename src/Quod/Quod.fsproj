@@ -33,7 +33,9 @@
     <Compile Include="Smt.fs" />
     <Compile Include="ContractStyle.fs" />
     <Compile Include="Vcgen.fs" />
+    <Compile Include="Codegen.fs" />
     <Compile Include="CodegenPython.fs" />
+    <Compile Include="CodegenCSharp.fs" />
     <Compile Include="Pipeline.fs" />
     <Compile Include="Mcp.fs" />
     <Compile Include="Program.fs" />

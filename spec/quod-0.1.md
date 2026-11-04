@@ -257,7 +257,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 
 ```
 quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS] [--require-contracts]
-quod build file.quod --target python [-o DIR] [--runtime-checks] [--require-contracts] [--json]
+quod build file.quod [--target python|csharp] [--namespace NAME] [--check-requires all] [-o DIR] [--runtime-checks] [--require-contracts] [--json]
 quod mcp [--require-contracts]  # check, build, run and the reference, served to an AI agent (MCP, stdio)
 quod reference [SECTION]   # the language reference, or one section of it
 ```
@@ -302,6 +302,24 @@ of time is not proved: the function's definition stays unknown to the solver.
   Python keyword gets a trailing `_`.
 - Known limit: recursion is Python recursion (default depth 1000).
 
+## C# backend
+
+- One class per Quod file (`--namespace`, `Quod.Generated` by default), in `Name.g.cs`. The code stays
+  within C# 7.3 and the standard library, for .NET Framework 4.7.2 as for .NET Core and later. A project
+  on .NET Framework references `System.Numerics`.
+- Each function is a public method in PascalCase and a private implementation `_quod_f_name`, which
+  Quod code calls. Lemmas are not generated. Two functions with the same public name are refused.
+- `int` and `nat` are `BigInteger`, `bool` is `bool`, `seq<T>` is `IReadOnlyList<T>` (not copied on entry),
+  tuples are `ValueTuple`. Equality is structural; `/` and `%` are Euclidean.
+- **A C# caller proves nothing.** A public method checks `null` for its sequences and its `requires` without
+  quantifier or call (`ArgumentException`). The others stay the caller's duty, and its comment says so;
+  `--check-requires all` checks them too, at their cost. Calls between Quod functions check nothing.
+- A recursive function calls `EnsureSufficientExecutionStack`: too deep a recursion raises an exception
+  instead of ending the process.
+- With `--runtime-checks`, unproved contracts raise `QuodContractException`, and bounds always raise.
+- The generator is not proved. The generated code is tested against the evaluator on the programs of the
+  repository, for both targets, and against the hidden tests of VerifBench.
+
 ## Example
 
 ```rust
@@ -333,7 +351,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 | Version | Planned content |
 |---|---|
-| 0.2 | a C# backend (the MCP server came with 0.1.1) |
+| 0.2 | packaging of the C# backend for .NET projects (the MCP server came with 0.1.1) |
 | 0.3 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |

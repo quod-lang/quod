@@ -23,7 +23,9 @@ let private usage =
     + "                      error (check, build, mcp); expression functions that another function calls\n"
     + "                      are explained by their definition\n"
     + "  --smt-log FILE      write every command sent to z3 to FILE\n"
-    + "  --target python     code generation target (build; python is the only one in 0.1)\n"
+    + "  --target TARGET     code generation target (build): python (default) or csharp\n"
+    + "  --namespace NAME    namespace of the generated C# (default Quod.Generated)\n"
+    + "  --check-requires all  in C#, also check the quantified requires when a public method is called\n"
     + "  -o DIR              output directory (build; default: next to FILE)\n"
     + "  --runtime-checks    build even if some proofs fail: their contracts become run-time\n"
     + "                      assertions (an underspecified contract still blocks the build)"
@@ -32,6 +34,8 @@ type private Options =
     { Json: bool
       Settings: Pipeline.Settings
       Target: string
+      Namespace: string option
+      AllRequires: bool
       OutDir: string option
       RuntimeChecks: bool
       /// --budget was given (quod mcp has its own default otherwise)
@@ -48,11 +52,13 @@ let private parseOptions (args: string list) : Options * string list =
         | "--require-contracts" :: tl -> go { o with Settings = { s with RequireContracts = true } } tl positional
         | "--smt-log" :: p :: tl -> go { o with Settings = { s with SmtLog = Some p } } tl positional
         | "--target" :: t :: tl -> go { o with Target = t } tl positional
+        | "--namespace" :: n :: tl -> go { o with Namespace = Some n } tl positional
+        | "--check-requires" :: "all" :: tl -> go { o with AllRequires = true } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; OutDir = None; RuntimeChecks = false; BudgetGiven = false } args []
+    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; RuntimeChecks = false; BudgetGiven = false } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
@@ -100,25 +106,30 @@ let private checkCommand (file: string) (o: Options) =
             if errors.IsEmpty then 0 else 1) // an inconclusive completeness verdict is a warning only
 
 let private buildCommand (file: string) (o: Options) =
-    if o.Target <> "python" then
-        Console.Error.WriteLine("error: unknown target '" + o.Target + "' (Quod 0.1 generates python only)")
+    match Pipeline.targetOf o.Target o.Namespace o.AllRequires with
+    | Result.Error why ->
+        Console.Error.WriteLine("error: " + why)
         2
-    else
+    | Ok target ->
         withFile file (fun src ->
             match verifyFile file src o with
             | Result.Error code -> code
             | Ok(typed, result) ->
-                match Pipeline.generate file typed result o.RuntimeChecks with
+                match Pipeline.generate target file typed result o.RuntimeChecks with
                 | Result.Error why ->
                     Console.Error.WriteLine why
                     1
                 | Ok(code, unproved) ->
                     let dir = defaultArg o.OutDir (Path.GetDirectoryName(Path.GetFullPath file))
                     Directory.CreateDirectory dir |> ignore
-                    let target = Path.Combine(dir, Path.GetFileNameWithoutExtension file + ".py")
-                    File.WriteAllText(target, code)
+                    let name =
+                        match target with
+                        | Pipeline.Python -> Path.GetFileNameWithoutExtension file + ".py"
+                        | Pipeline.CSharp _ -> CodegenCSharp.outputFile file
+                    let written = Path.Combine(dir, name)
+                    File.WriteAllText(written, code)
                     if not o.Json then
-                        Console.WriteLine("built " + target + " (" + Pipeline.summary result + ")")
+                        Console.WriteLine("built " + written + " (" + Pipeline.summary result + ")")
                         if not unproved.IsEmpty then
                             Console.Error.WriteLine(
                                 "warning: not fully proved, contracts checked at run time in: " + String.Join(", ", unproved))

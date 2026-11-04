@@ -269,7 +269,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 
 ```
 quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES] [--require-contracts]
-quod build fichier.quod --target python [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
+quod build fichier.quod [--target python|csharp] [--namespace NOM] [--check-requires all] [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
 quod mcp [--require-contracts]  # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 ```
@@ -318,6 +318,25 @@ fonction reste inconnue du solveur.
   sont aliasées (`_quod_len`...), donc une fonction Quod nommée `len` ou `list` ne masque rien dont le
   code généré a besoin. Un nom qui est un mot-clé Python reçoit un `_` final.
 - Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).
+
+## Backend C#
+
+- Une classe par fichier Quod (`--namespace`, `Quod.Generated` par défaut), dans `Nom.g.cs`. Le code reste
+  dans C# 7.3 et la bibliothèque standard, pour .NET Framework 4.7.2 comme pour .NET Core et suivants. Un
+  projet .NET Framework référence `System.Numerics`.
+- Chaque fonction donne une méthode publique en PascalCase et une implémentation privée `_quod_f_nom`, que le
+  code Quod appelle. Les lemmes ne sont pas générés. Deux fonctions de même nom public sont refusées.
+- `int` et `nat` sont `BigInteger`, `bool` est `bool`, `seq<T>` est `IReadOnlyList<T>` (sans copie à l'entrée),
+  les tuples sont des `ValueTuple`. L'égalité est structurelle ; `/` et `%` sont euclidiens.
+- **Un appelant C# ne prouve rien.** Une méthode publique vérifie `null` pour ses séquences et ses `requires`
+  sans quantificateur ni appel (`ArgumentException`). Les autres restent à la charge de l'appelant, et son
+  commentaire le dit ; `--check-requires all` les vérifie aussi, à leur coût. Les appels entre fonctions Quod ne
+  vérifient rien.
+- Une fonction récursive appelle `EnsureSufficientExecutionStack` : une récursion trop profonde lève une
+  exception au lieu de mettre fin au processus.
+- Avec `--runtime-checks`, les contrats non prouvés lèvent `QuodContractException`, et les bornes lèvent toujours.
+- Le générateur n'est pas prouvé. Le code généré est testé contre l'évaluateur sur les programmes du dépôt, pour
+  les deux cibles, et contre les tests cachés de VerifBench.
 
 ## Exemple
 
