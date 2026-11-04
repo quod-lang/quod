@@ -14,8 +14,8 @@ Symbolically tests Dafny specifications against input/output test cases:
 - *completeness*: the fraction of **mutated outputs** `o'` for which that Hoare triple does not
   verify (a kill rate, inspired by mutation testing);
 - implemented as a ~400-line Python script generating Dafny programs; evaluated against human
-  `strong_spec` / `weak_spec` labels on ~150 MBPP-based Dafny specifications (mostly GPT-4
-  generated). Its example of a weak spec (`count` only constrained to be non-negative) is exactly
+  `strong_spec` / `weak_spec` labels on MBPP-based Dafny specifications (mostly GPT-4 generated): of
+  153 problems with specifications, the paper had applied the metric to 64. Its example of a weak spec (`count` only constrained to be non-negative) is exactly
   the kind of contract we found.
 - Appendix B discusses a per-test uniqueness check, `{x == i ∧ φ} skip {y == o}`, and sets it aside
   because it only gives a Boolean verdict and only rewards specifications that constrain the output
@@ -24,8 +24,8 @@ Symbolically tests Dafny specifications against input/output test cases:
 **This is the same core idea as dafny-complete's witness step** (mutate an output on a concrete
 input, ask Dafny), published two years earlier. We should have cited it from the start.
 
-**Amaral, Mendes, Campos, "MutDafny: A Mutation-Based Approach to Assess Dafny Specifications"**
-(2025, [arXiv 2511.15403](https://arxiv.org/abs/2511.15403); abstract read, paper not yet).
+**Amaral, Mendes, Campos, "MutDafny: A Mutation-Based Approach to Assess Dafny Specifications"**,
+ICSE 2026 ([arXiv 2511.15403](https://arxiv.org/abs/2511.15403); abstract and first sections read).
 Mutation testing applied to Dafny *specifications*: the tool injects faults into the **code** (40
 mutation operators, some synthesized from bug-fix commits in public Dafny projects) and checks
 whether the mutant still verifies; a surviving mutant may reveal a weak specification. Evaluated on
