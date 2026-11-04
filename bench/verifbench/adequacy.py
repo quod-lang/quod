@@ -82,7 +82,7 @@ def results_of(task, args: tuple) -> tuple[list[Any], list[Any]]:
     pool = [c for c in candidates if repr(c) not in seen]
     for a in allowed:
         pool += mutations(a)
-    # any index of a list, and an empty answer, for a task whose allowed results are indices
+    pool += samples(returns)
     for c in pool:
         key = repr(c)
         if key in seen or not fits(c, returns):
@@ -124,6 +124,21 @@ def fits(value: Any, t: str) -> bool:
         ts = _split_top(m.group(1))
         return isinstance(value, list) and len(value) == len(ts) and all(fits(x, y) for x, y in zip(value, ts))
     return False
+
+
+def samples(t: str) -> list[Any]:
+    """A few small values of a type: an empty right answer has nothing to mutate."""
+    if t == "int":
+        return [0, 1, -1]
+    if t == "bool":
+        return [True, False]
+    m = re.fullmatch(r"list\[(.*)\]", t)
+    if m:
+        return [[x] for x in samples(m.group(1))] + [samples(m.group(1))[:2]]
+    m = re.fullmatch(r"tuple\[(.*)\]", t)
+    if m:
+        return [[samples(x)[k % len(samples(x))] for x in _split_top(m.group(1))] for k in range(3)]
+    return []
 
 
 def plan(task) -> list[dict]:
