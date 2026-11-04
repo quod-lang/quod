@@ -218,8 +218,8 @@ dans le JSON (`"kind": "contract"`) :
   définition.) Avec
   `--require-contracts` (`check`, `build`, `mcp`), c'est une **erreur**, tout comme une
   fonction-expression sans `ensures` qu'aucune autre fonction n'appelle , un `loose` qui accepte tout
-  résultat, un lemme écrit comme une fonction, et un `requires` qui fixe un paramètre à une valeur ou une séquence à
-  une longueur : `verified` signifie alors
+  résultat, un lemme écrit comme une fonction, un `requires` qui fixe un paramètre à une valeur ou une séquence à une
+  longueur de 0 ou 1, et un `requires` qui donne déjà l'`ensures` pour un argument renvoyé tel quel : `verified` signifie alors
   que quelque chose a été prouvé sur chaque résultat.
 - **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
   renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`
@@ -273,6 +273,7 @@ quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SE
 quod build fichier.quod [--target python|csharp] [--namespace NOM] [--check-requires all] [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
 quod mcp [--require-contracts]  # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
+quod contract fichier.quod cas.json --function NOM   # évalue un contrat sur des arguments et des résultats donnés
 ```
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.
@@ -321,7 +322,7 @@ fonction reste inconnue du solveur.
 - Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).
 
 Backend Python, depuis la 0.1.5 : **un appelant Python ne prouve rien.** Une fonction publique vérifie ses `requires`
-sans quantificateur ni appel (`ValueError`). Les autres restent à la charge de l'appelant, et sa docstring le dit ;
+sans quantificateur ni appel, et qu'un paramètre `nat` est `>= 0` (`ValueError`). Une liste de `nat` compte comme quantifiée. Les autres restent à la charge de l'appelant, et sa docstring le dit ;
 `--check-requires all` les vérifie aussi, à leur coût. Chaque `loose` est montré avec deux résultats différents qu'il
 accepte sur une entrée, dans le JSON et dans le résumé. Un modèle dont la définition se lit comme le corps, une fois
 déplié, est classé `restated`.
@@ -335,8 +336,8 @@ déplié, est classé `restated`.
   code Quod appelle. Les lemmes ne sont pas générés. Deux fonctions de même nom public sont refusées.
 - `int` et `nat` sont `BigInteger`, `bool` est `bool`, `seq<T>` est `IReadOnlyList<T>` (sans copie à l'entrée),
   les tuples sont des `ValueTuple`. L'égalité est structurelle ; `/` et `%` sont euclidiens.
-- **Un appelant C# ne prouve rien.** Une méthode publique vérifie `null` pour ses séquences et ses `requires`
-  sans quantificateur ni appel (`ArgumentException`). Les autres restent à la charge de l'appelant, et son
+- **Un appelant C# ne prouve rien.** Une méthode publique vérifie `null` pour ses séquences, ses `requires`
+  sans quantificateur ni appel, et qu'un paramètre `nat` est `>= 0` (`ArgumentException`). Une liste de `nat` compte comme quantifiée. Les autres restent à la charge de l'appelant, et son
   commentaire le dit ; `--check-requires all` les vérifie aussi, à leur coût. Les appels entre fonctions Quod ne
   vérifient rien.
 - Une méthode avec une liste d'entiers a deux formes de plus, pour `int` et `long` : la liste est vue comme celle de

@@ -11,6 +11,7 @@ let private usage =
     + "  check   type-check FILE, prove its contracts, check that they are complete\n"
     + "  build   check FILE, then generate code (only for a verified program)\n"
     + "  mcp     serve check, build, run and the language reference to an AI agent (MCP, stdio)\n"
+    + "  contract FILE CASES --function NAME   evaluate a contract on the arguments and results of a JSON file\n"
     + "  reference [SECTION]   print the language reference (all there is to know to write Quod),\n"
     + "          or one section of it, e.g. quod reference \"Hints and lemmas\"\n"
     + "options:\n"
@@ -40,6 +41,7 @@ type private Options =
       AllRequires: bool
       OutDir: string option
       OutputFile: string option
+      Function: string option
       BuildFormat: bool
       RuntimeChecks: bool
       /// --budget was given (quod mcp has its own default otherwise)
@@ -60,11 +62,12 @@ let private parseOptions (args: string list) : Options * string list =
         | "--check-requires" :: "all" :: tl -> go { o with AllRequires = true } tl positional
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
         | "--output-file" :: f :: tl -> go { o with OutputFile = Some f } tl positional
+        | "--function" :: f :: tl -> go { o with Function = Some f } tl positional
         | "--format" :: "msbuild" :: tl -> go { o with BuildFormat = true } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; OutputFile = None; BuildFormat = false; RuntimeChecks = false; BudgetGiven = false } args []
+    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; OutputFile = None; Function = None; BuildFormat = false; RuntimeChecks = false; BudgetGiven = false } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
@@ -149,6 +152,15 @@ let main argv =
     | [ "parse"; file ] -> parseCommand file o
     | [ "check"; file ] -> checkCommand file o
     | [ "build"; file ] -> buildCommand file o
+    | [ "contract"; file; cases ] when o.Function.IsSome ->
+        withFile file (fun src ->
+            match Mcp.contractCases file src o.Function.Value (File.ReadAllText cases) with
+            | Ok text ->
+                Console.WriteLine text
+                0
+            | Result.Error why ->
+                Console.Error.WriteLine("error: " + why)
+                1)
     | [ "mcp" ] -> Mcp.serve (if o.BudgetGiven then o.Settings else { o.Settings with Budget = Mcp.defaultBudget })
     | "reference" :: title ->
         match Mcp.referenceText (if title.IsEmpty then None else Some(String.Join(" ", title))) with

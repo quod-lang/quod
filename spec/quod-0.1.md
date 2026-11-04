@@ -211,8 +211,9 @@ as a `note` in the JSON (`"kind": "contract"`):
   function without `ensures` is not classified: the verifier knows its definition.) With
   `--require-contracts` (`check`, `build`, `mcp`) it is an **error**, as are an expression function
   without `ensures` that no other function calls, a `loose` that accepts every result, a lemma written
-  as a function, and a `requires` that fixes a parameter to one value or a sequence to one length, so
-  `verified` means that something was proved about each result.
+  as a function, a `requires` that fixes a parameter to one value or a sequence to a length of 0 or 1 (a fixed
+  length of 2 or more is a record), and a `requires` that already gives the `ensures` for an argument returned unchanged,
+  so `verified` means that something was proved about each result.
 - **lemma written as a function** (`lemma-as-function`): a statement function returning `bool`
   that returns `true` on every path, or says `ensures result`, its other `ensures` being facts,
   and whose value the program never uses (`if feature_enabled() { ... }` uses it; a lemma could
@@ -264,6 +265,7 @@ quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS]
 quod build file.quod [--target python|csharp] [--namespace NAME] [--check-requires all] [-o DIR] [--runtime-checks] [--require-contracts] [--json]
 quod mcp [--require-contracts]  # check, build, run and the reference, served to an AI agent (MCP, stdio)
 quod reference [SECTION]   # the language reference, or one section of it
+quod contract file.quod cases.json --function NAME   # evaluate a contract on given arguments and results
 ```
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.
@@ -289,8 +291,8 @@ of time is not proved: the function's definition stays unknown to the solver.
   iteration and after the last one, asserts) are checked at run time. They raise `AssertionError`
   and are not Python `assert`s, so `python -O` keeps them. An underspecified contract always blocks
   the build: no run-time check can tell that a result is the intended one.
-- **A Python caller proves nothing.** A public function checks its `requires` without quantifier or call
-  (`ValueError`). The others stay the caller's duty, and its docstring says so; `--check-requires all` checks them
+- **A Python caller proves nothing.** A public function checks its `requires` without quantifier or call, and
+  that a `nat` parameter is `>= 0` (`ValueError`). A list of `nat` counts as quantified. The others stay the caller's duty, and its docstring says so; `--check-requires all` checks them
   too, at their cost. Calls between Quod functions check nothing.
 - In such a function, indexing and slicing check their bounds (Python would wrap a negative index
   and clamp a slice), and a division by zero raises `ZeroDivisionError`. A `nat` that would be
@@ -307,7 +309,8 @@ of time is not proved: the function's definition stays unknown to the solver.
   it afterwards changes the caller's input too, as with any Python function. Builtins are aliased (`_quod_len`...), so a
   Quod function named `len` or `list` shadows nothing the generated code needs. A name that is a
   Python keyword gets a trailing `_`.
-- Known limit: recursion is Python recursion (default depth 1000).
+- Known limit: recursion is Python recursion (default depth 1000). **A valid input can give a different answer by
+  backend:** a recursion too deep raises in Python at about 1000 calls, in the evaluator of `quod_run` at about the same depth, and in C# much further.
 
 ## C# backend
 
@@ -318,8 +321,8 @@ of time is not proved: the function's definition stays unknown to the solver.
   Quod code calls. Lemmas are not generated. Two functions with the same public name are refused.
 - `int` and `nat` are `BigInteger`, `bool` is `bool`, `seq<T>` is `IReadOnlyList<T>` (not copied on entry),
   tuples are `ValueTuple`. Equality is structural; `/` and `%` are Euclidean.
-- **A C# caller proves nothing.** A public method checks `null` for its sequences and its `requires` without
-  quantifier or call (`ArgumentException`). The others stay the caller's duty, and its comment says so;
+- **A C# caller proves nothing.** A public method checks `null` for its sequences, its `requires` without
+  quantifier or call, and that a `nat` parameter is `>= 0` (`ArgumentException`). A list of `nat` counts as quantified. The others stay the caller's duty, and its comment says so;
   `--check-requires all` checks them too, at their cost, and so does defining `QUOD_CHECK_REQUIRES` in the calling
   project. Calls between Quod functions check nothing.
 - A method with a list of integers has two more forms, for `int` and `long`: the list is seen as Quod's, not copied.

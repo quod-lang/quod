@@ -1,0 +1,1 @@
+{"sound": false, "exact": false, "unknown": 0, "pairs": 59, "rejected_input": [], "accepted_wrong": [[[[[1, 1]]], []], [[[[1, 3], [3, 5]]], []]], "rejected_allowed": [[[[[1, 1]]], [[1, 1]]], [[[[1, 3], [3, 5]]], [[1, 5]]]], "task": "merge_intervals", "arm": "quod-mcp", "trial": 0, "all_pass": false}

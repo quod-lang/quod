@@ -146,6 +146,20 @@ type private Gen(checks: Set<string>) =
             "(" + (ts |> List.mapi (fun k ct -> g.Normalize(ct, term + "[" + string k + "]")) |> String.concat ", ") + ")"
         | _ -> term
 
+    /// The test that a value's `nat`s are `>= 0`, None if it has none to test. Under a sequence,
+    /// only with `deep`: it costs a pass over it, like a quantified requires.
+    member g.NatTest(t: Ty, term: string, deep: bool, depth: int) : string option =
+        match t with
+        | TyNat -> Some("(" + term + " >= 0)")
+        | TySeq e when deep ->
+            let x = "_quod_n" + string depth
+            g.NatTest(e, x, deep, depth + 1) |> Option.map (fun inner -> "_quod_all(" + inner + " for " + x + " in " + term + ")")
+        | TyTuple ts ->
+            match ts |> List.mapi (fun k c -> g.NatTest(c, term + "[" + string k + "]", deep, depth)) |> List.choose id with
+            | [] -> None
+            | tests -> Some("(" + String.Join(" and ", tests) + ")")
+        | _ -> None
+
     member g.Stmts(sb: StringBuilder, indent: string, items: TStmt list, f: TFn) =
         // lemma calls are proof steps: erased (a lemma may be recursive and slow, and its value is true)
         let items = items |> List.filter (fun s -> match s.Kind with SLet(_, n, _, _) -> not (isLemmaBinding n) | _ -> true)
@@ -209,6 +223,9 @@ type private Gen(checks: Set<string>) =
         let enforced, left = boundary |> List.partition (fun r -> allRequires || Codegen.cheap r)
         for r in enforced do doc.Add("requires " + Printer.exprText (toSyntax r) + " (checked)")
         for r in left do doc.Add("NOT CHECKED, the caller's duty: requires " + Printer.exprText (toSyntax r))
+        if not allRequires then
+            for p in f.Params |> List.filter (fun p -> Codegen.natInList p.Ty) do
+                doc.Add("NOT CHECKED, the caller's duty: every integer of " + p.Name + " is >= 0")
         for e in f.Ensures do doc.Add("ensures " + Printer.exprText (toSyntax e))
         if not (checks.Contains f.Name) && doc.Count > 0 then doc.Add("(proved by quod)")
         elif checks.Contains f.Name then doc.Add("(NOT fully proved: contracts are checked at run time)")
@@ -216,8 +233,16 @@ type private Gen(checks: Set<string>) =
             sb.Append("    \"\"\"").Append(String.Join("\n    ", doc)).Append("\"\"\"\n") |> ignore
         // a Python caller proves nothing: what is cheap to check is checked here, not in the
         // implementation, which Quod code calls with proved arguments
+        // a `nat` is a requires the proofs rely on: `n >= 0` (review of 0.1.5)
+        for p in f.Params do
+            match g.NatTest(p.Ty, pyName p.Name, allRequires, 0) with
+            | Some test ->
+                sb.Append("    if not ").Append(test).Append(":\n        raise ValueError(\"")
+                  .Append(f.Name + ": argument " + p.Name + " must be >= 0").Append("\")\n") |> ignore
+            | None -> ()
         for r in enforced do
-            sb.Append("    if not ").Append(g.Expr r).Append(":\n        raise ValueError(")
+            let negated = match r.Kind with ENot x -> g.Expr x | _ -> "not " + g.Expr r
+            sb.Append("    if ").Append(negated).Append(":\n        raise ValueError(")
               .Append("\"" + (f.Name + ": requires " + Printer.exprText (toSyntax r)).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"").Append(")\n") |> ignore
         let args = f.Params |> List.map (fun p -> g.Normalize(p.Ty, pyName p.Name)) |> String.concat ", "
         sb.Append("    return ").Append(implName f.Name).Append("(").Append(args).Append(")\n\n\n") |> ignore

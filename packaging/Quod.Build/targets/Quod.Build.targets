@@ -5,8 +5,9 @@
   <PropertyGroup>
     <QuodToolsRoot>$(MSBuildThisFileDirectory)..\tools\</QuodToolsRoot>
     <QuodRid Condition="'$(OS)' == 'Windows_NT'">win-x64</QuodRid>
-    <QuodRid Condition="'$(QuodRid)' == '' And $([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</QuodRid>
-    <QuodRid Condition="'$(QuodRid)' == ''">linux-x64</QuodRid>
+    <QuodArchitecture Condition="'$(OS)' != 'Windows_NT'">$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)</QuodArchitecture>
+    <QuodRid Condition="'$(QuodRid)' == '' And $([MSBuild]::IsOSPlatform('OSX')) And '$(QuodArchitecture)' == 'Arm64'">osx-arm64</QuodRid>
+    <QuodRid Condition="'$(QuodRid)' == '' And $([MSBuild]::IsOSPlatform('Linux')) And '$(QuodArchitecture)' == 'X64'">linux-x64</QuodRid>
     <QuodExeName Condition="'$(OS)' == 'Windows_NT'">quod.exe</QuodExeName>
     <QuodExeName Condition="'$(QuodExeName)' == ''">quod</QuodExeName>
     <QuodExe Condition="'$(QuodExe)' == ''">$(QuodToolsRoot)$(QuodRid)\$(QuodExeName)</QuodExe>
@@ -18,6 +19,7 @@
     <QuodArguments Condition="'$(QuodRequireContracts)' == 'true'">$(QuodArguments) --require-contracts</QuodArguments>
     <QuodArguments Condition="'$(QuodCheckAllRequires)' == 'true'">$(QuodArguments) --check-requires all</QuodArguments>
     <QuodArguments>$(QuodArguments) $(QuodBuildOptions)</QuodArguments>
+    <QuodArgumentsFile>$(QuodOutputDir)quod.args</QuodArgumentsFile>
   </PropertyGroup>
 
   <!-- .NET Framework projects do not reference BigInteger's assembly by default. -->
@@ -28,12 +30,30 @@
     </ItemGroup>
   </Target>
 
-  <Target Name="QuodGenerate"
-          Inputs="@(QuodCompile);$(QuodExe)"
+  <!-- Changing an option must verify again, so the options are an input: a file rewritten only when they change. -->
+  <Target Name="QuodWriteArguments">
+    <Error Condition="'$(QuodRid)' == '' And '@(QuodCompile)' != ''"
+           Text="Quod.Build has no quod for this system ($(QuodArchitecture)): it runs on Windows x64, Linux x64 and macOS on Apple silicon. Set QuodExe to a quod of your own." />
+    <MakeDir Directories="$(QuodOutputDir)" />
+    <WriteLinesToFile File="$(QuodArgumentsFile)" Lines="$(QuodArguments.Replace(';', '%3B'))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <FileWrites Include="$(QuodArgumentsFile)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="QuodGenerate" DependsOnTargets="QuodWriteArguments"
+          Inputs="@(QuodCompile);$(QuodExe);$(QuodArgumentsFile)"
           Outputs="@(QuodCompile->'$(QuodOutputDir)%(RecursiveDir)%(Filename).g.cs')">
     <!-- a NuGet package does not keep the execute permission -->
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="chmod +x &quot;$(QuodExe)&quot; &quot;$(QuodToolsRoot)$(QuodRid)/z3&quot;" />
-    <Exec Command="&quot;$(QuodExe)&quot; build &quot;%(QuodCompile.FullPath)&quot; $(QuodArguments) --output-file &quot;$(QuodOutputDir)%(QuodCompile.RecursiveDir)%(QuodCompile.Filename).g.cs&quot;" />
+    <!-- quod reports its diagnostics in MSBuild's format. They do not fail the build by themselves under every MSBuild (an
+         old-style project under Visual Studio's went on to compile the previous file), so the exit code does, without MSB3073. -->
+    <Exec Command="&quot;$(QuodExe)&quot; build &quot;%(QuodCompile.FullPath)&quot; $(QuodArguments) --output-file &quot;$(QuodOutputDir)%(QuodCompile.RecursiveDir)%(QuodCompile.Filename).g.cs&quot;"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" ItemName="QuodExitCode" />
+    </Exec>
+    <Error Condition="'%(QuodExitCode.Identity)' == '1'" Text="Quod verification failed: see the errors above." />
+    <Error Condition="'%(QuodExitCode.Identity)' != '0' And '%(QuodExitCode.Identity)' != '1'" Text="quod did not run (exit code %(QuodExitCode.Identity)): $(QuodExe)" />
   </Target>
 
   <Target Name="QuodAddGenerated" BeforeTargets="CoreCompile" DependsOnTargets="QuodGenerate" Condition="'@(QuodCompile)' != ''">

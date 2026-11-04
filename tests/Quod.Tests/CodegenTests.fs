@@ -216,6 +216,13 @@ let ``a Python caller is held to the requires that are cheap to check`` () =
     let code = Quod.CodegenPython.generate "test.quod" typed Set.empty
     Assert.Equal("need: requires x > 0\n2\n", runPython code driver)
     Assert.Contains("NOT CHECKED, the caller's duty", code)
+    // a nat is a requires too, and a list of them under --check-requires all
+    let nats = "fn back(n: nat) -> int { n - 1 }\nfn head(xs: seq<nat>) -> int { len(xs) }"
+    let typedNats, _ = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" nats)
+    let natCode = Quod.CodegenPython.generate "test.quod" typedNats Set.empty
+    Assert.Equal("back: argument n must be >= 0\n1\n", runPython natCode "try:\n    back(-5)\nexcept ValueError as e:\n    print(e)\nprint(head([-3]))\n")
+    let natAll = Quod.CodegenPython.generateWith "test.quod" typedNats Set.empty true
+    Assert.Equal("head: argument xs must be >= 0\n", runPython natAll "try:\n    head([-3])\nexcept ValueError as e:\n    print(e)\n")
     // and --check-requires all
     let all = Quod.CodegenPython.generateWith "test.quod" typed Set.empty true
     Assert.Contains("sorted_only: requires", runPython all "try:\n    sorted_only([2, 1])\nexcept ValueError as e:\n    print(e)\n")

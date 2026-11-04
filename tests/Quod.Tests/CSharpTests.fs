@@ -152,6 +152,8 @@ let private traps =
             + "fn need(x: int) -> int requires x > 0 { x }\n"
             + "fn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }\n"
             + "fn eq_seq(a: seq<int>, b: seq<int>) -> bool { a == b }\n"
+            + "fn back(n: nat) -> int { n - 1 }\n"
+            + "fn nats(xs: seq<nat>) -> int { len(xs) }\n"
             + "fn nested_ints(xs: seq<(int, seq<int>)>) -> seq<(int, seq<int>)> { xs + xs[..1] }\n"
             + "fn search(xs: seq<int>, x: int) -> int { let mut i = 0; while i < len(xs) invariant 0 <= i && i <= len(xs) decreases len(xs) - i { if xs[i] == x { return i; } i = i + 1; } return -1; }\n"
          let checked' = "fn wrong(x: int) -> int ensures result > x { return x; }\nfn out_of_bounds(xs: seq<int>) -> int { return xs[3]; }\n"
@@ -173,6 +175,9 @@ let private traps =
                "        Case(\"null\", () => T0.P.LenOf((IReadOnlyList<BigInteger>)null));"
                "        Case(\"null ints\", () => T0.P.LenOf((IReadOnlyList<int>)null));"
                "        Case(\"ints\", () => T0.P.LenOf(new int[] { 1, 2, 3 }));"
+               "        Case(\"negative nat\", () => T0.P.Back(" + big -5 + "));"
+               "        Case(\"negative in a list, left\", () => T0.P.Nats(" + arr [ -3 ] + "));"
+               "        Case(\"negative in a list, checked\", () => T2.P.Nats(" + arr [ -3 ] + "));"
                "        Case(\"longs\", () => T0.P.LenOf(new List<long> { 1L, 2L }));"
                "        Case(\"nested ints\", () => T0.P.NestedInts(new (int, IReadOnlyList<int>)[] { (1, new int[] { 2, 3 }), (4, new int[0]) }));"
                "        Case(\"sorted ints\", () => T0.P.Search(new int[] { 1, 3, 5 }, 3));"
@@ -196,6 +201,9 @@ let private traps =
 [<InlineData("null", "!ArgumentNullException")>]
 [<InlineData("null ints", "!ArgumentNullException")>]
 [<InlineData("ints", "3")>]
+[<InlineData("negative nat", "!ArgumentException")>]
+[<InlineData("negative in a list, left", "1")>]
+[<InlineData("negative in a list, checked", "!ArgumentException")>]
 [<InlineData("longs", "2")>]
 [<InlineData("nested ints", "[(1, [2, 3]), (4, []), (1, [2, 3])]")>]
 [<InlineData("sorted ints", "1")>]
@@ -219,6 +227,14 @@ let ``the calling project can turn on the quantified requires with a symbol`` ()
               "        Case(\"good\", () => T0.P.SortedOnly(new int[] { 1, 2 }));" ]
     Assert.Equal("!ArgumentException", got.["bad"])
     Assert.Equal("2", got.["good"])
+
+[<Fact>]
+let ``a check at the boundary reads as C#, without a double negation`` () =
+    match generate "p.quod" (typedOf "fn f(b: int) -> int requires b != 0 { 1 / b }") Set.empty defaultOptions with
+    | Ok code ->
+        Assert.Contains("if ((b == BigInteger.Zero)) throw new ArgumentException", code)
+        Assert.DoesNotContain("!(!", code)
+    | Result.Error why -> failwith why
 
 [<Fact>]
 let ``constants are named, not rebuilt at each use`` () =

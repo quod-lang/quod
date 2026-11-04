@@ -1649,14 +1649,42 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                         z3.Send("(assert " + d + ")")
                         let answer = z3.Check()
                         z3.Pop()
-                        if answer = Unsat then
-                            let what = match p.Ty with TySeq _ -> "a single length of " | _ -> "a single value of "
+                        // a fixed length of 2 or more is a record, a colour or a date (review of 0.1.5)
+                        let degenerate =
+                            match p.Ty with
+                            | TySeq _ when answer = Unsat ->
+                                z3.Push()
+                                z3.Send("(assert (<= (" + seqOp "len" p.Ty + " " + a.[p.Name] + ") 1))")
+                                let small = z3.Check()
+                                z3.Pop()
+                                small <> Unsat
+                            | _ -> answer = Unsat
+                        if degenerate then
+                            let what = match p.Ty with TySeq _ -> "a single length, 0 or 1, of " | _ -> "a single value of "
                             diags.Add
                                 { File = file; Span = f.Span; Kind = "contract"; Status = "pinned-input"; Severity = Error
                                   Fn = Some f.Name; Property = Some "the requires leaves the inputs free"; Counterexample = []
                                   Reason = None; Evidence = None
                                   Message = "the requires allows " + what + p.Name + ", and --require-contracts asks for a contract about the function, not about one case: state only what the task guarantees" }
                     | None -> ()
+                // the requires already gives the ensures for an argument returned as it is: a `sort`
+                // of a list said to be sorted (review of 0.1.5). A declared freedom may allow it.
+                if f.Loose.IsNone && not f.Ensures.IsEmpty then
+                    for p in f.Params |> List.filter (fun p -> p.Ty = f.Ret || (p.Ty = TyNat && f.Ret = TyInt)) do
+                        z3.Push()
+                        let more = Collector()
+                        let ensures = f.Ensures |> List.map (fun e -> v.Expr(e, a.Add("result", a.[p.Name]), [], more))
+                        for fact in List.ofSeq more.Facts do
+                            z3.Send("(assert " + fact + ")")
+                        z3.Send("(assert (not (and true " + String.Join(" ", ensures) + ")))")
+                        let answer = z3.Check()
+                        z3.Pop()
+                        if answer = Unsat then
+                            diags.Add
+                                { File = file; Span = f.Span; Kind = "contract"; Status = "returns-argument"; Severity = Error
+                                  Fn = Some f.Name; Property = Some "the requires does not already give the ensures"; Counterexample = []
+                                  Reason = None; Evidence = None
+                                  Message = "the requires already guarantees the ensures for " + p.Name + " returned unchanged: the function has nothing to do. State only what the task guarantees, and what the result is" }
             z3.SetTimeout z3.DefaultTimeout
             current <- None
             z3.Pop()

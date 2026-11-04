@@ -56,6 +56,19 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
     walk body
     candidates |> Seq.filter (fun n -> not (shared.Contains n)) |> Set.ofSeq
 
+/// Does this type hold a `nat` under a sequence, whose check costs a pass over it?
+let rec natInList (t: Ty) =
+    let rec hasNat t =
+        match t with
+        | TyNat -> true
+        | TySeq e -> hasNat e
+        | TyTuple ts -> List.exists hasNat ts
+        | _ -> false
+    match t with
+    | TySeq e -> hasNat e
+    | TyTuple ts -> List.exists natInList ts
+    | _ -> false
+
 /// A `requires` cheap enough to check at every public call: no quantifier, and no call, which
 /// could hide one.
 let rec cheap (e: TExpr) =

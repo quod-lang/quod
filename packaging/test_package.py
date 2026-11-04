@@ -162,6 +162,7 @@ def main() -> None:
         (d / "Rules.quod").write_text(WRONG_PROOF, encoding="utf-8")
         out = run(build, d, env, expect=1)
         check(re.search(r"Rules\.quod\(\d+,\d+\): error QUOD0003", out) is not None, "a wrong proof fails the build, with its code and its place", out)
+        check("MSB3073" not in out, "without a second error that repeats the command", out)
 
         d = sdk("sdk under", "net10.0", UNDERSPECIFIED)
         out = run(build, d, env, expect=1)
@@ -170,6 +171,11 @@ def main() -> None:
         d = sdk("sdk none", "net10.0", NO_CONTRACT, "<QuodRequireContracts>true</QuodRequireContracts>")
         out = run(build, d, env, expect=1)
         check("error QUOD0005" in out, "QuodRequireContracts refuses a function without a contract", out)
+
+        d = sdk("sdk options", "net10.0", CLAMP + "\n" + NO_CONTRACT)
+        run(build, d, env)
+        out = run(build + ["-p:QuodRequireContracts=true"], d, env, expect=1)
+        check("error QUOD0005" in out, "changing an option verifies again, without touching the file", out)
 
         if not windows:
             print("skip .NET Framework: Windows only")

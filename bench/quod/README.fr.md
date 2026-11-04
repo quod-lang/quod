@@ -201,7 +201,16 @@ donne, sans binary_search, 15 sur 15 par le shell, 13 sur 15 à travers MCP et 1
 fréquence des contrats qui déterminent le résultat.** Ces tâches laissent peut-être peu de marge, le modèle écrivant déjà de tels
 contrats de lui-même. Ce que le contrôle change, c'est que le verdict est connu pendant que l'agent écrit : `quod check` en
 décide 14 sur 15 par le shell, dafny-complete 9 sur 15 après coup. Le seul contrat trouvé faux est un contrat Dafny qu'aucun
-outil n'a signalé : une couverture sur les entiers, qui accepte `[(1,4)]` pour `[(1,2),(3,4)]`.
+outil n'a signalé : une couverture sur les entiers, qui accepte `[(1,4)]` pour `[(1,2),(3,4)]`. Les contrats que les outils ont décidés n'ont pas été lus ainsi, et les deux bugs échappés ci-dessus étaient de ce type.
+
+**Par exécution.** [adequacy.py](../verifbench/adequacy.py) exécute chaque contrat accepté sur de petites entrées, sans le code : un contrat *sain* accepte toute entrée valide et refuse tout résultat faux ; un contrat *exact* accepte aussi tout résultat que la tâche permet ([résultats](../runs/t6-haiku/adequacy.jsonl)). Un test fini trouve des contrats faux, il ne les exclut pas.
+
+| Contrats acceptés de Haiku | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| Sains | 18/18 | 16/16 | 15/18, et 3 non décidés |
+| Exacts | 15/18 | 16/16 | 15/18 |
+
+Elle trouve les deux bugs échappés. Les trois non décidés sont des merge_intervals, dont le quantificateur non borné ne peut pas s'exécuter, dont le seul contrat faux trouvé plus haut : cette mesure ne l'a pas attrapé. Les trois sains mais pas exacts sont les binary_search du shell : ils fixent un indice, alors que la tâche en permet n'importe lequel. **Le contrôle de complétude peut pousser un agent à trop spécifier plutôt qu'à déclarer une liberté**, ce que le bras Dafny, sans ce contrôle, ne fait pas.
 
 ## Ce que leur écriture a changé dans le vérificateur
 

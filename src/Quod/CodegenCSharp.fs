@@ -114,6 +114,12 @@ let private helpers =
             for (BigInteger i = lo; i < hi; i = i + 1) if (f(i)) return true;
             return false;
         }"
+      "every",
+      "private static bool _quod_every<T>(IEnumerable<T> xs, Func<T, bool> f)
+        {
+            foreach (var x in xs) if (!f(x)) return false;
+            return true;
+        }"
       "view",
       "// A list of the caller's integers, seen as Quod's: nothing is copied, each element is converted when read.
         private sealed class _QuodView<TFrom, T> : IReadOnlyList<T>
@@ -259,6 +265,8 @@ type private Gen(checks: Set<string>) =
         | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
         | ECall(f, args) -> g.Call(f, args)
         | ENeg x -> "(-" + g.Expr(x, TyInt) + ")"
+        | ENot { Kind = EEq(a, b) } when (match shape (merge (shape a.Ty) (shape b.Ty)) with TyInt | TyBool -> true | _ -> false) ->
+            "(" + g.Expr(a, a.Ty) + " != " + g.Expr(b, b.Ty) + ")"
         | ENot x -> "(!" + g.Expr(x, TyBool) + ")"
         | EArith(op, a, b) ->
             let x, y = g.Expr(a, TyInt), g.Expr(b, TyInt)
@@ -304,6 +312,31 @@ type private Gen(checks: Set<string>) =
     member g.Call(f: string, args: TExpr list) : string =
         let ps = g.Signatures.[f].Params
         implName f + "(" + (List.map2 (fun (a: TExpr) (p: TParam) -> g.Expr(a, p.Ty)) args ps |> String.concat ", ") + ")"
+
+    /// A condition that holds when `e` does not: `b == 0`, not `!(b != 0)`.
+    member g.Negated(e: TExpr) =
+        match e.Kind with
+        | ENot { Kind = EEq(a, b) } when (match shape (merge (shape a.Ty) (shape b.Ty)) with TyInt | TyBool -> true | _ -> false) ->
+            "(" + g.Expr(a, a.Ty) + " == " + g.Expr(b, b.Ty) + ")"
+        | ENot x -> g.Expr(x, TyBool)
+        | _ -> "!" + g.Expr(e, TyBool)
+
+    /// The test that a value's `nat`s are `>= 0`, None if it has none to test. Under a sequence,
+    /// only when `deep`: it costs a pass over it, like a quantified requires.
+    member g.NatTest(t: Ty, term: string, deep: bool, depth: int) : string option =
+        match t with
+        | TyNat -> Some("(" + term + ".Sign >= 0)")
+        | TySeq e when deep ->
+            let x = "_quod_n" + string depth
+            g.NatTest(e, x, deep, depth + 1)
+            |> Option.map (fun inner ->
+                g.Help "every" |> ignore
+                "_quod_every<" + csType e + ">(" + term + ", " + x + " => " + inner + ")")
+        | TyTuple ts ->
+            match ts |> List.mapi (fun k c -> g.NatTest(c, term + ".Item" + string (k + 1), deep, depth)) |> List.choose id with
+            | [] -> None
+            | tests -> Some("(" + String.Join(" && ", tests) + ")")
+        | _ -> None
 
     member g.Check(sb: StringBuilder, indent: string, e: TExpr, what: string, f: TFn) =
         let values =
@@ -444,7 +477,10 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
                 [ for r in enforced -> "requires " + text r + " (checked)"
                   for e in f.Ensures -> "ensures " + text e
                   for l in Option.toList f.Loose -> "loose (" + l.Left + ", " + l.Right + ") => " + text l.Relation
-                  for r in left -> "NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: requires " + text r ]
+                  for r in left -> "NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: requires " + text r
+                  if not options.CheckAllRequires then
+                      for p in f.Params |> List.filter (fun p -> Codegen.natInList p.Ty) ->
+                          "NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: every integer of " + p.Name + " is >= 0" ]
             if not notes.IsEmpty then
                 sb.Append(indent).Append("/// <remarks>\n") |> ignore
                 for n in notes do sb.Append(indent).Append("/// ").Append(xml n).Append("<br/>\n") |> ignore
@@ -460,12 +496,22 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
                     let n = csName p.Name
                     sb.Append(body).Append("if (").Append(n).Append(" == null) throw new ArgumentNullException(\"").Append(p.Name).Append("\");\n") |> ignore
                 | _ -> ()
+            // a `nat` is a requires the proofs rely on: `n >= 0` (review of 0.1.5)
+            let natCheck (deep: bool) (p: TParam) =
+                match g.NatTest(p.Ty, csName p.Name, deep, 0) with
+                | Some test ->
+                    sb.Append(body).Append("if (!").Append(test).Append(") throw new ArgumentException(")
+                      .Append(literal (f.Name + ": argument " + p.Name + " must be >= 0")).Append(");\n") |> ignore
+                | None -> ()
+            for p in f.Params do natCheck options.CheckAllRequires p
             for r in enforced do
-                sb.Append(body).Append("if (!").Append(g.Expr(r, TyBool)).Append(") throw new ArgumentException(")
+                sb.Append(body).Append("if (").Append(g.Negated r).Append(") throw new ArgumentException(")
                   .Append(literal (f.Name + ": requires " + text r)).Append(");\n") |> ignore
             // the file is compiled in the calling project, whose symbol turns these on, at their cost
-            if not left.IsEmpty then
+            let natLists = if options.CheckAllRequires then [] else f.Params |> List.filter (fun p -> Codegen.natInList p.Ty)
+            if not left.IsEmpty || not natLists.IsEmpty then
                 sb.Append("#if QUOD_CHECK_REQUIRES\n") |> ignore
+                for p in natLists do natCheck true p
                 for r in left do
                     sb.Append(body).Append("if (!").Append(g.Expr(r, TyBool)).Append(") throw new ArgumentException(")
                       .Append(literal (f.Name + ": requires " + text r)).Append(");\n") |> ignore

@@ -14,7 +14,7 @@ contract below is judged on one question only: can two different results satisfy
 | quod-mcp | rle_encode #0, #1 | `quod check` | **Determined**, likewise |
 | quod-mcp | max_subarray #0, #2 | `quod check` | **Determined.** The result is a sum of a sublist and at least all of them: the maximum |
 
-Only the witness is checked by a machine; the other verdicts are arguments on paper.
+Only the witness is checked by a machine; the other verdicts are arguments on paper. **The contracts the tools decided were not read:** the two escaped bugs of T6 were of that kind, determined and wrong, so "the only contract found wrong" holds for those read here. The measure of the held-out tasks, by execution, is what covers them.
 
 ## Counts
 

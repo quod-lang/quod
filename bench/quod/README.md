@@ -197,7 +197,19 @@ binary_search, 15 of 15 through the shell, 13 of 15 through MCP and 14 of 15 for
 often a contract determines the result.** These tasks may leave little room, the model already writing such
 contracts by itself. What the check changes is that the verdict is known, while the agent writes: 14 of 15 are decided
 by `quod check` through the shell, 9 of 15 by dafny-complete afterwards. The one contract found wrong is a Dafny one that
-no tool flagged: a cover over the integers, which accepts `[(1,4)]` for `[(1,2),(3,4)]`.
+no tool flagged: a cover over the integers, which accepts `[(1,4)]` for `[(1,2),(3,4)]`. The contracts that the tools decided were not read in this
+way, and the two escaped bugs above were of that kind.
+
+**By execution.** [adequacy.py](../verifbench/adequacy.py) runs each accepted contract on small inputs, without the code: a *sound* contract accepts every valid input and rejects every wrong
+result; an *exact* one also accepts every result the task allows ([results](../runs/t6-haiku/adequacy.jsonl)). A finite test finds wrong contracts, it does not exclude them.
+
+| Accepted contracts of Haiku | quod (shell) | quod-mcp | dafny |
+|---|---|---|---|
+| Sound | 18/18 | 16/16 | 15/18, and 3 undecided |
+| Exact | 15/18 | 16/16 | 15/18 |
+
+It finds both escaped bugs. The three undecided are merge_intervals, whose unbounded quantifier cannot run, among them the one wrong contract found above: this measure did not catch it. The three sound but not
+exact are the shell's binary_search: they fix one index, where the task allows any. **The completeness check may push an agent to over-specify rather than to declare a freedom**, which the Dafny arm, with no such check, does not.
 
 ## What writing them changed in the verifier
 

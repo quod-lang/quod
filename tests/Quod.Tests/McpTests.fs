@@ -193,9 +193,30 @@ let ``require-contracts refuses a requires that fixes a parameter, not one that 
     Assert.False(verified r)
     Assert.Contains("input fixed by its requires", r.GetProperty("summary").GetString())
     Assert.False(verified (strictCall "quod_check" "fn f(x: int) -> int requires x == 5 ensures result == x { x }"))
-    Assert.True(verified (strictCall "quod_check" "fn f(x: int, y: int) -> int requires x == y ensures result == x { x }"))
-    Assert.True(verified (strictCall "quod_check" "fn f(xs: seq<int>, n: nat) -> int requires n == len(xs) ensures result == n { n }"))
-    Assert.True(verified (strictCall "quod_check" "fn f(x: int) -> int requires x > 0 ensures result == x { x }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(x: int, y: int) -> int requires x == y ensures result == x + y { x + y }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(xs: seq<int>, n: nat) -> int requires n == len(xs) ensures result == n + 1 { n + 1 }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(x: int) -> int requires x > 0 ensures result == x + 1 { x + 1 }"))
+    // a fixed length of 2 or more is a record: a colour, a date
+    Assert.True(verified (strictCall "quod_check" "fn lum(rgb: seq<int>) -> int requires len(rgb) == 3 ensures result == rgb[0] + rgb[1] + rgb[2] { rgb[0] + rgb[1] + rgb[2] }"))
+    Assert.False(verified (strictCall "quod_check" "fn f(xs: seq<int>) -> int requires len(xs) == 1 ensures result == xs[0] { xs[0] }"))
+
+[<Fact>]
+let ``require-contracts refuses a contract its requires already gives for an unchanged argument`` () =
+    let sort = "fn sort(xs: seq<int>) -> seq<int> requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] ensures result == xs { xs }"
+    Assert.True(verified (fst (call "quod_check" (source sort))))
+    let r = strictCall "quod_check" sort
+    Assert.False(verified r)
+    Assert.Contains("already guaranteed by its requires", r.GetProperty("summary").GetString())
+    Assert.False(verified (strictCall "quod_check" "fn f(x: int) -> int requires x > 0 ensures result == x { x }"))
+    // a requires that a real function needs
+    Assert.True(verified (strictCall "quod_check" "fn inc(x: int) -> int requires x > 0 ensures result == x + 1 { x + 1 }"))
+
+[<Fact>]
+let ``quod contract evaluates a contract on given arguments and results`` () =
+    let src = "fn f(x: int) -> int requires x > 0 ensures result == x + 1 { x + 1 }"
+    match Quod.Mcp.contractCases "p.quod" src "f" "[{\"args\": [2], \"results\": [3, 4]}, {\"args\": [-1], \"results\": [0]}]" with
+    | Ok text -> Assert.Equal("[{\"requires\":true,\"results\":[true,false]},{\"requires\":false,\"results\":[true]}]", text)
+    | Result.Error why -> failwith why
 
 [<Fact>]
 let ``require-contracts refuses a lemma written as a function`` () =

@@ -137,6 +137,51 @@ let private program (args: JsonElement) : string * string =
 let private settings (base': Pipeline.Settings) (args: JsonElement) =
     { base' with Timeout = defaultArg (int' args "timeout") base'.Timeout; Budget = defaultArg (int' args "budget") base'.Budget }
 
+/// Evaluate a function's contract, not its code: for each case `{"args": [...], "results": [...]}`,
+/// whether its requires accept the arguments, and whether its ensures accept each result, as true,
+/// false, or null when the evaluator cannot tell. The bench measures contracts with it (bench/heldout.md).
+let contractCases (file: string) (src: string) (fn: string) (casesJson: string) : Result<string, string> =
+    let prog = Parser.parseProgram file src
+    let typed, errors = Typecheck.check file prog
+    if not errors.IsEmpty then Result.Error "the program has type errors"
+    else
+        match typed.Fns |> List.tryFind (fun f -> f.Name = fn) with
+        | None -> Result.Error("no function '" + fn + "'")
+        | Some f ->
+            let ev = Eval.Evaluator(typed.Fns |> List.map (fun g -> g.Name, g) |> Map.ofList)
+            let verdict (clauses: TExpr list) (env: Map<string, Eval.Value>) =
+                let holds = clauses |> List.map (fun e -> ev.Holds(e, env))
+                if holds |> List.contains (Some false) then Some false
+                elif holds |> List.contains None then None
+                else Some true
+            let write (w: Utf8JsonWriter) (v: bool option) =
+                match v with
+                | Some b -> w.WriteBooleanValue b
+                | None -> w.WriteNullValue()
+            use doc = JsonDocument.Parse casesJson
+            Ok(
+                Eval.withBigStack (fun () ->
+                    json (fun w ->
+                        w.WriteStartArray()
+                        for case in doc.RootElement.EnumerateArray() do
+                            let args = List.map2 (fun (p: TParam) a -> p.Name, readValue p.Ty a) f.Params [ for a in case.GetProperty("args").EnumerateArray() -> a ]
+                            w.WriteStartObject()
+                            if args |> List.exists (fun (_, a) -> a.IsNone) then
+                                w.WriteString("error", "an argument does not fit its type")
+                            else
+                                let env = args |> List.map (fun (n, a) -> n, a.Value) |> Map.ofList
+                                let fits = List.forall2 (fun (p: TParam) (_, a: Eval.Value option) -> ev.Fits(p.Ty, a.Value)) f.Params args
+                                w.WritePropertyName "requires"
+                                write w (if fits then verdict f.Requires env else Some false)
+                                w.WriteStartArray "results"
+                                for r in case.GetProperty("results").EnumerateArray() do
+                                    match readValue f.Ret r with
+                                    | Some value when ev.Fits(f.Ret, value) -> write w (verdict f.Ensures (env.Add("result", value)))
+                                    | _ -> w.WriteBooleanValue false
+                                w.WriteEndArray()
+                            w.WriteEndObject()
+                        w.WriteEndArray())))
+
 /// The diagnostics as the command line prints them (notes are in the summary).
 let private reportText (ds: Diagnostic list) =
     ds |> List.filter (fun d -> d.Severity <> Info) |> List.map toText |> String.concat "\n"

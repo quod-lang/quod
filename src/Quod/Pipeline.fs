@@ -96,7 +96,8 @@ and private styleSummary (r: Vcgen.VerifyResult) =
     let parts =
         [ count "properties", " by properties"; count "model", " by a model"; count "restated", " restating the body"
           count "none", " missing (no ensures)"; count "lemma-as-function", " lemma written as a function"
-          count "pinned-input", " input fixed by its requires" ]
+          count "pinned-input", " input fixed by its requires"
+          count "returns-argument", " already guaranteed by its requires" ]
         |> List.filter (fun (n, _) -> n > 0)
         |> List.map (fun (n, text) -> string n + text)
     if parts.IsEmpty then "" else "; contracts: " + String.Join(", ", parts)

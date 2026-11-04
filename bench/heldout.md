@@ -49,11 +49,13 @@ compiler but not worked on it. They say nothing about domains with amounts, date
 - **Sound** when its `requires` accept every valid input, and its `ensures` accept no wrong result. This is what protects from an escaped bug. A `requires` that reduces the function to a case fails here.
 - **Exact** when it is sound and its `ensures` accept every result the task allows, including all of them where several are allowed. It is reported next to the main measure. Exactness is not asked for: the completeness check may push an agent to an over-specified contract rather than to a `loose`, and that is an effect to measure, not to punish twice.
 
-Both are evaluated without the code of the solution, by the Quod evaluator for Quod. For Dafny, each pair is a lemma proved or not by Dafny, as `dafny-complete` does. Where a tool cannot tell (a value the evaluator cannot compute, a lemma it does not prove), the pair is *unknown*: never counted as accepted, always reported by arm, since it does not fall the same way in the two languages.
+Both are evaluated without the code of the solution ([adequacy.py](verifbench/adequacy.py)): by the Quod evaluator for Quod (`quod contract`); for Dafny, by running the contract when it compiles, otherwise by proving each question on literals, in both directions. What no tool answers is *unknown*, and a contract with unknown questions is **undecided**: neither sound nor unsound. It goes to the judge, and is counted apart. Counting it as sound would reward the contracts no tool can test: an unbounded quantifier over the integers, as in a Dafny `merge_intervals` of the base tasks, leaves every question unknown although that contract is wrong.
+
+**This asymmetry falls on the language, not on the check:** undecided contracts are more likely in Dafny. The main comparison, between two Dafny arms, is not exposed to it; the comparison with Quod is, and it is one more reason why that one is only described.
 
 This is a finite test, and it cannot show that a contract is sound for all inputs, only that it is not, with a witness.
 
-**The judge, second measure:** only for contracts with unknown pairs, and those that pass the main measure while proving little. `claude-opus-5-5`, with the prompt recorded below, a fresh conversation per contract, the statement of the task and the contract with its helpers, without the code, the run or the results. An inadequate verdict comes with an input and a result, then checked by the same machinery. Without one, it is "unsure": reported apart, and counted as sound in neither direction. An LLM judge is known to miss failures (Verus-SpecGym: 26% of those its evaluator caught), and this one belongs to the family of the agent. The language shows: Quod and Dafny syntax cannot be hidden.
+**The judge, second measure:** only for undecided contracts. `claude-opus-5-5`, with the prompt recorded below, a fresh conversation per contract, the statement of the task and the contract with its helpers, without the code, the run or the results. An inadequate verdict comes with an input and a result, then checked by the same machinery. Without one, it is "unsure": reported apart, and counted as sound in neither direction. An LLM judge is known to miss failures (Verus-SpecGym: 26% of those its evaluator caught), and this one belongs to the family of the agent. The language shows: Quod and Dafny syntax cannot be hidden.
 
 **The author** reads 5 contracts per arm, and all the "unsure" ones; any disagreement is reported.
 
@@ -85,7 +87,8 @@ This is a finite test, and it cannot show that a contract is sound for all input
 
 ## Frozen version and prompts
 
-- **Compiler:** tag `v0.1.5`, commit `0fa2df7`, the Windows package of its release. It is the compiler of all the runs.
+- **Compiler:** tag `v0.1.6`, once published, the Windows package of its release. It replaces `v0.1.5`, recorded first, because the review of 0.1.5 found faults in the boundary and in `--require-contracts`, before any run. It will not be replaced again.
+- **The judge's prompt**, in a fresh conversation with `claude-opus-5-5`, for an undecided contract: "Here is a programming task and the contract of a solution, with its helper functions. Does the contract accept a result the task forbids, or reject an input the task allows? If so, give that input and that result. Answer only from the task and the contract." It is followed by the statement of the task and the contract.
 - **Prompts:** those of `bench/verifbench/run.py` at the commit of the first run. The prompt of `dafny-loop` is the one of `dafny` with two
   changes: `ensures` clauses that fully capture the specified result, "`dafny-complete solution.dfy` reports a contract that accepts two
   different results for the same input (`[UNDER]`, with a witness). Fix it, unless that freedom is what the specification allows"; and the
@@ -104,3 +107,4 @@ All before any run; the first version of this suite is in commit 64c4872.
 - `two_sum_sorted`: the generator now also targets twice a value that occurs once. The wrong solution that uses one index twice failed 10 of 510 cases, and now fails 87.
 - 2026-11-04, after the review of 0.1.5 and of the literature: the main measure is no longer a judge's verdict but soundness by execution, and exactness is apart from it (a judge misses failures, and "exactly" would have punished an over-specified contract that lets nothing wrong through). The main comparison is named; cheats and the acceptance rule are defined, the same for both languages; predictions have numbers; restarts are limited; the judge is fixed.
 - A `requires` too strong now fails the main measure: the first wording looked only at results.
+- `adequacy.py`, tried on the base tasks only: a first version counted every unknown as not accepted, and called a wrong Dafny contract sound. Undecided is now a verdict of its own, and a contract that compiles is run.
