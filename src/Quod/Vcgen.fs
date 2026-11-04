@@ -1586,15 +1586,21 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 match f.Ret with
                 | TySeq _ -> "(" + seqOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
                 | _ -> "(= " + r1 + " " + r2 + ")"
-            z3.Push()
-            z3.Send("(assert (not " + same + "))")
-            z3.Send "(set-option :smt.mbqi true)"
-            z3.SetTimeout(min 3000 z3.DefaultTimeout)
-            let found = match z3.Check() with Unsat -> None | _ -> candidate () |> Option.bind accepted
-            z3.Send "(set-option :smt.mbqi false)"
-            z3.SetTimeout z3.DefaultTimeout
-            z3.Pop()
-            let found = match found with Some _ -> found | None -> Eval.withBigStack (fun () -> concreteWith accepted)
+            // small inputs first: the solver spends its whole time limit on most sequences (a
+            // binary_search took 3 s more to check, mutant bench of 0.1.5)
+            let found =
+                match Eval.withBigStack (fun () -> concreteWith accepted) with
+                | Some w -> Some w
+                | None ->
+                    z3.Push()
+                    z3.Send("(assert (not " + same + "))")
+                    z3.Send "(set-option :smt.mbqi true)"
+                    z3.SetTimeout(min 3000 z3.DefaultTimeout)
+                    let w = match z3.Check() with Unsat -> None | _ -> candidate () |> Option.bind accepted
+                    z3.Send "(set-option :smt.mbqi false)"
+                    z3.SetTimeout z3.DefaultTimeout
+                    z3.Pop()
+                    w
             match found with
             | Some w ->
                 diags.Add
