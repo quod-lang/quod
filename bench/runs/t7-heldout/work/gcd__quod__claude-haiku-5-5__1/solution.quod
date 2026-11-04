@@ -1,0 +1,167 @@
+// Greatest common divisor of two integers (either may be negative or zero).
+// The result is never negative, and gcd(0, 0) = 0.
+
+fn abs_int(a: int) -> int
+  ensures result >= 0
+  ensures result == a || result == 0 - a
+{
+  if a < 0 { 0 - a } else { a }
+}
+
+// ---------------------------------------------------------------------------
+// Modular arithmetic helpers (proofs only; erased from the generated code).
+
+// (a * d + b) % d == b when 0 <= b < d
+lemma div_small(a: int, d: int, b: int)
+  requires d > 0
+  requires 0 <= b < d
+  ensures (a * d + b) % d == b
+{
+  let q: int = (a * d + b) / d;
+  let m: int = (a * d + b) % d;
+  assert a * d + b == q * d + m;
+  assert 0 <= m < d;
+  if a - q >= 1 {
+    assert (a - q) * d >= d;
+  }
+  if a - q <= -1 {
+    assert (a - q) * d <= 0 - d;
+  }
+  assert a == q;
+}
+
+lemma mod_add_mul(k: int, d: int, r: int)
+  requires d > 0
+  ensures (k * d + r) % d == r % d
+{
+  assert r == (r / d) * d + r % d;
+  assert k * d + r == (k + r / d) * d + r % d;
+  div_small(k + r / d, d, r % d);
+}
+
+// If y is divisible by d, then x and x % y = r have the same remainder mod d.
+lemma rem_one(x: int, y: int, r: int, d: int)
+  requires x >= 0
+  requires y > 0
+  requires r == x % y
+  requires d > 0
+  ensures y % d == 0 ==> x % d == r % d
+{
+  if y % d == 0 {
+    assert y == (y / d) * d;
+    assert x == (x / y) * y + r;
+    assert x == ((x / y) * (y / d)) * d + r;
+    mod_add_mul((x / y) * (y / d), d, r);
+  }
+}
+
+// The same fact for every d in 1..n.
+lemma rem_all(x: int, y: int, r: int, n: int)
+  requires x >= 0
+  requires y > 0
+  requires r == x % y
+  requires n >= 0
+  ensures forall d in 1..n: (y % d == 0 ==> x % d == r % d)
+  decreases n
+{
+  if n >= 2 {
+    rem_all(x, y, r, n - 1);
+    rem_one(x, y, r, n - 1);
+  }
+}
+
+// (-a) % d == 0 when a % d == 0
+lemma neg_mod(a: int, d: int)
+  requires d > 0
+  ensures a % d == 0 ==> (0 - a) % d == 0
+{
+  if a % d == 0 {
+    let k: int = a / d;
+    assert a == k * d;
+    assert 0 - a == (0 - k) * d;
+    div_small(0 - k, d, 0);
+  }
+}
+
+// a % d == 0 exactly when |a| % d == 0
+lemma abs_mod(a: int, d: int)
+  requires d > 0
+  ensures (a % d == 0) <==> (abs_int(a) % d == 0)
+{
+  if a < 0 {
+    neg_mod(a, d);
+    neg_mod(0 - a, d);
+  }
+}
+
+lemma abs_mod_all(a: int, b: int, n: int)
+  requires n >= 0
+  ensures forall d in 1..n:
+    ((a % d == 0 && b % d == 0) <==> (abs_int(a) % d == 0 && abs_int(b) % d == 0))
+  decreases n
+{
+  if n >= 2 {
+    abs_mod_all(a, b, n - 1);
+    abs_mod(a, n - 1);
+    abs_mod(b, n - 1);
+  }
+}
+
+// A positive x divisible by d satisfies d <= x.
+lemma le_of_mod0(x: int, d: int)
+  requires x > 0
+  requires d > 0
+  requires x % d == 0
+  ensures d <= x
+{
+  let k: int = x / d;
+  assert x == k * d;
+  if k <= 0 {
+    assert k * d <= 0;
+  }
+  if k >= 1 {
+    assert k * d >= d;
+  }
+}
+
+lemma le_all(x: int, n: int)
+  requires n >= 0
+  ensures forall d in 1..n: ((x > 0 && x % d == 0) ==> d <= x)
+  decreases n
+{
+  if n >= 2 {
+    le_all(x, n - 1);
+    if x > 0 && x % (n - 1) == 0 {
+      le_of_mod0(x, n - 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+fn gcd(a: int, b: int) -> int
+  ensures result >= 0
+  ensures a == 0 && b == 0 ==> result == 0
+  ensures !(a == 0 && b == 0) ==> result > 0 && a % result == 0 && b % result == 0
+  ensures !(a == 0 && b == 0) ==> forall d in 1..(abs_int(a) + abs_int(b) + 1):
+    ((a % d == 0 && b % d == 0) ==> d <= result)
+{
+  let mut x: int = abs_int(a);
+  let mut y: int = abs_int(b);
+  while y != 0
+    invariant x >= 0 && y >= 0
+    invariant x <= abs_int(a) + abs_int(b) && y <= abs_int(a) + abs_int(b)
+    invariant (abs_int(a) + abs_int(b) > 0) ==> x + y > 0
+    invariant forall d in 1..(abs_int(a) + abs_int(b) + 1):
+      ((x % d == 0 && y % d == 0) <==> (abs_int(a) % d == 0 && abs_int(b) % d == 0))
+    decreases y
+  {
+    let r: int = x % y;
+    rem_all(x, y, r, abs_int(a) + abs_int(b) + 1);
+    x = y;
+    y = r;
+  }
+  abs_mod_all(a, b, abs_int(a) + abs_int(b) + 1);
+  le_all(x, abs_int(a) + abs_int(b) + 1);
+  x
+}

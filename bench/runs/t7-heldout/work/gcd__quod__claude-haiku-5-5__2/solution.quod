@@ -1,0 +1,45 @@
+// Greatest common divisor of two integers, either of which may be negative or zero.
+// The result is the Euclidean algorithm run on the absolute values of the arguments.
+
+fn abs_int(x: int) -> int {
+  if x < 0 { -x } else { x }
+}
+
+// Euclid's algorithm on non-negative arguments: the model the result is stated with.
+fn euclid(x: int, y: int) -> int
+  requires x >= 0 && y >= 0
+  decreases y
+{
+  if y == 0 { x } else { euclid(y, x % y) }
+}
+
+// The model is positive as soon as one of its arguments is.
+lemma euclid_pos(x: int, y: int)
+  requires x >= 0 && y >= 0 && x + y > 0
+  ensures euclid(x, y) > 0
+  decreases y
+{
+  if y != 0 { euclid_pos(y, x % y); }
+}
+
+fn gcd(a: int, b: int) -> int
+  ensures result >= 0
+  ensures result == 0 ==> a == 0 && b == 0
+  ensures result == euclid(abs_int(a), abs_int(b))
+{
+  let mut x: int = abs_int(a);
+  let mut y: int = abs_int(b);
+  while y != 0
+    invariant x >= 0 && y >= 0
+    invariant euclid(x, y) == euclid(abs_int(a), abs_int(b))
+    decreases y
+  {
+    let t: int = x % y;
+    x = y;
+    y = t;
+  }
+  if abs_int(a) + abs_int(b) > 0 {
+    euclid_pos(abs_int(a), abs_int(b));
+  }
+  return x;
+}

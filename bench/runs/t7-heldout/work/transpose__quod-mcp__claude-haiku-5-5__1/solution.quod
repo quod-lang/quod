@@ -1,0 +1,36 @@
+// Transpose of a non-empty rectangular matrix.
+fn transpose(m: seq<seq<int>>) -> seq<seq<int>>
+  requires len(m) >= 1
+  requires len(m[0]) >= 1
+  requires forall r in 0..len(m): len(m[r]) == len(m[0])
+  ensures len(result) == len(m[0])
+  ensures forall j in 0..len(result): len(result[j]) == len(m)
+  ensures forall j in 0..len(result): forall i in 0..len(m): result[j][i] == m[i][j]
+{
+  let rows = len(m);
+  let cols = len(m[0]);
+  let mut res: seq<seq<int>> = [];
+  let mut j: nat = 0;
+  while j < cols
+    invariant 0 <= j <= cols
+    invariant len(res) == j
+    invariant forall k in 0..j: len(res[k]) == rows
+    invariant forall k in 0..j: forall i in 0..rows: res[k][i] == m[i][k]
+    decreases cols - j
+  {
+    let mut col: seq<int> = [];
+    let mut i: nat = 0;
+    while i < rows
+      invariant 0 <= i <= rows
+      invariant len(col) == i
+      invariant forall t in 0..i: col[t] == m[t][j]
+      decreases rows - i
+    {
+      col = col + [m[i][j]];
+      i = i + 1;
+    }
+    res = res + [col];
+    j = j + 1;
+  }
+  res
+}

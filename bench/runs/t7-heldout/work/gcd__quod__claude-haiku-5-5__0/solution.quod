@@ -1,0 +1,28 @@
+// Absolute value.
+fn abs_int(x: int) -> int {
+  if x < 0 { -x } else { x }
+}
+
+// Reference model: Euclid's algorithm. For b != 0 the remainder a % b lies in
+// 0..|b|, so |b| strictly decreases; when b == 0 the gcd is |a|.
+fn gcd_model(a: int, b: int) -> int
+  decreases abs_int(b)
+{
+  if b == 0 { abs_int(a) } else { gcd_model(b, a % b) }
+}
+
+fn gcd(a: int, b: int) -> int
+  ensures result == gcd_model(a, b)
+{
+  let mut x: int = a;
+  let mut y: int = b;
+  while y != 0
+    invariant gcd_model(x, y) == gcd_model(a, b)
+    decreases abs_int(y)
+  {
+    let t: int = y;
+    y = x % y;
+    x = t;
+  }
+  return abs_int(x);
+}

@@ -212,6 +212,20 @@ outil n'a signalé : une couverture sur les entiers, qui accepte `[(1,4)]` pour 
 
 Elle trouve les deux bugs échappés. Les trois non décidés sont des merge_intervals, dont le quantificateur non borné ne peut pas s'exécuter, dont le seul contrat faux trouvé plus haut : cette mesure ne l'a pas attrapé. Les trois sains mais pas exacts sont les binary_search du shell : ils fixent un indice, alors que la tâche en permet n'importe lequel. **Le contrôle de complétude peut pousser un agent à trop spécifier plutôt qu'à déclarer une liberté**, ce que le bras Dafny, sans ce contrôle, ne fait pas.
 
+### Les tâches tenues à l'écart
+
+Sur six tâches qui n'ont pas façonné le compilateur, avec [un protocole fixé avant les essais](../heldout.md), [72 essais](../runs/t7-heldout/report.md) n'ont trouvé aucun contrat non sain dans aucun bras : la solidité ne peut donc pas départager les bras.
+
+| Haiku, 18 essais par bras | quod | quod-mcp | dafny | dafny-loop |
+|---|---|---|---|---|
+| Acceptés | 17 | 16 | 18 | 18 |
+| Sains à l'exécution | 17 | 16 | 12 | 13 |
+| Non décidés, tous jugés adéquats | 0 | 0 | 6 | 5 |
+| Non sains | 0 | 0 | 0 | 0 |
+| Déterminés par l'outil | 15 | 11 | 4 | 8 |
+
+**Donner à Dafny le contrôle pendant l'écriture n'a rien changé à la solidité (13 contre 12), seulement à ce que l'outil détermine (8 contre 4).** Les essais ont aussi trouvé un bug de la 0.1.6 : `quod` se bloque au hasard sur un même fichier, ce qui a coûté deux acceptations aux bras Quod, et ils ont montré que les deux bugs échappés enregistrés étaient faux.
+
 ## Ce que leur écriture a changé dans le vérificateur
 
 - **Les séquences sont axiomatisées** (comme le fait Dafny), au lieu d'utiliser la théorie des

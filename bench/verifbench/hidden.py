@@ -42,7 +42,8 @@ def load_dafny(pydir: Path, func: str) -> Callable[..., Any]:
     dafny_rt = importlib.import_module("_dafny")
     mod = importlib.import_module("Solution")
     cls = getattr(mod, "default__")
-    matches = [getattr(cls, n) for n in dir(cls) if _key(n) == _key(func)]
+    # The exact name first: a helper `Gcd` next to `gcd` has the same key, and sorts before it.
+    matches = [getattr(cls, n) for n in dir(cls) if n == func] or [getattr(cls, n) for n in dir(cls) if _key(n) == _key(func)]
     if not matches:
         raise LookupError(f"no method matching {func!r} in Solution.default__: {dir(cls)}")
     method = matches[0]

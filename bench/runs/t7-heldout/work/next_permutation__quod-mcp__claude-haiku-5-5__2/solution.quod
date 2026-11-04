@@ -1,0 +1,99 @@
+// Next permutation in lexicographic order, duplicates allowed.
+//
+// The model below is the classic algorithm, written as a pure function:
+//   1. p = the largest index with xs[p] < xs[p + 1]. If there is none, xs is
+//      non-increasing and its greatest rearrangement is itself: the answer is
+//      its reversal, which is the non-decreasing order.
+//   2. j = the largest index > p with xs[j] > xs[p] (it exists, since xs[p + 1] works).
+//   3. Swap xs[p] and xs[j], then reverse the suffix after p. The suffix is then
+//      non-decreasing, which is the smallest arrangement of that suffix.
+
+// Reversal of a sequence.
+fn rev(s: seq<int>) -> seq<int>
+  decreases len(s)
+{
+  if len(s) == 0 { [] } else { rev(s[1..]) + [s[0]] }
+}
+
+// Largest index k <= i (and >= 0) with xs[k] < xs[k + 1]; -1 if there is none.
+fn find_pivot(xs: seq<int>, i: int) -> int
+  decreases i + 1
+{
+  if i < 0 || i + 1 >= len(xs) { -1 }
+  else if xs[i] < xs[i + 1] { i }
+  else { find_pivot(xs, i - 1) }
+}
+
+// Largest index k with lo <= k <= j and xs[k] > v; -1 if there is none.
+fn find_succ(xs: seq<int>, lo: int, j: int, v: int) -> int
+  decreases j - lo
+{
+  if lo < 0 || j < lo || j >= len(xs) { -1 }
+  else if xs[j] > v { j }
+  else { find_succ(xs, lo, j - 1, v) }
+}
+
+// The result when the swap happens at p with partner j.
+fn next_at(xs: seq<int>, p: int, j: int) -> seq<int>
+{
+  if 0 <= p && p < j && j < len(xs) {
+    xs[..p] + [xs[j]] + rev(xs[p + 1..j] + [xs[p]] + xs[j + 1..])
+  } else {
+    rev(xs)
+  }
+}
+
+// The result given the pivot p (or -1 when there is none).
+fn from_pivot(xs: seq<int>, p: int) -> seq<int>
+{
+  if p < 0 || p + 1 >= len(xs) {
+    rev(xs)
+  } else {
+    next_at(xs, p, find_succ(xs, p + 1, len(xs) - 1, xs[p]))
+  }
+}
+
+// The model: the next permutation of xs, or its sorted order when xs is the greatest.
+fn next_model(xs: seq<int>) -> seq<int>
+{
+  from_pivot(xs, find_pivot(xs, len(xs) - 2))
+}
+
+fn next_permutation(xs: seq<int>) -> seq<int>
+  ensures result == next_model(xs)
+{
+  let n = len(xs);
+  if n < 2 {
+    return rev(xs);
+  }
+
+  // Find the pivot p: the largest p with xs[p] < xs[p + 1].
+  // Invariant: the suffix after p is non-increasing; the pivot search from n-2
+  // and from p give the same answer.
+  let mut p = n - 2;
+  while p >= 0 && xs[p] >= xs[p + 1]
+    invariant -1 <= p && p <= n - 2
+    invariant forall k in p + 1..n - 1: xs[k] >= xs[k + 1]
+    invariant find_pivot(xs, p) == find_pivot(xs, n - 2)
+    decreases p + 1
+  {
+    p = p - 1;
+  }
+
+  if p < 0 {
+    return rev(xs);
+  }
+
+  // Here xs[p] < xs[p + 1]. Find the largest j with xs[j] > xs[p].
+  let mut j = n - 1;
+  while xs[j] <= xs[p]
+    invariant p + 1 <= j && j <= n - 1
+    invariant xs[p] < xs[p + 1]
+    invariant find_succ(xs, p + 1, n - 1, xs[p]) == find_succ(xs, p + 1, j, xs[p])
+    decreases j - p
+  {
+    j = j - 1;
+  }
+
+  return xs[..p] + [xs[j]] + rev(xs[p + 1..j] + [xs[p]] + xs[j + 1..]);
+}

@@ -1,0 +1,35 @@
+fn abs_int(x: int) -> int {
+  if x < 0 { 0 - x } else { x }
+}
+
+// If y divides x or not does not change when x is replaced by x % y:
+// a common divisor of x and y is a common divisor of y and x % y, and conversely.
+lemma mod_step(x: int, y: int, d: int)
+  requires y != 0
+  requires d > 0
+  ensures (x % d == 0 && y % d == 0) <==> (y % d == 0 && (x % y) % d == 0)
+{
+  let q: int = x / y;
+  assert x == q * y + x % y;
+}
+
+fn gcd(a: int, b: int) -> int
+  requires a != 0 || b != 0 || true
+  ensures result >= 0
+  ensures (a == 0 && b == 0) ==> result == 0
+  ensures result > 0 ==> a % result == 0 && b % result == 0
+  ensures forall d in 1..abs_int(a) + abs_int(b) + 1: (a % d == 0 && b % d == 0) ==> result % d == 0
+{
+  let mut x: int = abs_int(a);
+  let mut y: int = abs_int(b);
+  while y != 0
+    invariant x >= 0
+    invariant y >= 0
+    decreases y
+  {
+    let r: int = x % y;
+    x = y;
+    y = r;
+  }
+  x
+}

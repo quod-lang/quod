@@ -211,6 +211,20 @@ result; an *exact* one also accepts every result the task allows ([results](../r
 It finds both escaped bugs. The three undecided are merge_intervals, whose unbounded quantifier cannot run, among them the one wrong contract found above: this measure did not catch it. The three sound but not
 exact are the shell's binary_search: they fix one index, where the task allows any. **The completeness check may push an agent to over-specify rather than to declare a freedom**, which the Dafny arm, with no such check, does not.
 
+### The held-out tasks
+
+On six tasks that did not shape the compiler, with [a protocol fixed before the runs](../heldout.md), [72 runs](../runs/t7-heldout/report.md) found no unsound contract in any arm, so soundness cannot tell the arms apart:
+
+| Haiku, 18 runs per arm | quod | quod-mcp | dafny | dafny-loop |
+|---|---|---|---|---|
+| Accepted | 17 | 16 | 18 | 18 |
+| Sound by execution | 17 | 16 | 12 | 13 |
+| Undecided, all judged adequate | 0 | 0 | 6 | 5 |
+| Unsound | 0 | 0 | 0 | 0 |
+| Determined by the tool | 15 | 11 | 4 | 8 |
+
+**Giving Dafny the check during writing made no difference to soundness (13 against 12), only to what the tool determines (8 against 4).** The runs also found a bug of 0.1.6: `quod` hangs at random on the same file, which cost the Quod arms two acceptances, and they showed that both escaped bugs recorded were false.
+
 ## What writing them changed in the verifier
 
 - **Sequences are axiomatized** (as Dafny does), instead of using Z3's sequence theory, which

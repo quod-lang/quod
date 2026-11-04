@@ -1,0 +1,62 @@
+// A candidate is (engine, confidence, value). Only the engine and confidence matter here:
+// the result is an index into `candidates`.
+
+// The candidate reaches the threshold.
+fn eligible(c: (int, int, int), threshold: int) -> bool {
+  c.1 >= threshold
+}
+
+// Candidate c is strictly preferred to d: higher confidence, or equal confidence and
+// an engine of strictly smaller rank.
+fn beats(c: (int, int, int), d: (int, int, int), rank: seq<int>) -> bool
+  requires 0 <= c.0 < len(rank)
+  requires 0 <= d.0 < len(rank)
+{
+  c.1 > d.1 || (c.1 == d.1 && rank[c.0] < rank[d.0])
+}
+
+fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int
+  requires 0 <= threshold <= 100
+  requires forall i in 0..len(candidates): 0 <= candidates[i].0 < len(rank)
+  requires forall i in 0..len(candidates): 0 <= candidates[i].1 <= 100
+  ensures result == -1 ==> forall i in 0..len(candidates): !eligible(candidates[i], threshold)
+  ensures result != -1 ==> (
+    0 <= result < len(candidates)
+    && eligible(candidates[result], threshold)
+    && forall i in 0..len(candidates):
+         (eligible(candidates[i], threshold) && i != result) ==>
+           (beats(candidates[result], candidates[i], rank)
+            || (candidates[i].1 == candidates[result].1
+                && rank[candidates[i].0] == rank[candidates[result].0]
+                && result < i)))
+  decreases len(candidates)
+{
+  let mut best: int = -1;
+  let mut i: int = 0;
+  while i < len(candidates)
+    invariant 0 <= i <= len(candidates)
+    invariant -1 <= best < i
+    invariant best == -1 ==> forall j in 0..i: !eligible(candidates[j], threshold)
+    invariant best != -1 ==> (
+      eligible(candidates[best], threshold)
+      && forall j in 0..i:
+           (eligible(candidates[j], threshold) && j != best) ==>
+             (beats(candidates[best], candidates[j], rank)
+              || (candidates[j].1 == candidates[best].1
+                  && rank[candidates[j].0] == rank[candidates[best].0]
+                  && best < j)))
+    decreases len(candidates) - i
+  {
+    if eligible(candidates[i], threshold) {
+      if best == -1 {
+        best = i;
+      } else {
+        if beats(candidates[i], candidates[best], rank) {
+          best = i;
+        }
+      }
+    }
+    i = i + 1;
+  }
+  return best;
+}

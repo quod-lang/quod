@@ -1,0 +1,34 @@
+// Absolute value.
+fn iabs(x: int) -> int
+  ensures result >= 0
+  ensures x >= 0 ==> result == x
+  ensures x < 0 ==> result == -x
+{
+  if x < 0 { -x } else { x }
+}
+
+// Euclid's gcd on signed integers, as a recursive model: the gcd of a and b
+// is the absolute value of the last non-zero remainder. Euclidean `%` keeps
+// 0 <= a % b < |b|, so the recursion terminates on |b|.
+fn gcd_model(a: int, b: int) -> int
+  decreases iabs(b)
+{
+  if b == 0 { iabs(a) } else { gcd_model(b, a % b) }
+}
+
+fn gcd(a: int, b: int) -> int
+  ensures result >= 0
+  ensures result == gcd_model(a, b)
+{
+  let mut x: int = a;
+  let mut y: int = b;
+  while y != 0
+    invariant gcd_model(x, y) == gcd_model(a, b)
+    decreases iabs(y)
+  {
+    let t: int = x % y;
+    x = y;
+    y = t;
+  }
+  iabs(x)
+}

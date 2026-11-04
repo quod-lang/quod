@@ -1,0 +1,320 @@
+// Number of occurrences of v in s.
+fn cnt(s: seq<int>, v: int) -> int
+  decreases len(s)
+{
+  if len(s) == 0 { 0 } else if s[0] == v { 1 + cnt(s[1..], v) } else { cnt(s[1..], v) }
+}
+
+// Reversal of s.
+fn rev(s: seq<int>) -> seq<int>
+  decreases len(s)
+{
+  if len(s) == 0 { [] } else { [s[len(s) - 1]] + rev(s[..len(s) - 1]) }
+}
+
+// The tail after position p of the swapped sequence: xs[p+1..q], then xs[p], then xs[q+1..].
+fn tail_of(xs: seq<int>, p: int, q: int) -> seq<int>
+  requires 0 <= p < q < len(xs)
+{
+  xs[p + 1..q] + [xs[p]] + xs[q + 1..]
+}
+
+// Swap xs[p] and xs[q], then reverse the part after position p.
+fn swap_rev(xs: seq<int>, p: int, q: int) -> seq<int>
+  requires 0 <= p < q < len(xs)
+{
+  xs[..p] + [xs[q]] + rev(tail_of(xs, p, q))
+}
+
+lemma cnt_concat(a: seq<int>, b: seq<int>, v: int)
+  ensures cnt(a + b, v) == cnt(a, v) + cnt(b, v)
+  decreases len(a)
+{
+  if len(a) > 0 {
+    cnt_concat(a[1..], b, v);
+    assert (a + b)[0] == a[0];
+    assert (a + b)[1..] == a[1..] + b;
+  }
+}
+
+lemma cnt_nonneg(s: seq<int>, v: int)
+  ensures cnt(s, v) >= 0
+  decreases len(s)
+{
+  if len(s) > 0 {
+    cnt_nonneg(s[1..], v);
+  }
+}
+
+lemma cnt_pos(s: seq<int>, j: int)
+  requires 0 <= j < len(s)
+  ensures cnt(s, s[j]) >= 1
+  decreases len(s)
+{
+  if j > 0 {
+    cnt_pos(s[1..], j - 1);
+    assert s[1..][j - 1] == s[j];
+  } else {
+    cnt_nonneg(s[1..], s[0]);
+  }
+}
+
+lemma rev_len(s: seq<int>)
+  ensures len(rev(s)) == len(s)
+  decreases len(s)
+{
+  if len(s) > 0 {
+    rev_len(s[..len(s) - 1]);
+  }
+}
+
+lemma rev_index(s: seq<int>, j: int)
+  requires 0 <= j < len(s)
+  ensures rev(s)[j] == s[len(s) - 1 - j]
+  decreases len(s)
+{
+  rev_len(s[..len(s) - 1]);
+  if j > 0 {
+    rev_index(s[..len(s) - 1], j - 1);
+  }
+}
+
+lemma cnt_rev(s: seq<int>, v: int)
+  ensures cnt(rev(s), v) == cnt(s, v)
+  decreases len(s)
+{
+  if len(s) > 0 {
+    let s2: seq<int> = s[..len(s) - 1];
+    cnt_rev(s2, v);
+    cnt_concat([s[len(s) - 1]], rev(s2), v);
+    cnt_concat(s2, [s[len(s) - 1]], v);
+    assert len(s2 + [s[len(s) - 1]]) == len(s);
+    assert forall i in 0..len(s): (s2 + [s[len(s) - 1]])[i] == s[i];
+    assert s2 + [s[len(s) - 1]] == s;
+  }
+}
+
+lemma swap_len(xs: seq<int>, p: int, q: int)
+  requires 0 <= p < q < len(xs)
+  ensures len(swap_rev(xs, p, q)) == len(xs)
+{
+  rev_len(tail_of(xs, p, q));
+}
+
+lemma cnt_swap(xs: seq<int>, p: int, q: int, v: int)
+  requires 0 <= p < q < len(xs)
+  ensures cnt(swap_rev(xs, p, q), v) == cnt(xs, v)
+{
+  let a: seq<int> = xs[..p];
+  let m: seq<int> = xs[p + 1..q];
+  let b: seq<int> = xs[q + 1..];
+  assert xs == a + [xs[p]] + m + [xs[q]] + b;
+  cnt_rev(m + [xs[p]] + b, v);
+  cnt_concat(a, [xs[q]], v);
+  cnt_concat(a + [xs[q]], rev(m + [xs[p]] + b), v);
+  cnt_concat(m + [xs[p]], b, v);
+  cnt_concat(m, [xs[p]], v);
+  cnt_concat(a, [xs[p]], v);
+  cnt_concat(a + [xs[p]], m, v);
+  cnt_concat(a + [xs[p]] + m, [xs[q]], v);
+  cnt_concat(a + [xs[p]] + m + [xs[q]], b, v);
+}
+
+lemma perm_rev(xs: seq<int>, i: int)
+  requires 0 <= i
+  ensures forall k in i..len(xs): cnt(rev(xs), xs[k]) == cnt(xs, xs[k])
+  ensures forall k in i..len(xs): cnt(xs, rev(xs)[k]) >= 1
+  decreases len(xs) - i
+{
+  rev_len(xs);
+  if i < len(xs) {
+    cnt_rev(xs, xs[i]);
+    cnt_pos(rev(xs), i);
+    cnt_rev(xs, rev(xs)[i]);
+    perm_rev(xs, i + 1);
+  }
+}
+
+lemma perm_swap(xs: seq<int>, p: int, q: int, i: int)
+  requires 0 <= p < q < len(xs)
+  requires 0 <= i
+  ensures forall k in i..len(xs): cnt(swap_rev(xs, p, q), xs[k]) == cnt(xs, xs[k])
+  ensures forall k in i..len(xs): cnt(xs, swap_rev(xs, p, q)[k]) >= 1
+  decreases len(xs) - i
+{
+  swap_len(xs, p, q);
+  if i < len(xs) {
+    cnt_swap(xs, p, q, xs[i]);
+    cnt_pos(swap_rev(xs, p, q), i);
+    cnt_swap(xs, p, q, swap_rev(xs, p, q)[i]);
+    perm_swap(xs, p, q, i + 1);
+  }
+}
+
+lemma rev_pair(s: seq<int>, k: int)
+  requires 0 <= k < len(s) - 1
+  requires s[len(s) - 2 - k] >= s[len(s) - 1 - k]
+  ensures rev(s)[k] <= rev(s)[k + 1]
+{
+  rev_len(s);
+  rev_index(s, k);
+  rev_index(s, k + 1);
+}
+
+// A non-increasing sequence reverses into a non-decreasing one.
+lemma rev_nondecr(s: seq<int>, k: int)
+  requires 0 <= k
+  requires forall i in 0..len(s) - 1: s[i] >= s[i + 1]
+  ensures forall j in k..len(s) - 1: rev(s)[j] <= rev(s)[j + 1]
+  decreases len(s) - k
+{
+  rev_len(s);
+  if k + 1 < len(s) {
+    rev_pair(s, k);
+    rev_nondecr(s, k + 1);
+  }
+}
+
+// Monotonicity of a non-increasing run.
+lemma mono(xs: seq<int>, a: int, b: int)
+  requires 0 <= a <= b < len(xs)
+  requires forall t in a..b: xs[t] >= xs[t + 1]
+  ensures xs[a] >= xs[b]
+  decreases b - a
+{
+  if a < b {
+    mono(xs, a + 1, b);
+  }
+}
+
+lemma min_all(xs: seq<int>, p: int, q: int, k: int)
+  requires 0 <= p < q < len(xs)
+  requires k >= p + 1
+  requires forall t in p + 1..len(xs) - 1: xs[t] >= xs[t + 1]
+  requires forall t in q + 1..len(xs): xs[t] <= xs[p]
+  ensures forall j in k..len(xs): (xs[j] > xs[p] ==> xs[q] <= xs[j])
+  decreases len(xs) - k
+{
+  if k < len(xs) {
+    if k <= q {
+      mono(xs, k, q);
+    }
+    min_all(xs, p, q, k + 1);
+  }
+}
+
+// Adjacent pairs of the tail are non-increasing.
+lemma tail_pair(xs: seq<int>, p: int, q: int, j: int)
+  requires 0 <= p < q < len(xs)
+  requires 0 <= j < len(tail_of(xs, p, q)) - 1
+  requires forall t in p + 1..len(xs) - 1: xs[t] >= xs[t + 1]
+  requires xs[p] < xs[q]
+  requires forall t in q + 1..len(xs): xs[t] <= xs[p]
+  ensures tail_of(xs, p, q)[j] >= tail_of(xs, p, q)[j + 1]
+{
+  let m: seq<int> = xs[p + 1..q];
+  let b: seq<int> = xs[q + 1..];
+  assert tail_of(xs, p, q) == m + [xs[p]] + b;
+  if j + 1 < len(m) {
+    assert (m + [xs[p]] + b)[j] == xs[p + 1 + j];
+    assert (m + [xs[p]] + b)[j + 1] == xs[p + 2 + j];
+  } else if j + 1 == len(m) {
+    assert (m + [xs[p]] + b)[j] == xs[q - 1];
+    assert (m + [xs[p]] + b)[j + 1] == xs[p];
+    mono(xs, q - 1, q);
+  } else if j == len(m) {
+    assert (m + [xs[p]] + b)[j] == xs[p];
+    assert (m + [xs[p]] + b)[j + 1] == xs[q + 1];
+  } else {
+    assert (m + [xs[p]] + b)[j] == xs[q + 1 + (j - len(m) - 1)];
+    assert (m + [xs[p]] + b)[j + 1] == xs[q + 1 + (j - len(m))];
+  }
+}
+
+lemma tail_all(xs: seq<int>, p: int, q: int, j: int)
+  requires 0 <= p < q < len(xs)
+  requires 0 <= j
+  requires forall t in p + 1..len(xs) - 1: xs[t] >= xs[t + 1]
+  requires xs[p] < xs[q]
+  requires forall t in q + 1..len(xs): xs[t] <= xs[p]
+  ensures forall i in j..len(tail_of(xs, p, q)) - 1: tail_of(xs, p, q)[i] >= tail_of(xs, p, q)[i + 1]
+  decreases len(tail_of(xs, p, q)) - j
+{
+  if j + 1 < len(tail_of(xs, p, q)) {
+    tail_pair(xs, p, q, j);
+    tail_all(xs, p, q, j + 1);
+  }
+}
+
+// Position k of the result, past the prefix, is an entry of the reversed tail.
+lemma result_index(xs: seq<int>, p: int, q: int, k: int)
+  requires 0 <= p < q < len(xs)
+  requires p + 1 <= k < len(xs)
+  ensures swap_rev(xs, p, q)[k] == rev(tail_of(xs, p, q))[k - p - 1]
+{
+  rev_len(tail_of(xs, p, q));
+  assert swap_rev(xs, p, q) == (xs[..p] + [xs[q]]) + rev(tail_of(xs, p, q));
+}
+
+lemma result_sorted(xs: seq<int>, p: int, q: int, k: int)
+  requires 0 <= p < q < len(xs)
+  requires k >= p + 1
+  requires forall t in p + 1..len(xs) - 1: xs[t] >= xs[t + 1]
+  requires xs[p] < xs[q]
+  requires forall t in q + 1..len(xs): xs[t] <= xs[p]
+  ensures forall i in k..len(xs) - 1: swap_rev(xs, p, q)[i] <= swap_rev(xs, p, q)[i + 1]
+  decreases len(xs) - k
+{
+  tail_all(xs, p, q, 0);
+  rev_nondecr(tail_of(xs, p, q), 0);
+  rev_len(tail_of(xs, p, q));
+  if k + 1 < len(xs) {
+    result_index(xs, p, q, k);
+    result_index(xs, p, q, k + 1);
+    result_sorted(xs, p, q, k + 1);
+  }
+}
+
+fn next_permutation(xs: seq<int>) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): cnt(result, xs[i]) == cnt(xs, xs[i])
+  ensures forall j in 0..len(result): cnt(xs, result[j]) >= 1
+  ensures (forall k in 0..len(xs) - 1: xs[k] >= xs[k + 1]) ==> (forall k in 0..len(xs) - 1: result[k] <= result[k + 1])
+  ensures forall p in 0..len(xs) - 1: (xs[p] < xs[p + 1] && forall k in p + 1..len(xs) - 1: xs[k] >= xs[k + 1]) ==> ((forall i in 0..p: result[i] == xs[i]) && xs[p] < result[p] && (forall k in p + 1..len(xs): xs[k] > xs[p] ==> result[p] <= xs[k]) && (forall k in p + 1..len(xs) - 1: result[k] <= result[k + 1]))
+{
+  let n: int = len(xs);
+  if n < 2 {
+    rev_nondecr(xs, 0);
+    perm_rev(xs, 0);
+    rev_len(xs);
+    return rev(xs);
+  }
+  let mut p: int = n - 2;
+  while p >= 0 && xs[p] >= xs[p + 1]
+    invariant -1 <= p && p <= n - 2
+    invariant forall k in p + 1..n - 1: xs[k] >= xs[k + 1]
+    decreases p + 1
+  {
+    p = p - 1;
+  }
+  if p < 0 {
+    rev_nondecr(xs, 0);
+    perm_rev(xs, 0);
+    rev_len(xs);
+    return rev(xs);
+  }
+  let mut q: int = n - 1;
+  while xs[q] <= xs[p]
+    invariant p + 1 <= q && q <= n - 1
+    invariant forall k in q + 1..n: xs[k] <= xs[p]
+    decreases q
+  {
+    q = q - 1;
+  }
+  min_all(xs, p, q, p + 1);
+  perm_swap(xs, p, q, 0);
+  swap_len(xs, p, q);
+  tail_all(xs, p, q, 0);
+  result_sorted(xs, p, q, p + 1);
+  return swap_rev(xs, p, q);
+}

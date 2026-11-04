@@ -1,0 +1,59 @@
+// Two-pointer search over a sorted sequence.
+
+// Every element before index j is at most xs[j].
+lemma sorted_upper(xs: seq<int>, j: nat)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires j < len(xs)
+  ensures forall b in 0..j + 1: xs[b] <= xs[j]
+  decreases j
+{
+  if j > 0 {
+    sorted_upper(xs, j - 1);
+  }
+}
+
+// Every element from index i on is at least xs[i].
+lemma sorted_lower(xs: seq<int>, i: nat)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires i < len(xs)
+  ensures forall a in i..len(xs): xs[i] <= xs[a]
+  decreases len(xs) - i
+{
+  if i + 1 < len(xs) {
+    sorted_lower(xs, i + 1);
+  }
+}
+
+fn two_sum_sorted(xs: seq<int>, target: int) -> (int, int)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  ensures result.0 == -1 ==> result.1 == -1
+  ensures result.0 == -1 ==> forall a in 0..len(xs): forall b in a + 1..len(xs): xs[a] + xs[b] != target
+  ensures result.0 != -1 ==> 0 <= result.0 && result.0 < result.1 && result.1 < len(xs) && xs[result.0] + xs[result.1] == target
+  loose (p, q) => (p.0 == -1) == (q.0 == -1)
+{
+  let mut i: int = 0;
+  let mut j: int = len(xs) - 1;
+  let mut ri: int = -1;
+  let mut rj: int = -1;
+  while i < j && ri == -1
+    invariant 0 <= i
+    invariant j < len(xs)
+    invariant ri == -1 ==> rj == -1
+    invariant ri == -1 ==> forall a in 0..len(xs): forall b in a + 1..len(xs): (xs[a] + xs[b] == target) ==> (a >= i && b <= j)
+    invariant ri != -1 ==> 0 <= ri && ri < rj && rj < len(xs) && xs[ri] + xs[rj] == target
+    decreases (if ri == -1 { j - i } else { 0 })
+  {
+    sorted_upper(xs, j);
+    sorted_lower(xs, i);
+    let s = xs[i] + xs[j];
+    if s == target {
+      ri = i;
+      rj = j;
+    } else if s < target {
+      i = i + 1;
+    } else {
+      j = j - 1;
+    }
+  }
+  (ri, rj)
+}

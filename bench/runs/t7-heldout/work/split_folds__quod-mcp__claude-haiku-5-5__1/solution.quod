@@ -1,0 +1,61 @@
+// Folds of a scanned batch, from the classification of each page:
+// 0 = continuation, 1 = first page of a document, 2 = separator.
+
+// Start of the fold still open after the first i pages, or -1 if none.
+// A page 2 closes any open fold; a page 1 opens a fold at itself; a page 0
+// continues the open fold, or opens one at itself after a separator or at the start.
+fn open_start(pages: seq<int>, i: int) -> int
+  requires 0 <= i <= len(pages)
+  decreases i
+{
+  if i == 0 { -1 }
+  else if pages[i - 1] == 2 { -1 }
+  else if pages[i - 1] == 1 { i - 1 }
+  else if open_start(pages, i - 1) >= 0 { open_start(pages, i - 1) }
+  else { i - 1 }
+}
+
+// The fold [s, e) as a singleton sequence when s is a real start, else nothing.
+fn close_fold(s: int, e: int) -> seq<(int, int)>
+{
+  if s >= 0 { [(s, e)] } else { [] }
+}
+
+// The folds already closed within the first i pages.
+// A fold closes at each page that is not a continuation (a 1 or a 2).
+fn closed_folds(pages: seq<int>, i: int) -> seq<(int, int)>
+  requires 0 <= i <= len(pages)
+  decreases i
+{
+  if i == 0 { [] }
+  else if pages[i - 1] == 0 { closed_folds(pages, i - 1) }
+  else { closed_folds(pages, i - 1) + close_fold(open_start(pages, i - 1), i - 1) }
+}
+
+fn split_folds(pages: seq<int>) -> seq<(int, int)>
+  requires forall k in 0..len(pages): pages[k] == 0 || pages[k] == 1 || pages[k] == 2
+  ensures result == closed_folds(pages, len(pages)) + close_fold(open_start(pages, len(pages)), len(pages))
+{
+  let n: int = len(pages);
+  let mut acc: seq<(int, int)> = [];
+  let mut cur: int = -1;
+  let mut i: int = 0;
+  while i < n
+    invariant 0 <= i <= n
+    invariant acc == closed_folds(pages, i)
+    invariant cur == open_start(pages, i)
+    decreases n - i
+  {
+    if pages[i] == 2 {
+      acc = acc + close_fold(cur, i);
+      cur = -1;
+    } else if pages[i] == 1 {
+      acc = acc + close_fold(cur, i);
+      cur = i;
+    } else if cur < 0 {
+      cur = i;
+    }
+    i = i + 1;
+  }
+  return acc + close_fold(cur, n);
+}

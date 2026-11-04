@@ -1,0 +1,33 @@
+fn transpose(m: seq<seq<int>>) -> seq<seq<int>>
+  requires len(m) >= 1
+  requires len(m[0]) >= 1
+  requires forall r in 0..len(m): len(m[r]) == len(m[0])
+  ensures len(result) == len(m[0])
+  ensures forall i in 0..len(m[0]): len(result[i]) == len(m)
+  ensures forall i in 0..len(m[0]): forall j in 0..len(m): result[i][j] == m[j][i]
+{
+  let mut res: seq<seq<int>> = [];
+  let mut i = 0;
+  while i < len(m[0])
+    invariant 0 <= i <= len(m[0])
+    invariant len(res) == i
+    invariant forall k in 0..i: len(res[k]) == len(m)
+    invariant forall k in 0..i: forall j in 0..len(m): res[k][j] == m[j][k]
+    decreases len(m[0]) - i
+  {
+    let mut row: seq<int> = [];
+    let mut j = 0;
+    while j < len(m)
+      invariant 0 <= j <= len(m)
+      invariant len(row) == j
+      invariant forall t in 0..j: row[t] == m[t][i]
+      decreases len(m) - j
+    {
+      row = row + [m[j][i]];
+      j = j + 1;
+    }
+    res = res + [row];
+    i = i + 1;
+  }
+  res
+}

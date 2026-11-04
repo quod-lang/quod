@@ -1,0 +1,57 @@
+// Column j of m, taking the first n rows: the entries m[0][j] .. m[n-1][j].
+fn column_upto(m: seq<seq<int>>, j: int, n: int) -> seq<int>
+  requires 0 <= n <= len(m)
+  requires forall i in 0..len(m): 0 <= j < len(m[i])
+  decreases n
+{
+  if n == 0 { [] } else { column_upto(m, j, n - 1) + [m[n - 1][j]] }
+}
+
+// The first n columns of m, each taken over all rows of m.
+fn columns_upto(m: seq<seq<int>>, n: int) -> seq<seq<int>>
+  requires len(m) >= 1
+  requires 0 <= n <= len(m[0])
+  requires forall i in 0..len(m): len(m[i]) == len(m[0])
+  decreases n
+{
+  if n == 0 { [] } else { columns_upto(m, n - 1) + [column_upto(m, n - 1, len(m))] }
+}
+
+fn transpose(m: seq<seq<int>>) -> seq<seq<int>>
+  requires len(m) >= 1
+  requires len(m[0]) >= 1
+  requires forall i in 0..len(m): len(m[i]) == len(m[0])
+  ensures result == columns_upto(m, len(m[0]))
+  ensures len(result) == len(m[0])
+  ensures forall j in 0..len(result): len(result[j]) == len(m)
+  ensures forall j in 0..len(result): forall i in 0..len(m): result[j][i] == m[i][j]
+{
+  let cols = len(m[0]);
+  let rows = len(m);
+  let mut res: seq<seq<int>> = [];
+  let mut j = 0;
+  while j < cols
+    invariant 0 <= j <= cols
+    invariant len(res) == j
+    invariant forall k in 0..j: len(res[k]) == rows
+    invariant forall k in 0..j: forall i in 0..rows: res[k][i] == m[i][k]
+    invariant res == columns_upto(m, j)
+    decreases cols - j
+  {
+    let mut row: seq<int> = [];
+    let mut i = 0;
+    while i < rows
+      invariant 0 <= i <= rows
+      invariant len(row) == i
+      invariant forall k in 0..i: row[k] == m[k][j]
+      invariant row == column_upto(m, j, i)
+      decreases rows - i
+    {
+      row = row + [m[i][j]];
+      i = i + 1;
+    }
+    res = res + [row];
+    j = j + 1;
+  }
+  res
+}

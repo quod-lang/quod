@@ -1,0 +1,45 @@
+// Candidate (engine, confidence, value): engine indexes rank, confidence in 0..100.
+// Returns the index of the retained candidate, or -1 if none reaches the threshold.
+
+fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int
+  requires 0 <= threshold && threshold <= 100
+  requires forall k in 0..len(candidates):
+    0 <= candidates[k].0 && candidates[k].0 < len(rank) &&
+    0 <= candidates[k].1 && candidates[k].1 <= 100
+  ensures result == -1 || (0 <= result && result < len(candidates))
+  ensures result == -1 ==> forall i in 0..len(candidates): candidates[i].1 < threshold
+  ensures result != -1 ==> candidates[result].1 >= threshold
+  ensures result != -1 ==> forall i in 0..len(candidates):
+    candidates[i].1 < threshold ||
+    candidates[result].1 > candidates[i].1 ||
+    (candidates[result].1 == candidates[i].1 &&
+      (rank[candidates[result].0] < rank[candidates[i].0] ||
+       (rank[candidates[result].0] == rank[candidates[i].0] && result <= i)))
+{
+  let mut best: int = -1;
+  let mut i: int = 0;
+  while i < len(candidates)
+    invariant 0 <= i && i <= len(candidates)
+    invariant -1 <= best && best < i
+    invariant best == -1 ==> forall j in 0..i: candidates[j].1 < threshold
+    invariant best != -1 ==> candidates[best].1 >= threshold
+    invariant best != -1 ==> forall j in 0..i:
+      candidates[j].1 < threshold ||
+      candidates[best].1 > candidates[j].1 ||
+      (candidates[best].1 == candidates[j].1 &&
+        (rank[candidates[best].0] < rank[candidates[j].0] ||
+         (rank[candidates[best].0] == rank[candidates[j].0] && best <= j)))
+    decreases len(candidates) - i
+  {
+    if candidates[i].1 >= threshold {
+      if best == -1 {
+        best = i;
+      } else if candidates[i].1 > candidates[best].1 ||
+                (candidates[i].1 == candidates[best].1 && rank[candidates[i].0] < rank[candidates[best].0]) {
+        best = i;
+      }
+    }
+    i = i + 1;
+  }
+  best
+}

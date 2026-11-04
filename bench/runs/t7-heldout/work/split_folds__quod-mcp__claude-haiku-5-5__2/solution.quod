@@ -1,0 +1,90 @@
+// A page is classified 0 (continuation), 1 (first page of a document) or
+// 2 (separator sheet). A fold starts at a page classified 1, or at the first
+// page that is not a separator, at the start of the batch or after a separator.
+// It ends just before the next page classified 1, the next separator, or the
+// end of the batch. Separator sheets belong to no fold.
+
+// Position s may start a fold: the start of the batch, a page classified 1,
+// or a page that follows a separator.
+fn may_start(pages: seq<int>, s: int) -> bool {
+  if s == 0 { true } else { 0 < s && s < len(pages) && (pages[s] == 1 || pages[s - 1] == 2) }
+}
+
+// Position e may end a fold: the end of the batch, or a page classified 1 or 2.
+fn may_end(pages: seq<int>, e: int) -> bool {
+  if e == len(pages) { true } else { 0 <= e && e < len(pages) && (pages[e] == 1 || pages[e] == 2) }
+}
+
+// The uncovered gap before fold g (for g == len(folds), the gap after the last
+// fold) starts at lo: the end of fold g - 1, or the batch start.
+fn gap_lo(folds: seq<(int, int)>, g: int) -> int {
+  if 0 < g && g <= len(folds) { folds[g - 1].1 } else { 0 }
+}
+
+// The gap before fold g ends at hi: the start of fold g, or the batch end.
+fn gap_hi(folds: seq<(int, int)>, n: int, g: int) -> int {
+  if 0 <= g && g < len(folds) { folds[g].0 } else { n }
+}
+
+fn split_folds(pages: seq<int>) -> seq<(int, int)>
+  requires forall i in 0..len(pages): pages[i] == 0 || pages[i] == 1 || pages[i] == 2
+  // each fold covers pages start..end-1, in order, without overlap, and is not empty
+  ensures forall k in 0..len(result): 0 <= result[k].0 && result[k].0 < result[k].1 && result[k].1 <= len(pages)
+  ensures forall k in 0..len(result) - 1: result[k].1 <= result[k + 1].0
+  // a fold starts at a page classified 1, or at the first non-separator page
+  // at the batch start or after a separator; it never starts on a separator
+  ensures forall k in 0..len(result): may_start(pages, result[k].0) && pages[result[k].0] != 2
+  // a fold ends at the batch end, or just before a page classified 1 or 2
+  ensures forall k in 0..len(result): may_end(pages, result[k].1)
+  // a fold continues over continuation pages only (no separator, no new document)
+  ensures forall k in 0..len(result): forall j in result[k].0 + 1..result[k].1: pages[j] == 0
+  // every page outside the folds is a separator: all gaps between folds are separators
+  ensures forall g in 0..len(result) + 1: forall j in gap_lo(result, g)..gap_hi(result, len(pages), g): pages[j] == 2
+{
+  let n = len(pages);
+  let mut folds: seq<(int, int)> = [];
+  let mut cur: int = -1;
+  let mut last: int = 0;
+  let mut i: int = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant 0 <= last && last <= i
+    invariant cur < i
+    invariant forall k in 0..len(folds): 0 <= folds[k].0 && folds[k].0 < folds[k].1 && folds[k].1 <= i
+    invariant forall k in 0..len(folds) - 1: folds[k].1 <= folds[k + 1].0
+    invariant forall k in 0..len(folds): may_start(pages, folds[k].0) && pages[folds[k].0] != 2
+    invariant forall k in 0..len(folds): may_end(pages, folds[k].1)
+    invariant forall k in 0..len(folds): forall j in folds[k].0 + 1..folds[k].1: pages[j] == 0
+    invariant last == gap_lo(folds, len(folds))
+    invariant forall g in 0..len(folds): forall j in gap_lo(folds, g)..folds[g].0: pages[j] == 2
+    invariant forall j in last..i: pages[j] == 2 || (cur >= 0 && cur <= j)
+    invariant cur >= 0 ==> may_start(pages, cur) && pages[cur] != 2
+    invariant cur >= 0 ==> forall j in cur + 1..i: pages[j] == 0
+    invariant cur >= 0 ==> forall k in 0..len(folds): folds[k].1 <= cur
+    decreases n - i
+  {
+    let p = pages[i];
+    if p == 2 {
+      if cur >= 0 {
+        folds = folds + [(cur, i)];
+        last = i;
+        cur = -1;
+      }
+    } else if p == 1 {
+      if cur >= 0 {
+        folds = folds + [(cur, i)];
+        last = i;
+      }
+      cur = i;
+    } else {
+      if cur < 0 {
+        cur = i;
+      }
+    }
+    i = i + 1;
+  }
+  if cur >= 0 {
+    folds = folds + [(cur, n)];
+  }
+  folds
+}

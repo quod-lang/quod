@@ -1,0 +1,227 @@
+// Next permutation in lexicographic order.
+//
+// Specification, as contracts (see next_permutation):
+//   result is a rearrangement of xs: same length, and each element occurs in xs as often as in result;
+//   if xs is non-increasing (no ascent), result is non-decreasing (the smallest rearrangement);
+//   otherwise, with i the last index where xs[i] < xs[i+1]:
+//     result agrees with xs before i, result[i] is the smallest value after i that is
+//     greater than xs[i], and the elements after i are non-decreasing.
+
+// Number of occurrences of v in s.
+fn count_of(s: seq<int>, v: int) -> int
+  decreases len(s)
+{
+  if len(s) == 0 { 0 } else { (if s[0] == v { 1 } else { 0 }) + count_of(s[1..], v) }
+}
+
+// Reversal of s.
+fn rev(s: seq<int>) -> seq<int>
+  decreases len(s)
+{
+  if len(s) == 0 { [] } else { [s[len(s) - 1]] + rev(s[..len(s) - 1]) }
+}
+
+// The candidate built from xs with pivot i and swap index j (i < j < len(xs)):
+// the prefix, then xs[j], then the reversal of the rest (non-increasing, so reversed it ascends).
+fn nxt(xs: seq<int>, i: int, j: int) -> seq<int>
+  requires 0 <= i && i < j && j < len(xs)
+{
+  xs[..i] + [xs[j]] + rev(xs[i + 1..j] + [xs[i]] + xs[j + 1..])
+}
+
+// ---------- lemmas about rev ----------
+
+lemma rev_facts(s: seq<int>)
+  ensures len(rev(s)) == len(s)
+  ensures forall k in 0..len(s): rev(s)[k] == s[len(s) - 1 - k]
+  decreases len(s)
+{
+  if len(s) > 0 {
+    let t = s[..len(s) - 1];
+    assert rev(s) == [s[len(s) - 1]] + rev(t);
+    rev_facts(t);
+  }
+}
+
+lemma count_concat(a: seq<int>, b: seq<int>, v: int)
+  ensures count_of(a + b, v) == count_of(a, v) + count_of(b, v)
+  decreases len(a)
+{
+  if len(a) > 0 {
+    assert (a + b)[1..] == a[1..] + b;
+    count_concat(a[1..], b, v);
+  }
+}
+
+lemma rev_count(s: seq<int>, v: int)
+  ensures count_of(rev(s), v) == count_of(s, v)
+  decreases len(s)
+{
+  if len(s) > 0 {
+    let t = s[..len(s) - 1];
+    let last = [s[len(s) - 1]];
+    assert rev(s) == last + rev(t);
+    assert s == t + last;
+    rev_count(t, v);
+    count_concat(last, rev(t), v);
+    count_concat(t, last, v);
+  }
+}
+
+// Pointwise permutation facts for rev(s), from position k on.
+lemma rev_perm_from(s: seq<int>, k: int)
+  requires 0 <= k && k <= len(s)
+  ensures forall q in k..len(s): count_of(s, rev(s)[q]) == count_of(rev(s), rev(s)[q])
+  decreases len(s) - k
+{
+  rev_facts(s);
+  if k < len(s) {
+    rev_count(s, rev(s)[k]);
+    rev_perm_from(s, k + 1);
+  }
+}
+
+// A non-increasing sequence reversed is non-decreasing.
+lemma rev_sorted(s: seq<int>)
+  requires forall k in 0..len(s) - 1: s[k] >= s[k + 1]
+  ensures forall k in 0..len(s) - 1: rev(s)[k] <= rev(s)[k + 1]
+{
+  rev_facts(s);
+}
+
+// ---------- lemmas about nxt ----------
+
+lemma nxt_count(xs: seq<int>, i: int, j: int, v: int)
+  requires 0 <= i && i < j && j < len(xs)
+  ensures count_of(nxt(xs, i, j), v) == count_of(xs, v)
+{
+  let p = xs[..i];
+  let m = xs[i + 1..j];
+  let r = xs[j + 1..];
+  let x = xs[i];
+  let y = xs[j];
+  let a = m + [x] + r;
+  assert xs == p + [x] + (m + [y] + r);
+  assert nxt(xs, i, j) == p + [y] + rev(a);
+  rev_count(a, v);
+  count_concat(p + [y], rev(a), v);
+  count_concat(p, [y], v);
+  count_concat(m + [x], r, v);
+  count_concat(m, [x], v);
+  count_concat(p + [x], m + [y] + r, v);
+  count_concat(p, [x], v);
+  count_concat(m + [y], r, v);
+  count_concat(m, [y], v);
+}
+
+lemma nxt_perm_from(xs: seq<int>, i: int, j: int, k: int)
+  requires 0 <= i && i < j && j < len(xs)
+  requires 0 <= k && k <= len(xs)
+  ensures forall q in k..len(xs): count_of(xs, nxt(xs, i, j)[q]) == count_of(nxt(xs, i, j), nxt(xs, i, j)[q])
+  decreases len(xs) - k
+{
+  nxt_len(xs, i, j);
+  if k < len(xs) {
+    nxt_count(xs, i, j, nxt(xs, i, j)[k]);
+    nxt_perm_from(xs, i, j, k + 1);
+  }
+}
+
+lemma nxt_len(xs: seq<int>, i: int, j: int)
+  requires 0 <= i && i < j && j < len(xs)
+  ensures len(nxt(xs, i, j)) == len(xs)
+{
+  rev_facts(xs[i + 1..j] + [xs[i]] + xs[j + 1..]);
+}
+
+// On a non-increasing segment, every element from a up to b is at least xs[b].
+lemma chain(xs: seq<int>, a: int, b: int)
+  requires 0 <= a && a <= b && b < len(xs) - 1
+  requires forall k in a..b: xs[k] >= xs[k + 1]
+  ensures forall t in a..b + 1: xs[t] >= xs[b]
+  decreases b - a
+{
+  if a < b {
+    chain(xs, a + 1, b);
+  }
+}
+
+// The result of nxt is the pivot result for i.
+lemma nxt_correct(xs: seq<int>, i: int, j: int)
+  requires 0 <= i && i < j && j < len(xs)
+  requires forall k in i + 1..len(xs) - 1: xs[k] >= xs[k + 1]
+  requires xs[i] < xs[j]
+  requires forall k in j + 1..len(xs): xs[k] <= xs[i]
+  ensures len(nxt(xs, i, j)) == len(xs)
+  ensures forall q in 0..i: nxt(xs, i, j)[q] == xs[q]
+  ensures nxt(xs, i, j)[i] > xs[i]
+  ensures forall t in i + 1..len(xs): xs[t] > xs[i] ==> nxt(xs, i, j)[i] <= xs[t]
+  ensures forall k in i + 1..len(xs) - 1: nxt(xs, i, j)[k] <= nxt(xs, i, j)[k + 1]
+{
+  nxt_len(xs, i, j);
+  let m = xs[i + 1..j];
+  let r = xs[j + 1..];
+  let a = m + [xs[i]] + r;
+  rev_facts(a);
+  assert nxt(xs, i, j) == xs[..i] + [xs[j]] + rev(a);
+  assert forall k in i + 1..len(xs): nxt(xs, i, j)[k] == rev(a)[k - i - 1];
+  // a is non-increasing: inside m, across m to xs[i], and inside r
+  if j > i + 1 {
+    chain(xs, i + 1, j - 1);
+  }
+  assert forall t in 0..len(m): m[t] == xs[i + 1 + t];
+  assert forall t in 0..len(r): r[t] == xs[j + 1 + t];
+  assert forall t in 0..len(m) - 1: m[t] >= m[t + 1];
+  assert forall t in 0..len(m): m[t] >= xs[j];
+  assert forall t in 0..len(r) - 1: r[t] >= r[t + 1];
+  assert forall t in 0..len(r): r[t] <= xs[i];
+  assert forall t in 0..len(a) - 1: a[t] >= a[t + 1];
+  rev_sorted(a);
+  assert nxt(xs, i, j)[i] == xs[j];
+  assert forall t in i + 1..len(xs): xs[t] > xs[i] ==> xs[j] <= xs[t];
+}
+
+// ---------- the function ----------
+
+fn next_permutation(xs: seq<int>) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall q in 0..len(xs): count_of(xs, result[q]) == count_of(result, result[q])
+  ensures (forall k in 0..len(xs) - 1: xs[k] >= xs[k + 1]) ==> (forall k in 0..len(result) - 1: result[k] <= result[k + 1])
+  ensures forall i in 0..len(xs): (i + 1 < len(xs) && xs[i] < xs[i + 1] && forall k in i + 1..len(xs) - 1: xs[k] >= xs[k + 1]) ==> (
+    (forall q in 0..i: result[q] == xs[q]) && result[i] > xs[i]
+    && (forall t in i + 1..len(xs): xs[t] > xs[i] ==> result[i] <= xs[t])
+    && (forall k in i + 1..len(result) - 1: result[k] <= result[k + 1]))
+{
+  let n = len(xs);
+  if n == 0 {
+    return xs;
+  }
+  // last index i with xs[i] < xs[i + 1]
+  let mut i: int = n - 2;
+  while i >= 0 && xs[i] >= xs[i + 1]
+    invariant -1 <= i && i <= n - 2
+    invariant forall k in i + 1..n - 1: xs[k] >= xs[k + 1]
+    decreases i + 1
+  {
+    i = i - 1;
+  }
+  if i < 0 {
+    rev_facts(xs);
+    rev_perm_from(xs, 0);
+    rev_sorted(xs);
+    return rev(xs);
+  }
+  // here xs[i] < xs[i + 1]
+  // last index j > i with xs[j] > xs[i]
+  let mut j: int = n - 1;
+  while xs[j] <= xs[i]
+    invariant i + 1 <= j && j <= n - 1
+    invariant forall k in j + 1..n: xs[k] <= xs[i]
+    decreases j
+  {
+    j = j - 1;
+  }
+  nxt_correct(xs, i, j);
+  nxt_perm_from(xs, i, j, 0);
+  return nxt(xs, i, j);
+}

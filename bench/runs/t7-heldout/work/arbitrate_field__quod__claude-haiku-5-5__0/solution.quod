@@ -1,0 +1,34 @@
+// Candidate a beats candidate b: higher confidence, then smaller engine rank,
+// then smaller index. This is a strict total order on (confidence, rank, index).
+fn beats(ca: int, ra: int, ia: int, cb: int, rb: int, ib: int) -> bool {
+  ca > cb || (ca == cb && (ra < rb || (ra == rb && ia < ib)))
+}
+
+fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int
+  requires 0 <= threshold && threshold <= 100
+  requires forall i in 0..len(candidates): 0 <= candidates[i].0 && candidates[i].0 < len(rank)
+  requires forall i in 0..len(candidates): 0 <= candidates[i].1 && candidates[i].1 <= 100
+  ensures result == -1 || (0 <= result && result < len(candidates) && candidates[result].1 >= threshold)
+  ensures result == -1 ==> forall i in 0..len(candidates): candidates[i].1 < threshold
+  ensures result != -1 ==> forall i in 0..len(candidates): (candidates[i].1 >= threshold && i != result) ==> beats(candidates[result].1, rank[candidates[result].0], result, candidates[i].1, rank[candidates[i].0], i)
+{
+  let mut best: int = -1;
+  let mut i: int = 0;
+  while i < len(candidates)
+    invariant 0 <= i && i <= len(candidates)
+    invariant best == -1 || (0 <= best && best < i && candidates[best].1 >= threshold)
+    invariant best == -1 ==> forall j in 0..i: candidates[j].1 < threshold
+    invariant best != -1 ==> forall j in 0..i: (candidates[j].1 >= threshold && j != best) ==> beats(candidates[best].1, rank[candidates[best].0], best, candidates[j].1, rank[candidates[j].0], j)
+    decreases len(candidates) - i
+  {
+    if candidates[i].1 >= threshold {
+      if best == -1 {
+        best = i;
+      } else if beats(candidates[i].1, rank[candidates[i].0], i, candidates[best].1, rank[candidates[best].0], best) {
+        best = i;
+      }
+    }
+    i = i + 1;
+  }
+  best
+}

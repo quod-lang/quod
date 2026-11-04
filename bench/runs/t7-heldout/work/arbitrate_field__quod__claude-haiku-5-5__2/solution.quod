@@ -1,0 +1,50 @@
+// Select the retained candidate among several engine proposals.
+// A candidate is (engine, confidence, value); rank[e] is the trust order of engine e
+// (smaller rank = more trusted). Among candidates with confidence >= threshold, the
+// retained one has the highest confidence, then the smallest engine rank, then the
+// smallest index. Returns -1 when no candidate reaches the threshold.
+fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int
+  requires 0 <= threshold <= 100
+  requires forall i in 0..len(candidates): 0 <= candidates[i].0 < len(rank)
+  requires forall i in 0..len(candidates): 0 <= candidates[i].1 <= 100
+  // -1 exactly when no candidate reaches the threshold
+  ensures result >= -1 && result < len(candidates)
+  ensures (result == -1) <==> (forall i in 0..len(candidates): candidates[i].1 < threshold)
+  // otherwise the result is eligible and no other eligible candidate beats it
+  ensures result >= 0 ==> (
+    candidates[result].1 >= threshold &&
+    forall j in 0..len(candidates):
+      (j != result && candidates[j].1 >= threshold) ==>
+        (candidates[j].1 < candidates[result].1 ||
+         (candidates[j].1 == candidates[result].1 &&
+          (rank[candidates[j].0] > rank[candidates[result].0] ||
+           (rank[candidates[j].0] == rank[candidates[result].0] && j > result)))))
+{
+  let mut best: int = -1;
+  let mut i: int = 0;
+  while i < len(candidates)
+    invariant 0 <= i <= len(candidates)
+    invariant best >= -1 && best < i
+    invariant best == -1 ==> forall k in 0..i: candidates[k].1 < threshold
+    invariant best >= 0 ==>
+      (candidates[best].1 >= threshold &&
+       forall k in 0..i:
+         (k != best && candidates[k].1 >= threshold) ==>
+           (candidates[k].1 < candidates[best].1 ||
+            (candidates[k].1 == candidates[best].1 &&
+             (rank[candidates[k].0] > rank[candidates[best].0] ||
+              (rank[candidates[k].0] == rank[candidates[best].0] && k > best)))))
+    decreases len(candidates) - i
+  {
+    if candidates[i].1 >= threshold {
+      if best == -1 {
+        best = i;
+      } else if candidates[i].1 > candidates[best].1 ||
+                (candidates[i].1 == candidates[best].1 && rank[candidates[i].0] < rank[candidates[best].0]) {
+        best = i;
+      }
+    }
+    i = i + 1;
+  }
+  best
+}

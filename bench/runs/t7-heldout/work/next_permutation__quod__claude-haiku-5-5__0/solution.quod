@@ -1,0 +1,160 @@
+// Reverse of a sequence.
+fn rev(s: seq<int>) -> seq<int>
+  decreases len(s)
+{
+  if len(s) == 0 { [] } else { rev(s[1..]) + [s[0]] }
+}
+
+// Rightmost k' <= k with xs[k'] < xs[k' + 1], or -1 if there is none.
+fn pivot_from(xs: seq<int>, k: int) -> int
+  requires -1 <= k && k + 1 < len(xs)
+  ensures (result == -1 && forall t in 0..k + 1: xs[t] >= xs[t + 1])
+    || (0 <= result && result <= k && xs[result] < xs[result + 1]
+        && forall t in result + 1..k + 1: xs[t] >= xs[t + 1])
+  decreases k + 1
+{
+  if k < 0 { -1 } else if xs[k] < xs[k + 1] { k } else { pivot_from(xs, k - 1) }
+}
+
+// Pivot of xs: the largest i with xs[i] < xs[i + 1], or -1 when xs is non-increasing.
+fn pivot(xs: seq<int>) -> int
+  ensures (result == -1 && forall t in 0..len(xs) - 1: xs[t] >= xs[t + 1])
+    || (0 <= result && result + 1 < len(xs) && xs[result] < xs[result + 1]
+        && forall t in result + 1..len(xs) - 1: xs[t] >= xs[t + 1])
+{
+  if len(xs) < 2 { -1 } else { pivot_from(xs, len(xs) - 2) }
+}
+
+// Rightmost k' in i+1..=k with xs[k'] > xs[i], or -1 if there is none.
+fn succ_from(xs: seq<int>, i: int, k: int) -> int
+  requires 0 <= i && i + 1 < len(xs) && k < len(xs) && xs[i] < xs[i + 1]
+  ensures (result == -1 && forall t in i + 1..k + 1: xs[t] <= xs[i])
+    || (i < result && result <= k && xs[result] > xs[i]
+        && forall t in result + 1..k + 1: xs[t] <= xs[i])
+  decreases k - i
+{
+  if k <= i { -1 } else if xs[k] > xs[i] { k } else { succ_from(xs, i, k - 1) }
+}
+
+// Swap xs[i] and xs[j], then reverse the suffix that follows position i.
+fn swap_model(xs: seq<int>, i: int, j: int) -> seq<int>
+  requires 0 <= i && i < j && j < len(xs)
+{
+  xs[..i] + [xs[j]] + rev(xs[j + 1..len(xs)]) + [xs[i]] + rev(xs[i + 1..j])
+}
+
+// Model: the next permutation of xs.
+fn next_model(xs: seq<int>) -> seq<int> {
+  if pivot(xs) < 0 { rev(xs) } else { swap_model(xs, pivot(xs), succ_from(xs, pivot(xs), len(xs) - 1)) }
+}
+
+lemma pivot_found(xs: seq<int>, k: int, i: int)
+  requires 0 <= i && i <= k && k + 1 < len(xs) && xs[i] < xs[i + 1]
+  requires forall t in i + 1..k + 1: xs[t] >= xs[t + 1]
+  ensures pivot_from(xs, k) == i
+  decreases k - i
+{
+  if k > i { pivot_found(xs, k - 1, i); }
+}
+
+lemma pivot_none(xs: seq<int>, k: int)
+  requires -1 <= k && k + 1 < len(xs)
+  requires forall t in 0..k + 1: xs[t] >= xs[t + 1]
+  ensures pivot_from(xs, k) == -1
+  decreases k + 1
+{
+  if k >= 0 { pivot_none(xs, k - 1); }
+}
+
+lemma succ_found(xs: seq<int>, i: int, k: int, j: int)
+  requires 0 <= i && i + 1 < len(xs) && k < len(xs) && xs[i] < xs[i + 1]
+  requires i < j && j <= k && xs[j] > xs[i]
+  requires forall t in j + 1..k + 1: xs[t] <= xs[i]
+  ensures succ_from(xs, i, k) == j
+  decreases k - j
+{
+  if k > j { succ_found(xs, i, k - 1, j); }
+}
+
+// Unfolding of rev on a non-empty slice.
+lemma rev_slice(xs: seq<int>, a: int, b: int)
+  requires 0 <= a && a < b && b <= len(xs)
+  ensures rev(xs[a..b]) == rev(xs[a + 1..b]) + [xs[a]]
+{
+  assert xs[a..b][1..] == xs[a + 1..b];
+  assert xs[a..b][0] == xs[a];
+}
+
+fn next_permutation(xs: seq<int>) -> seq<int>
+  ensures result == next_model(xs)
+{
+  let n = len(xs);
+  let mut i: int = if n >= 2 { n - 2 } else { -1 };
+  // Scan for the rightmost ascent.
+  while i >= 0 && xs[i] >= xs[i + 1]
+    invariant -1 <= i && (i < 0 || i + 1 < n)
+    invariant forall t in i + 1..n - 1: xs[t] >= xs[t + 1]
+    decreases i + 1
+  {
+    i = i - 1;
+  }
+  if i < 0 {
+    if n >= 2 { pivot_none(xs, n - 2); }
+    // xs is non-increasing: its next permutation is its reverse.
+    let mut r: seq<int> = [];
+    let mut k: int = n - 1;
+    while k >= 0
+      invariant -1 <= k && k <= n - 1
+      invariant r == rev(xs[k + 1..n])
+      decreases k + 1
+    {
+      rev_slice(xs, k, n);
+      r = r + [xs[k]];
+      k = k - 1;
+    }
+    return r;
+  }
+  // Here xs[i] < xs[i + 1] and the suffix after i is non-increasing.
+  pivot_found(xs, n - 2, i);
+  // Rightmost j > i with xs[j] > xs[i].
+  let mut j: int = n - 1;
+  while xs[j] <= xs[i]
+    invariant i + 1 <= j && j <= n - 1
+    invariant forall t in j + 1..n: xs[t] <= xs[i]
+    decreases j - i
+  {
+    j = j - 1;
+  }
+  succ_found(xs, i, n - 1, j);
+  // a = reverse of xs[j+1..n]
+  let mut a: seq<int> = [];
+  let mut k: int = n - 1;
+  while k > j
+    invariant i + 1 <= j && j <= k && k <= n - 1
+    invariant a == rev(xs[k + 1..n])
+    decreases k - j
+  {
+    rev_slice(xs, k, n);
+    assert rev(xs[k..n]) == a + [xs[k]];
+    a = a + [xs[k]];
+    k = k - 1;
+  }
+  // b = reverse of xs[i+1..j]
+  let mut b: seq<int> = [];
+  let mut m: int = j - 1;
+  while m > i
+    invariant i <= m && m <= j - 1
+    invariant b == rev(xs[m + 1..j])
+    decreases m - i
+  {
+    rev_slice(xs, m, j);
+    b = b + [xs[m]];
+    m = m - 1;
+  }
+  assert pivot(xs) == i;
+  assert succ_from(xs, i, n - 1) == j;
+  assert a == rev(xs[j + 1..n]);
+  assert b == rev(xs[i + 1..j]);
+  assert next_model(xs) == swap_model(xs, i, j);
+  xs[..i] + [xs[j]] + a + [xs[i]] + b
+}

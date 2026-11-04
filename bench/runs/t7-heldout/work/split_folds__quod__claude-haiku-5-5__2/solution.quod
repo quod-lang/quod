@@ -1,0 +1,82 @@
+// Folds of a scanned batch. Page classes: 0 = continuation, 1 = first page of a
+// document, 2 = separator sheet.
+
+// A page starts a fold when it is classified 1, or when it is a continuation page
+// at the start of the batch or right after a separator.
+fn is_start(pages: seq<int>, i: int) -> bool
+  requires 0 <= i < len(pages)
+{
+  pages[i] == 1 || (pages[i] == 0 && (if i == 0 { true } else { pages[i - 1] == 2 }))
+}
+
+// The first index at or after j that is not a continuation page (1 or 2), or the
+// length of the batch if there is none: the page just after a fold ends it.
+fn fold_end(pages: seq<int>, j: int) -> int
+  requires 0 <= j <= len(pages)
+  ensures j <= result <= len(pages)
+  ensures forall k in j..result: pages[k] == 0
+  ensures if result == len(pages) { true } else { pages[result] != 0 }
+  decreases len(pages) - j
+{
+  if j == len(pages) {
+    len(pages)
+  } else if pages[j] != 0 {
+    j
+  } else {
+    fold_end(pages, j + 1)
+  }
+}
+
+// The same index as fold_end, found by a loop, so that the code does not recurse
+// (a long run of continuation pages would be as deep as the run is long).
+fn scan_end(pages: seq<int>, j: int) -> int
+  requires 0 <= j <= len(pages)
+  ensures result == fold_end(pages, j)
+{
+  let mut k: int = j;
+  while k < len(pages) && pages[k] == 0
+    invariant j <= k <= len(pages)
+    invariant fold_end(pages, k) == fold_end(pages, j)
+    decreases len(pages) - k
+  {
+    k = k + 1;
+  }
+  k
+}
+
+// The folds of the pages from index i to the end of the batch, in order.
+fn folds(pages: seq<int>, i: int) -> seq<(int, int)>
+  requires 0 <= i <= len(pages)
+  decreases len(pages) - i
+{
+  if i >= len(pages) {
+    []
+  } else if is_start(pages, i) {
+    [(i, fold_end(pages, i + 1))] + folds(pages, fold_end(pages, i + 1))
+  } else {
+    folds(pages, i + 1)
+  }
+}
+
+fn split_folds(pages: seq<int>) -> seq<(int, int)>
+  requires forall k in 0..len(pages): pages[k] == 0 || pages[k] == 1 || pages[k] == 2
+  ensures result == folds(pages, 0)
+{
+  let n = len(pages);
+  let mut i: int = 0;
+  let mut res: seq<(int, int)> = [];
+  while i < n
+    invariant 0 <= i <= n
+    invariant res + folds(pages, i) == folds(pages, 0)
+    decreases n - i
+  {
+    if is_start(pages, i) {
+      let e = scan_end(pages, i + 1);
+      res = res + [(i, e)];
+      i = e;
+    } else {
+      i = i + 1;
+    }
+  }
+  res
+}

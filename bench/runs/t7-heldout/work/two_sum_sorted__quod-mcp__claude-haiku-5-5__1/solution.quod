@@ -1,0 +1,69 @@
+// Two pointers over a sorted sequence.
+
+lemma sorted_mono(xs: seq<int>, a: int, b: int)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires 0 <= a <= b < len(xs)
+  ensures xs[a] <= xs[b]
+  decreases b - a
+{
+  if a < b {
+    sorted_mono(xs, a, b - 1);
+  }
+}
+
+// Every element up to b is at most xs[b].
+lemma max_at_right(xs: seq<int>, b: int)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires 0 <= b < len(xs)
+  ensures forall q in 0..b + 1: xs[q] <= xs[b]
+  decreases b
+{
+  if b > 0 {
+    max_at_right(xs, b - 1);
+  }
+}
+
+// Every element from a on is at least xs[a].
+lemma min_at_left(xs: seq<int>, a: int)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  requires 0 <= a < len(xs)
+  ensures forall q in a..len(xs): xs[a] <= xs[q]
+  decreases len(xs) - a
+{
+  if a + 1 < len(xs) {
+    min_at_left(xs, a + 1);
+  }
+}
+
+fn two_sum_sorted(xs: seq<int>, target: int) -> (int, int)
+  requires forall k in 0..len(xs) - 1: xs[k] <= xs[k + 1]
+  ensures
+    (result.0 == -1 && result.1 == -1
+      && forall p in 0..len(xs): forall q in 0..len(xs): !(p < q && xs[p] + xs[q] == target))
+    || (0 <= result.0 && result.0 < result.1 && result.1 < len(xs)
+      && xs[result.0] + xs[result.1] == target)
+  loose (a, b) => (a.0 == -1) == (b.0 == -1)
+{
+  let mut i: int = 0;
+  let mut j: int = len(xs) - 1;
+  while i < j
+    invariant 0 <= i
+    invariant j < len(xs)
+    invariant forall p in 0..len(xs): forall q in 0..len(xs):
+      (p < q && xs[p] + xs[q] == target) ==> (p >= i && q <= j)
+    decreases j - i
+  {
+    let s = xs[i] + xs[j];
+    if s == target {
+      return (i, j);
+    }
+    if s < target {
+      max_at_right(xs, j);
+      i = i + 1;
+    } else {
+      min_at_left(xs, i);
+      j = j - 1;
+    }
+  }
+  return (-1, -1);
+}

@@ -1,0 +1,65 @@
+// Page classification: 0 = continuation, 1 = first page of a document, 2 = separator.
+
+// A page starts a fold when it is classified 1, or when it is not a separator and
+// it is the first page of the batch or follows a separator.
+fn is_start(pages: seq<int>, i: int) -> bool
+  requires 0 <= i < len(pages)
+{
+  if i == 0 {
+    pages[i] != 2
+  } else {
+    pages[i] == 1 || (pages[i] == 0 && pages[i - 1] == 2)
+  }
+}
+
+// The first index at or after j whose page is not a continuation (classified 1 or 2),
+// or the length of the batch when there is none. A fold starting at s ends there.
+fn next_nonzero(pages: seq<int>, j: int) -> int
+  requires 0 <= j <= len(pages)
+  ensures j <= result <= len(pages)
+  ensures forall k in j..result: pages[k] == 0
+  ensures result < len(pages) ==> pages[result] != 0
+  decreases len(pages) - j
+{
+  if j == len(pages) {
+    len(pages)
+  } else if pages[j] != 0 {
+    j
+  } else {
+    next_nonzero(pages, j + 1)
+  }
+}
+
+// The folds whose start lies in 0..m, in order.
+fn folds_upto(pages: seq<int>, m: int) -> seq<(int, int)>
+  requires 0 <= m <= len(pages)
+  decreases m
+{
+  if m == 0 {
+    []
+  } else if is_start(pages, m - 1) {
+    folds_upto(pages, m - 1) + [(m - 1, next_nonzero(pages, m))]
+  } else {
+    folds_upto(pages, m - 1)
+  }
+}
+
+fn split_folds(pages: seq<int>) -> seq<(int, int)>
+  requires forall i in 0..len(pages): pages[i] == 0 || pages[i] == 1 || pages[i] == 2
+  ensures result == folds_upto(pages, len(pages))
+{
+  let n: int = len(pages);
+  let mut res: seq<(int, int)> = [];
+  let mut i: int = 0;
+  while i < n
+    invariant 0 <= i <= n
+    invariant res == folds_upto(pages, i)
+    decreases n - i
+  {
+    if is_start(pages, i) {
+      res = res + [(i, next_nonzero(pages, i + 1))];
+    }
+    i = i + 1;
+  }
+  res
+}

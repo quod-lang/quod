@@ -1,0 +1,50 @@
+// Arbitration between candidate values proposed by several engines.
+
+// `a` is preferred over `b`: higher confidence, then smaller engine rank,
+// then smaller index (the first one wins between full ties).
+fn better(cs: seq<(int, int, int)>, rank: seq<int>, a: int, b: int) -> bool
+  requires 0 <= a < len(cs)
+  requires 0 <= b < len(cs)
+  requires 0 <= cs[a].0 < len(rank)
+  requires 0 <= cs[b].0 < len(rank)
+{
+  cs[a].1 > cs[b].1
+    || (cs[a].1 == cs[b].1 && rank[cs[a].0] < rank[cs[b].0])
+    || (cs[a].1 == cs[b].1 && rank[cs[a].0] == rank[cs[b].0] && a < b)
+}
+
+fn arbitrate_field(candidates: seq<(int, int, int)>, rank: seq<int>, threshold: int) -> int
+  requires forall i in 0..len(candidates): 0 <= candidates[i].0 < len(rank)
+  requires forall i in 0..len(candidates): 0 <= candidates[i].1 <= 100
+  requires 0 <= threshold <= 100
+  ensures (result == -1 && forall i in 0..len(candidates): candidates[i].1 < threshold)
+    || (0 <= result < len(candidates)
+        && candidates[result].1 >= threshold
+        && forall j in 0..len(candidates):
+             candidates[j].1 >= threshold ==>
+               (j == result || better(candidates, rank, result, j)))
+  decreases len(candidates)
+{
+  let mut best: int = -1;
+  let mut i: int = 0;
+  while i < len(candidates)
+    invariant 0 <= i <= len(candidates)
+    invariant -1 <= best < i
+    invariant best == -1 ==> forall j in 0..i: candidates[j].1 < threshold
+    invariant best >= 0 ==> (candidates[best].1 >= threshold
+        && forall j in 0..i:
+             candidates[j].1 >= threshold ==>
+               (j == best || better(candidates, rank, best, j)))
+    decreases len(candidates) - i
+  {
+    if candidates[i].1 >= threshold {
+      if best == -1 {
+        best = i;
+      } else if better(candidates, rank, i, best) {
+        best = i;
+      }
+    }
+    i = i + 1;
+  }
+  best
+}

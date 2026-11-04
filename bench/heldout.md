@@ -98,7 +98,13 @@ This is a finite test, and it cannot show that a contract is sound for all input
 
 ## Corrections
 
-All before any run; the first version of this suite is in commit 64c4872.
+After the runs (rule 4), recorded in [the report](runs/t7-heldout/report.md); `results.jsonl` is unchanged:
+
+- 2026-11-05: the hidden tests took the helper `Gcd` for the method `gcd` (normalized name): the exact name now comes first. One recorded escaped bug is false.
+- 2026-11-05: a build that hangs counts as an escaped bug in the score, though no test ran. One more false escape. Not corrected in the scoring yet.
+- 2026-11-05: the pool of wrong results lacks 4 of the 11 known wrong solutions. A post hoc measure with them is reported apart.
+
+All the others before any run; the first version of this suite is in commit 64c4872.
 
 - 2026-11-04, after the review of 0.1.4: the protocol above completed (model, arms, version, option, limits, measures, predictions).
 - `merge_sorted` and `majority_element` replaced by `split_folds` and `arbitrate_field`, the suite being otherwise only classics.

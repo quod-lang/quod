@@ -1,0 +1,359 @@
+// Next permutation of a sequence of integers, in lexicographic order.
+
+// ---------------------------------------------------------------------------
+// Multisets, seen through occurrence counts
+// ---------------------------------------------------------------------------
+
+// Number of occurrences of v in s.
+fn cnt(s: seq<int>, v: int) -> int
+  decreases len(s)
+{
+  if len(s) == 0 { 0 } else { (if s[0] == v { 1 } else { 0 }) + cnt(s[1..], v) }
+}
+
+lemma cnt_concat(a: seq<int>, b: seq<int>, v: int)
+  ensures cnt(a + b, v) == cnt(a, v) + cnt(b, v)
+  decreases len(a)
+{
+  if len(a) > 0 {
+    assert (a + b)[1..] == a[1..] + b;
+    cnt_concat(a[1..], b, v);
+  } else {
+    assert a + b == b;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reversal
+// ---------------------------------------------------------------------------
+
+fn rev(s: seq<int>) -> seq<int>
+  decreases len(s)
+{
+  if len(s) == 0 { [] } else { rev(s[1..]) + [s[0]] }
+}
+
+lemma rev_len(s: seq<int>)
+  ensures len(rev(s)) == len(s)
+  decreases len(s)
+{
+  if len(s) > 0 {
+    rev_len(s[1..]);
+  }
+}
+
+lemma rev_last(t: seq<int>)
+  requires len(t) >= 1
+  ensures rev(t)[len(t) - 1] == t[0]
+{
+  rev_len(t[1..]);
+  assert rev(t) == rev(t[1..]) + [t[0]];
+}
+
+lemma rev_cnt(s: seq<int>, v: int)
+  ensures cnt(rev(s), v) == cnt(s, v)
+  decreases len(s)
+{
+  if len(s) > 0 {
+    rev_cnt(s[1..], v);
+    assert rev(s) == rev(s[1..]) + [s[0]];
+    assert s == [s[0]] + s[1..];
+    cnt_concat(rev(s[1..]), [s[0]], v);
+    cnt_concat([s[0]], s[1..], v);
+  }
+}
+
+lemma rev_cnt_all(s: seq<int>, U: seq<int>, i: int)
+  requires 0 <= i && i <= len(U)
+  ensures forall j in i..len(U): cnt(rev(s), U[j]) == cnt(s, U[j])
+  decreases len(U) - i
+{
+  if i < len(U) {
+    rev_cnt(s, U[i]);
+    rev_cnt_all(s, U, i + 1);
+    assert cnt(rev(s), U[i]) == cnt(s, U[i]);
+    assert forall j in i + 1..len(U): cnt(rev(s), U[j]) == cnt(s, U[j]);
+  }
+}
+
+// A non-increasing sequence reverses into a non-decreasing one.
+lemma rev_sorted(s: seq<int>)
+  requires forall i in 0..len(s) - 1: s[i] >= s[i + 1]
+  ensures forall i in 0..len(s) - 1: rev(s)[i] <= rev(s)[i + 1]
+  decreases len(s)
+{
+  if len(s) >= 2 {
+    rev_sorted(s[1..]);
+    rev_last(s[1..]);
+    rev_len(s[1..]);
+    assert rev(s) == rev(s[1..]) + [s[0]];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The pivot: the largest k with xs[k] < xs[k + 1]
+// ---------------------------------------------------------------------------
+
+// The largest k' <= k with xs[k'] < xs[k' + 1], or -1 if there is none.
+fn pivot_from(xs: seq<int>, k: int) -> int
+  requires k < len(xs) - 1
+  decreases k + 1
+{
+  if k < 0 { -1 } else if xs[k] < xs[k + 1] { k } else { pivot_from(xs, k - 1) }
+}
+
+// The pivot of xs, or -1 when xs is non-increasing.
+fn pivot(xs: seq<int>) -> int
+{
+  if len(xs) < 2 { -1 } else { pivot_from(xs, len(xs) - 2) }
+}
+
+// The largest j' in k + 1..=j with xs[j'] > xs[k], or -1 if there is none.
+fn gt_from(xs: seq<int>, k: int, j: int) -> int
+  decreases j - k
+{
+  if k < 0 || j <= k || j >= len(xs) {
+    -1
+  } else if xs[j] > xs[k] {
+    j
+  } else {
+    gt_from(xs, k, j - 1)
+  }
+}
+
+// Monotonicity along a non-increasing run
+// ---------------------------------------------------------------------------
+
+lemma mono(xs: seq<int>, a: int, b: int)
+  requires 0 <= a && a <= b && b < len(xs)
+  requires forall i in a..b: xs[i] >= xs[i + 1]
+  ensures xs[a] >= xs[b]
+  decreases b - a
+{
+  if a < b {
+    mono(xs, a + 1, b);
+  }
+}
+
+lemma from_mono(xs: seq<int>, b: int, j: int)
+  requires 0 <= j && j <= b && b < len(xs)
+  requires forall i in j..b: xs[i] >= xs[i + 1]
+  ensures forall t in j..b + 1: xs[t] >= xs[b]
+  decreases b - j
+{
+  mono(xs, j, b);
+  if j < b {
+    from_mono(xs, b, j + 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The rearrangement: xs[..k] ++ [xs[l]] ++ rev(wseq)
+// where wseq is xs[k + 1..] with xs[l] replaced by xs[k]
+// ---------------------------------------------------------------------------
+
+fn wseq(xs: seq<int>, k: int, l: int) -> seq<int>
+  requires 0 <= k && k < l && l < len(xs)
+{
+  xs[k + 1..l] + [xs[k]] + xs[l + 1..]
+}
+
+// xs with the element at l moved, as the rearrangement of xs[k..], to the front
+// of the suffix: xs[..k] ++ [xs[l]] ++ (suffix sorted ascending). Total: xs itself
+// when the indices are out of order.
+fn built(xs: seq<int>, k: int, l: int) -> seq<int>
+{
+  if 0 <= k && k < l && l < len(xs) {
+    xs[..k] + [xs[l]] + rev(wseq(xs, k, l))
+  } else {
+    xs
+  }
+}
+
+lemma wseq_noninc(xs: seq<int>, k: int, l: int)
+  requires 0 <= k && k < l && l < len(xs)
+  requires xs[k] < xs[l]
+  requires forall i in k + 1..len(xs) - 1: xs[i] >= xs[i + 1]
+  requires forall j in l + 1..len(xs): xs[j] <= xs[k]
+  ensures forall i in 0..len(wseq(xs, k, l)) - 1: wseq(xs, k, l)[i] >= wseq(xs, k, l)[i + 1]
+{
+  assert forall i in 0..len(wseq(xs, k, l)): wseq(xs, k, l)[i] == (if i == l - k - 1 { xs[k] } else { xs[i + k + 1] });
+}
+
+lemma built_len(xs: seq<int>, k: int, l: int)
+  requires 0 <= k && k < l && l < len(xs)
+  ensures len(built(xs, k, l)) == len(xs)
+{
+  rev_len(wseq(xs, k, l));
+}
+
+lemma built_pick(xs: seq<int>, k: int, l: int)
+  requires 0 <= k && k < l && l < len(xs)
+  ensures forall i in 0..k: built(xs, k, l)[i] == xs[i]
+  ensures built(xs, k, l)[k] == xs[l]
+  ensures exists j in k + 1..len(xs): xs[j] == built(xs, k, l)[k]
+{
+  assert forall i in 0..k: built(xs, k, l)[i] == xs[..k][i];
+  assert built(xs, k, l)[k] == xs[l];
+}
+
+lemma built_sorted(xs: seq<int>, k: int, l: int)
+  requires 0 <= k && k < l && l < len(xs)
+  requires xs[k] < xs[l]
+  requires forall i in k + 1..len(xs) - 1: xs[i] >= xs[i + 1]
+  requires forall j in l + 1..len(xs): xs[j] <= xs[k]
+  ensures forall i in k + 1..len(xs) - 1: built(xs, k, l)[i] <= built(xs, k, l)[i + 1]
+{
+  wseq_noninc(xs, k, l);
+  rev_sorted(wseq(xs, k, l));
+  rev_len(wseq(xs, k, l));
+  assert forall i in k + 1..len(xs): built(xs, k, l)[i] == rev(wseq(xs, k, l))[i - k - 1];
+}
+
+lemma built_min(xs: seq<int>, k: int, l: int)
+  requires 0 <= k && k < l && l < len(xs)
+  requires xs[k] < xs[l]
+  requires forall i in k + 1..len(xs) - 1: xs[i] >= xs[i + 1]
+  requires forall j in l + 1..len(xs): xs[j] <= xs[k]
+  ensures forall j in k + 1..len(xs): xs[j] > xs[k] ==> xs[l] <= xs[j]
+{
+  from_mono(xs, l, k + 1);
+}
+
+lemma built_cnt(xs: seq<int>, k: int, l: int, v: int)
+  requires 0 <= k && k < l && l < len(xs)
+  ensures cnt(built(xs, k, l), v) == cnt(xs, v)
+{
+  let p = xs[..k];
+  let a = xs[k + 1..l];
+  let b = xs[l + 1..];
+  let w = wseq(xs, k, l);
+  assert w == a + [xs[k]] + b;
+  assert xs == p + [xs[k]] + a + [xs[l]] + b;
+  assert built(xs, k, l) == p + [xs[l]] + rev(w);
+  rev_cnt(w, v);
+  cnt_concat(p + [xs[l]], rev(w), v);
+  cnt_concat(p, [xs[l]], v);
+  cnt_concat(a + [xs[k]], b, v);
+  cnt_concat(a, [xs[k]], v);
+  cnt_concat(p + [xs[k]] + a + [xs[l]], b, v);
+  cnt_concat(p + [xs[k]] + a, [xs[l]], v);
+  cnt_concat(p + [xs[k]], a, v);
+  cnt_concat(p, [xs[k]], v);
+}
+
+lemma built_cnt_all(xs: seq<int>, k: int, l: int, U: seq<int>, i: int)
+  requires 0 <= k && k < l && l < len(xs)
+  requires 0 <= i && i <= len(U)
+  ensures forall j in i..len(U): cnt(built(xs, k, l), U[j]) == cnt(xs, U[j])
+  decreases len(U) - i
+{
+  if i < len(U) {
+    built_cnt(xs, k, l, U[i]);
+    built_cnt_all(xs, k, l, U, i + 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Finding k and l
+// ---------------------------------------------------------------------------
+
+fn find_pivot(xs: seq<int>) -> int
+  requires len(xs) >= 2
+  ensures result == pivot(xs)
+  ensures result >= -1 && result <= len(xs) - 2
+  ensures result >= 0 ==> xs[result] < xs[result + 1]
+  ensures forall i in result + 1..len(xs) - 1: xs[i] >= xs[i + 1]
+{
+  let mut k: int = len(xs) - 2;
+  while k >= 0 && xs[k] >= xs[k + 1]
+    invariant -1 <= k && k <= len(xs) - 2
+    invariant pivot_from(xs, k) == pivot(xs)
+    invariant forall i in k + 1..len(xs) - 1: xs[i] >= xs[i + 1]
+    decreases k + 1
+  {
+    k = k - 1;
+  }
+  k
+}
+
+fn find_succ(xs: seq<int>, k: int) -> int
+  requires 0 <= k && k + 1 < len(xs) && xs[k] < xs[k + 1]
+  ensures k + 1 <= result && result < len(xs)
+  ensures xs[k] < xs[result]
+  ensures forall j in result + 1..len(xs): xs[j] <= xs[k]
+  ensures result == gt_from(xs, k, len(xs) - 1)
+{
+  let mut l: int = len(xs) - 1;
+  while xs[l] <= xs[k]
+    invariant k + 1 <= l && l < len(xs)
+    invariant forall j in l + 1..len(xs): xs[j] <= xs[k]
+    invariant gt_from(xs, k, l) == gt_from(xs, k, len(xs) - 1)
+    decreases l
+  {
+    l = l - 1;
+  }
+  l
+}
+
+// The reference rearrangement, as a function of xs alone.
+fn next_model(xs: seq<int>) -> seq<int>
+{
+  if pivot(xs) < 0 {
+    rev(xs)
+  } else {
+    built(xs, pivot(xs), gt_from(xs, pivot(xs), len(xs) - 1))
+  }
+}
+
+lemma rev_short(s: seq<int>)
+  requires len(s) < 2
+  ensures rev(s) == s
+{
+  if len(s) == 1 {
+    assert s[1..] == [];
+    assert rev(s) == rev(s[1..]) + [s[0]];
+    assert s == [s[0]];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The function
+// ---------------------------------------------------------------------------
+
+fn next_permutation(xs: seq<int>) -> seq<int>
+  ensures len(result) == len(xs)
+  ensures forall i in 0..len(xs): cnt(result, xs[i]) == cnt(xs, xs[i])
+  ensures forall i in 0..len(result): cnt(xs, result[i]) == cnt(result, result[i])
+  ensures pivot(xs) < 0 ==> (forall i in 0..len(xs) - 1: result[i] <= result[i + 1])
+  ensures pivot(xs) >= 0 ==> (forall i in 0..pivot(xs): result[i] == xs[i])
+  ensures pivot(xs) >= 0 ==> (xs[pivot(xs)] < result[pivot(xs)])
+  ensures pivot(xs) >= 0 ==> (exists j in pivot(xs) + 1..len(xs): xs[j] == result[pivot(xs)])
+  ensures pivot(xs) >= 0 ==> (forall j in pivot(xs) + 1..len(xs): xs[j] > xs[pivot(xs)] ==> result[pivot(xs)] <= xs[j])
+  ensures pivot(xs) >= 0 ==> (forall i in pivot(xs) + 1..len(xs) - 1: result[i] <= result[i + 1])
+  ensures result == next_model(xs)
+{
+  let mut res: seq<int> = xs;
+  if len(xs) >= 2 {
+    let k: int = find_pivot(xs);
+    if k < 0 {
+      rev_len(xs);
+      rev_sorted(xs);
+      rev_cnt_all(xs, xs, 0);
+      rev_cnt_all(xs, rev(xs), 0);
+      res = rev(xs);
+    } else {
+      let l: int = find_succ(xs, k);
+      built_len(xs, k, l);
+      built_pick(xs, k, l);
+      built_sorted(xs, k, l);
+      built_min(xs, k, l);
+      built_cnt_all(xs, k, l, xs, 0);
+      built_cnt_all(xs, k, l, built(xs, k, l), 0);
+      res = built(xs, k, l);
+    }
+  } else {
+    rev_short(xs);
+  }
+  res
+}
