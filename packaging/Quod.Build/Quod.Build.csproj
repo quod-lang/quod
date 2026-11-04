@@ -8,7 +8,9 @@
     <NoBuild>true</NoBuild>
     <IsPackable>true</IsPackable>
     <NuspecFile>Quod.Build.nuspec</NuspecFile>
-    <NuspecProperties>version=$(QuodVersion);tools=$(QuodTools)</NuspecProperties>
+    <!-- a full path in the system's form: with a D:/a/b path on Windows, the nuspec's glob finds
+         nothing, and the package is made without its tools, without a word -->
+    <NuspecProperties>version=$(QuodVersion);tools=$([System.IO.Path]::GetFullPath('$(QuodTools)'))</NuspecProperties>
     <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
   </PropertyGroup>
 </Project>

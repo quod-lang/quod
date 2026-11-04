@@ -171,7 +171,13 @@ jobs:
           ls tools/*
 
       - name: Pack
-        run: dotnet pack packaging/Quod.Build -o nupkg -p:QuodVersion=$VERSION "-p:QuodTools=$(pwd -W)/tools"
+        run: |
+          dotnet pack packaging/Quod.Build -o nupkg -p:QuodVersion=$VERSION "-p:QuodTools=$(pwd -W)/tools"
+          # the binaries of every system are in the package
+          for f in win-x64/quod.exe win-x64/z3.exe linux-x64/quod linux-x64/z3 osx-arm64/quod osx-arm64/z3; do
+            7z l "nupkg/Quod.Build.$VERSION.nupkg" | grep -q "tools.$f" || { echo "::error::tools/$f is not in the package"; exit 1; }
+          done
+          ls -l nupkg
 
       - name: Test the package in real projects
         run: python packaging/test_package.py --package "nupkg/Quod.Build.$VERSION.nupkg" --version "$VERSION"
