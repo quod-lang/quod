@@ -189,7 +189,7 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
                     w.WriteStartObject()
                     w.WriteBoolean("built", true)
                     w.WriteString("summary", line)
-                    w.WriteString("language", (match target with Pipeline.Python -> "python" | Pipeline.CSharp _ -> "csharp"))
+                    w.WriteString("language", (match target with Pipeline.Python _ -> "python" | Pipeline.CSharp _ -> "csharp"))
                     w.WriteString("code", code)
                     w.WriteStartArray("runtime_checked")
                     for f in unproved do w.WriteStringValue f
@@ -310,7 +310,7 @@ let private tools =
       "{\"type\": \"object\", \"properties\": {" + programProperties + "," + budgetProperties
       + ",\"target\": {\"type\": \"string\", \"enum\": [\"python\", \"csharp\"]}, \"runtime_checks\": {\"type\": \"boolean\"}, "
       + "\"namespace\": {\"type\": \"string\", \"description\": \"C#: the namespace of the class\"}, "
-      + "\"check_requires\": {\"type\": \"string\", \"enum\": [\"all\"], \"description\": \"C#: also check the quantified requires when a public method is called\"}}}"
+      + "\"check_requires\": {\"type\": \"string\", \"enum\": [\"all\"], \"description\": \"Also check the quantified requires when a public function is called\"}}}"
       "quod_run",
       "Run one function of a Quod program on given arguments, checking every assertion, invariant, bound and contract on the way, without the solver. "
       + "Integers are JSON numbers (or strings for big ones), sequences and tuples are arrays. Returns the result, or the obligation that fails, with its text (and the value returned, for a postcondition).",

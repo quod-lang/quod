@@ -186,6 +186,8 @@ What a proof needs beyond the contracts is written in the code, and checked like
   concern one result only (`a < len(xs) && b < len(xs)`, which the ensures already give). Either
   way the completeness check proves nothing. A relation says what two acceptable results have
   in common: `xs[a] == xs[b]` for two indices of a maximum.
+- Each `loose` is shown with two different results it accepts on one input, in the JSON (`"kind": "loose"`, `"status":
+  "witness"`) and in the summary: a reviewer reads what the freedom allows.
 - When the result is an index (`xs[result]`, `0..result`), the quantifiers of the `ensures` are
   also given to the solver at both results: "the first index of a maximum" is then recognised
   as determined.
@@ -200,14 +202,16 @@ as a `note` in the JSON (`"kind": "contract"`):
 - **model**: `result == f(...)`, with `f` a function of the program (a model, or a reference
   implementation): the proof shows that the code computes what the model computes, so the model
   is what a reviewer reads;
-- **restated**: `result == e` where `e` is, word for word, a value the body returns. A **warning**:
+- **restated**: `result == e` where `e` is, word for word, a value the body returns, or a call to a
+  function whose definition reads as the body once unfolded. A **warning**:
   the proof then shows little more than the absence of errors. A small formula that is its own
   specification can stay as it is.
 - **none**: a statement function without `ensures`. A **warning**: nothing is proved about its
   result, and its callers, who know it by its contract only, know nothing about it. (An expression
   function without `ensures` is not classified: the verifier knows its definition.) With
   `--require-contracts` (`check`, `build`, `mcp`) it is an **error**, as are an expression function
-  without `ensures` that no other function calls and a `loose` that accepts every result, so
+  without `ensures` that no other function calls, a `loose` that accepts every result, a lemma written
+  as a function, and a `requires` that fixes a parameter to one value or a sequence to one length, so
   `verified` means that something was proved about each result.
 - **lemma written as a function** (`lemma-as-function`): a statement function returning `bool`
   that returns `true` on every path, or says `ensures result`, its other `ensures` being facts,
@@ -285,10 +289,13 @@ of time is not proved: the function's definition stays unknown to the solver.
   iteration and after the last one, asserts) are checked at run time. They raise `AssertionError`
   and are not Python `assert`s, so `python -O` keeps them. An underspecified contract always blocks
   the build: no run-time check can tell that a result is the intended one.
+- **A Python caller proves nothing.** A public function checks its `requires` without quantifier or call
+  (`ValueError`). The others stay the caller's duty, and its docstring says so; `--check-requires all` checks them
+  too, at their cost. Calls between Quod functions check nothing.
 - In such a function, indexing and slicing check their bounds (Python would wrap a negative index
   and clamp a slice), and a division by zero raises `ZeroDivisionError`. A `nat` that would be
   negative is not checked.
-- Proved contracts produce no runtime code, only the function's docstring.
+- Proved `ensures` produce no runtime code, only the function's docstring.
 - Quod semantics where Python differs: Euclidean `/` and `%` (`_quod_div`, `_quod_mod`), and
   sequences that never change. A list argument is not copied (the generated code never mutates
   an argument): O(1) on entry, so a binary search stays O(log n). A tuple is converted to a list;
@@ -313,7 +320,10 @@ of time is not proved: the function's definition stays unknown to the solver.
   tuples are `ValueTuple`. Equality is structural; `/` and `%` are Euclidean.
 - **A C# caller proves nothing.** A public method checks `null` for its sequences and its `requires` without
   quantifier or call (`ArgumentException`). The others stay the caller's duty, and its comment says so;
-  `--check-requires all` checks them too, at their cost. Calls between Quod functions check nothing.
+  `--check-requires all` checks them too, at their cost, and so does defining `QUOD_CHECK_REQUIRES` in the calling
+  project. Calls between Quod functions check nothing.
+- A method with a list of integers has two more forms, for `int` and `long`: the list is seen as Quod's, not copied.
+  The result stays a `BigInteger`.
 - A recursive function calls `EnsureSufficientExecutionStack`: too deep a recursion raises an exception
   instead of ending the process.
 - With `--runtime-checks`, unproved contracts raise `QuodContractException`, and bounds always raise.
@@ -351,7 +361,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 | Version | Planned content |
 |---|---|
-| 0.2 | packaging of the C# backend for .NET projects (the MCP server came with 0.1.1) |
+| 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
 | 0.3 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |

@@ -1,4 +1,4 @@
-/// Diagnostics shared by every stage: one record, printed for humans or written as JSON.
+﻿/// Diagnostics shared by every stage: one record, printed for humans or written as JSON.
 /// JSON is written with Utf8JsonWriter by hand: no reflection, so it works under Native AOT.
 module Quod.Diagnostics
 
@@ -8,7 +8,7 @@ open System.Text.Json
 open Quod.Syntax
 
 /// The version of quod, in --version and in the header of generated code.
-let quodVersion = "0.1.4"
+let quodVersion = "0.1.5"
 
 type Severity =
     | Error

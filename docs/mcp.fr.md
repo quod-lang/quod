@@ -70,8 +70,8 @@ attend l'appel d'outil (la ligne de commande a 300 s) : les obligations restante
 l'argument `budget`, et `quod mcp --budget 120` change la valeur par défaut (`--timeout` aussi,
 10 s par obligation).
 
-`quod mcp --require-contracts` fait une erreur d'une fonction sans contrat ou d'un `loose` qui accepte
-tout résultat : un agent ne peut plus s'arrêter sur un fichier vérifié parce qu'il n'énonce rien. L'option se règle sur le serveur :
+`quod mcp --require-contracts` fait une erreur d'une fonction sans contrat, d'un `loose` qui accepte tout résultat,
+d'un lemme écrit comme une fonction ou d'un `requires` qui fixe un paramètre : un agent ne peut plus s'arrêter sur un fichier vérifié parce qu'il n'énonce rien. L'option se règle sur le serveur :
 l'agent n'a aucun argument pour la désactiver.
 
 Les appels d'outils s'exécutent un à la fois, pendant que le serveur continue de lire : `ping`,

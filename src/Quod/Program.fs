@@ -25,7 +25,7 @@ let private usage =
     + "  --smt-log FILE      write every command sent to z3 to FILE\n"
     + "  --target TARGET     code generation target (build): python (default) or csharp\n"
     + "  --namespace NAME    namespace of the generated C# (default Quod.Generated)\n"
-    + "  --check-requires all  in C#, also check the quantified requires when a public method is called\n"
+    + "  --check-requires all  also check the quantified requires when a public function is called\n"
     + "  -o DIR              output directory (build; default: next to FILE)\n"
     + "  --output-file FILE  the generated file itself (build), instead of -o\n"
     + "  --format msbuild    diagnostics as MSBuild reads them, each with a code QUOD0001...\n"
@@ -130,7 +130,7 @@ let private buildCommand (file: string) (o: Options) =
                     Directory.CreateDirectory dir |> ignore
                     let name =
                         match target with
-                        | Pipeline.Python -> Path.GetFileNameWithoutExtension file + ".py"
+                        | Pipeline.Python _ -> Path.GetFileNameWithoutExtension file + ".py"
                         | Pipeline.CSharp _ -> CodegenCSharp.outputFile file
                     let written = defaultArg o.OutputFile (Path.Combine(dir, name))
                     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath written)) |> ignore

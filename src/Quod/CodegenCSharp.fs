@@ -77,8 +77,7 @@ let private literal (text: string) = "\"" + text.Replace("\\", "\\\\").Replace("
 let private xml (text: string) = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
 
 let private helpers =
-    [ "big", "private static BigInteger _quod_big(string digits) { return BigInteger.Parse(digits); }"
-      "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
+    [ "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
       "concat",
       "private static IReadOnlyList<T> _quod_concat<T>(IReadOnlyList<T> a, IReadOnlyList<T> b)
         {
@@ -115,6 +114,23 @@ let private helpers =
             for (BigInteger i = lo; i < hi; i = i + 1) if (f(i)) return true;
             return false;
         }"
+      "view",
+      "// A list of the caller's integers, seen as Quod's: nothing is copied, each element is converted when read.
+        private sealed class _QuodView<TFrom, T> : IReadOnlyList<T>
+        {
+            private readonly IReadOnlyList<TFrom> xs;
+            private readonly Func<TFrom, T> convert;
+            public _QuodView(IReadOnlyList<TFrom> xs, Func<TFrom, T> convert)
+            {
+                if (xs == null) throw new ArgumentNullException(\"xs\");
+                this.xs = xs;
+                this.convert = convert;
+            }
+            public int Count { get { return xs.Count; } }
+            public T this[int i] { get { return convert(xs[i]); } }
+            public IEnumerator<T> GetEnumerator() { foreach (var x in xs) yield return convert(x); }
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return GetEnumerator(); }
+        }"
       "show",
       "private static string _quod_show(object v)
         {
@@ -128,6 +144,7 @@ let private helpers =
 
 type private Gen(checks: Set<string>) =
     let used = HashSet<string>() // helpers
+    let constants = SortedDictionary<BigInteger, string>()
     let eqs = Dictionary<Ty, string>()
     let eqOrder = ResizeArray<Ty>()
     /// Names and types in scope. C# refuses `if c { let x = 1; } let x = 1;`, which Quod accepts:
@@ -138,6 +155,22 @@ type private Gen(checks: Set<string>) =
     let mutable inPlace: Set<string> = Set.empty
 
     member _.Used = used
+
+    /// The integer constants of the class: `BigInteger.One` or `_quod_2`, not `new BigInteger(2)` at each use.
+    member _.Constant(n: BigInteger) =
+        if n.IsZero then "BigInteger.Zero"
+        elif n.IsOne then "BigInteger.One"
+        else
+            let name = "_quod_" + (if n.Sign < 0 then "minus_" else "") + BigInteger.Abs(n).ToString()
+            constants.[n] <- name
+            name
+
+    member _.ConstantFields() : string list =
+        [ for KeyValue(n, name) in constants ->
+              let value =
+                  if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then "new BigInteger(" + n.ToString() + ")"
+                  else "BigInteger.Parse(\"" + n.ToString() + "\")"
+              "private static readonly BigInteger " + name + " = " + value + ";" ]
 
     member _.Reset() =
         names <- Map.empty
@@ -206,9 +239,7 @@ type private Gen(checks: Set<string>) =
         let ty = merge (shape e.Ty) (shape want)
         let elem = match ty with TySeq t -> t | _ -> TyInt
         match e.Kind with
-        | EInt n ->
-            if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then "new BigInteger(" + n.ToString() + ")"
-            else g.Help "big" + "(\"" + n.ToString() + "\")"
+        | EInt n -> g.Constant n
         | EBool b -> if b then "true" else "false"
         | EVar n -> g.Name n
         | EResult -> "_quod_result"
@@ -222,7 +253,7 @@ type private Gen(checks: Set<string>) =
         | ESlice(s, lo, hi) ->
             let sv = g.Expr(s, ty)
             g.Help "slice" + "<" + csType elem + ">(" + sv + ", "
-            + (lo |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue "new BigInteger(0)") + ", "
+            + (lo |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue "BigInteger.Zero") + ", "
             + (hi |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue ("new BigInteger(" + sv + ".Count)")) + ")"
         | EProj(t, k) -> g.Expr(t, t.Ty) + ".Item" + string (k + 1)
         | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
@@ -350,17 +381,37 @@ let rec private returns (items: TStmt list) =
         | SIf(_, a, b) -> returns a && returns b
         | _ -> false)
 
-/// A `requires` cheap enough to check at every public call: no quantifier, and no call, which
-/// could hide one.
-let rec private cheap (e: TExpr) =
-    match e.Kind with
-    | EQuant _ | ECall _ -> false
-    | EInt _ | EBool _ | EVar _ | EResult -> true
-    | ESeq xs | ETuple xs -> List.forall cheap xs
-    | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> cheap a && cheap b
-    | ESlice(a, b, c) -> cheap a && Option.forall cheap b && Option.forall cheap c
-    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> cheap a
-    | EIf(a, b, c) -> cheap a && cheap b && cheap c
+/// Is there a list of integers in this type, which a caller would hold as `int` or `long`?
+let rec private hasIntegerList (t: Ty) =
+    let rec hasInteger t =
+        match t with
+        | TyInt | TyNat -> true
+        | TySeq e -> hasInteger e
+        | TyTuple ts -> List.exists hasInteger ts
+        | _ -> false
+    match t with
+    | TySeq e -> hasInteger e
+    | TyTuple ts -> List.exists hasIntegerList ts
+    | _ -> false
+
+let rec private narrowType (narrow: string) (t: Ty) =
+    match t with
+    | TyInt | TyNat | TyError -> narrow
+    | TyBool -> "bool"
+    | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
+    | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
+
+/// A value of the narrow type as Quod's. Exact, since int and long fit in a BigInteger. `depth` names
+/// the lambdas apart.
+let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TyInt | TyNat | TyError -> "new BigInteger(" + term + ")"
+    | TyBool -> term
+    | TySeq e ->
+        let x = "_quod_x" + string depth
+        "new _QuodView<" + narrowType narrow e + ", " + csType e + ">(" + term + ", " + x + " => " + widen narrow e x (depth + 1) + ")"
+    | TyTuple ts ->
+        "(" + (ts |> List.mapi (fun k c -> widen narrow c (term + ".Item" + string (k + 1)) depth) |> String.concat ", ") + ")"
 
 /// The C# of a verified program, or why it cannot be generated. `checks` lists the functions whose
 /// proofs did not all pass (built only with --runtime-checks): their contracts run at run time.
@@ -383,7 +434,7 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
             let ps = f.Params |> List.map (fun p -> csType p.Ty + " " + csName p.Name) |> String.concat ", "
             let isChecked = checks.Contains f.Name
             let boundary = f.Requires |> List.filter (fun r -> match r.Kind with EBool true -> false | _ -> true)
-            let enforced, left = boundary |> List.partition (fun r -> options.CheckAllRequires || cheap r)
+            let enforced, left = boundary |> List.partition (fun r -> options.CheckAllRequires || Codegen.cheap r)
             let text (e: TExpr) = Printer.exprText (toSyntax e)
             // the public method: what a C# caller sees and what it cannot be trusted with
             sb.Append(indent).Append("/// <summary>")
@@ -393,7 +444,7 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
                 [ for r in enforced -> "requires " + text r + " (checked)"
                   for e in f.Ensures -> "ensures " + text e
                   for l in Option.toList f.Loose -> "loose (" + l.Left + ", " + l.Right + ") => " + text l.Relation
-                  for r in left -> "NOT CHECKED, the caller's duty: requires " + text r ]
+                  for r in left -> "NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: requires " + text r ]
             if not notes.IsEmpty then
                 sb.Append(indent).Append("/// <remarks>\n") |> ignore
                 for n in notes do sb.Append(indent).Append("/// ").Append(xml n).Append("<br/>\n") |> ignore
@@ -412,9 +463,28 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
             for r in enforced do
                 sb.Append(body).Append("if (!").Append(g.Expr(r, TyBool)).Append(") throw new ArgumentException(")
                   .Append(literal (f.Name + ": requires " + text r)).Append(");\n") |> ignore
+            // the file is compiled in the calling project, whose symbol turns these on, at their cost
+            if not left.IsEmpty then
+                sb.Append("#if QUOD_CHECK_REQUIRES\n") |> ignore
+                for r in left do
+                    sb.Append(body).Append("if (!").Append(g.Expr(r, TyBool)).Append(") throw new ArgumentException(")
+                      .Append(literal (f.Name + ": requires " + text r)).Append(");\n") |> ignore
+                sb.Append("#endif\n") |> ignore
             sb.Append(body).Append("return ").Append(implName f.Name).Append('(')
               .Append(f.Params |> List.map (fun p -> csName p.Name) |> String.concat ", ").Append(");\n")
               .Append(indent).Append("}\n\n") |> ignore
+            // a real caller has a List<int>, not an IReadOnlyList<BigInteger>: the same method for
+            // its integers, without a copy (review of 0.1.4). The result stays a BigInteger.
+            if f.Params |> List.exists (fun p -> hasIntegerList p.Ty) then
+                for narrow in [ "int"; "long" ] do
+                    let narrowed = f.Params |> List.map (fun p -> narrowType narrow p.Ty + " " + csName p.Name) |> String.concat ", "
+                    g.Help "view" |> ignore
+                    sb.Append(indent).Append("/// <summary>The same for a list of ").Append(narrow).Append(": it is not copied. See the method above.</summary>\n")
+                      .Append(indent).Append("public static ").Append(csType f.Ret).Append(' ').Append(pascal f.Name).Append('(').Append(narrowed).Append(")\n")
+                      .Append(indent).Append("{\n")
+                      .Append(body).Append("return ").Append(pascal f.Name).Append('(')
+                      .Append(f.Params |> List.map (fun p -> widen narrow p.Ty (csName p.Name) 0) |> String.concat ", ").Append(");\n")
+                      .Append(indent).Append("}\n\n") |> ignore
             // the implementation, which Quod code calls
             sb.Append(indent).Append("private static ").Append(csType f.Ret).Append(' ').Append(implName f.Name).Append('(').Append(ps).Append(")\n")
               .Append(indent).Append("{\n") |> ignore
@@ -452,6 +522,9 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
         if not checks.IsEmpty then
             out.Append("        public sealed class QuodContractException : Exception\n        {\n")
                .Append("            public QuodContractException(string message) : base(message) { }\n        }\n\n") |> ignore
+        let constantFields = g.ConstantFields()
+        if not constantFields.IsEmpty then
+            out.Append(indent).Append(String.Join("\n" + indent, constantFields)).Append("\n\n") |> ignore
         out.Append(sb) |> ignore
         for h in helperText @ eqFunctions do
             out.Append(indent).Append(h).Append("\n\n") |> ignore

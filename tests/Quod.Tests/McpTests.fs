@@ -186,6 +186,32 @@ let ``require-contracts refuses a loose that accepts every result`` () =
     Assert.False((strictCall "quod_build" program).GetProperty("built").GetBoolean())
 
 [<Fact>]
+let ``require-contracts refuses a requires that fixes a parameter, not one that relates them`` () =
+    let sort = "fn sort(xs: seq<int>) -> seq<int> requires len(xs) == 0 ensures len(result) == len(xs) { xs }"
+    Assert.True(verified (fst (call "quod_check" (source sort))))
+    let r = strictCall "quod_check" sort
+    Assert.False(verified r)
+    Assert.Contains("input fixed by its requires", r.GetProperty("summary").GetString())
+    Assert.False(verified (strictCall "quod_check" "fn f(x: int) -> int requires x == 5 ensures result == x { x }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(x: int, y: int) -> int requires x == y ensures result == x { x }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(xs: seq<int>, n: nat) -> int requires n == len(xs) ensures result == n { n }"))
+    Assert.True(verified (strictCall "quod_check" "fn f(x: int) -> int requires x > 0 ensures result == x { x }"))
+
+[<Fact>]
+let ``require-contracts refuses a lemma written as a function`` () =
+    let lemma = "fn fact(x: int) -> bool ensures result ensures x + 1 > x { return true; }"
+    Assert.True(verified (fst (call "quod_check" (source lemma))))
+    Assert.False(verified (strictCall "quod_check" lemma))
+
+[<Fact>]
+let ``each loose shows two results it accepts`` () =
+    let program = "fn f(x: int) -> int ensures result >= 0 loose (a, b) => a + b >= 0 { if x > 0 { x } else { 0 } }"
+    let r, _ = call "quod_check" (source program)
+    let summary = r.GetProperty("summary").GetString()
+    Assert.Contains("loose: f (x = ", summary)
+    Assert.Contains(" or ", summary)
+
+[<Fact>]
 let ``quod_build generates C# on request, and refuses an unknown target`` () =
     let args = "{\"target\": \"csharp\", \"namespace\": \"Acme.Rules\", \"source\": " + JsonSerializer.Serialize(clamp) + "}"
     let r, _ = call "quod_build" args

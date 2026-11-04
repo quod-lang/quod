@@ -217,8 +217,9 @@ dans le JSON (`"kind": "contract"`) :
   rien. (Une fonction-expression sans `ensures` n'est pas classée : le vérificateur connaît sa
   définition.) Avec
   `--require-contracts` (`check`, `build`, `mcp`), c'est une **erreur**, tout comme une
-  fonction-expression sans `ensures` qu'aucune autre fonction n'appelle et un `loose` qui accepte tout
-  résultat : `verified` signifie alors
+  fonction-expression sans `ensures` qu'aucune autre fonction n'appelle , un `loose` qui accepte tout
+  résultat, un lemme écrit comme une fonction, et un `requires` qui fixe un paramètre à une valeur ou une séquence à
+  une longueur : `verified` signifie alors
   que quelque chose a été prouvé sur chaque résultat.
 - **lemme écrit comme une fonction** (`lemma-as-function`) : une fonction à instructions qui
   renvoie un `bool`, `true` sur tous les chemins, ou qui dit `ensures result`, ses autres `ensures`
@@ -319,6 +320,12 @@ fonction reste inconnue du solveur.
   code généré a besoin. Un nom qui est un mot-clé Python reçoit un `_` final.
 - Limite connue : la récursion est celle de Python (profondeur 1000 par défaut).
 
+Backend Python, depuis la 0.1.5 : **un appelant Python ne prouve rien.** Une fonction publique vérifie ses `requires`
+sans quantificateur ni appel (`ValueError`). Les autres restent à la charge de l'appelant, et sa docstring le dit ;
+`--check-requires all` les vérifie aussi, à leur coût. Chaque `loose` est montré avec deux résultats différents qu'il
+accepte sur une entrée, dans le JSON et dans le résumé. Un modèle dont la définition se lit comme le corps, une fois
+déplié, est classé `restated`.
+
 ## Backend C#
 
 - Une classe par fichier Quod (`--namespace`, `Quod.Generated` par défaut), dans `Nom.g.cs`. Le code reste
@@ -332,6 +339,9 @@ fonction reste inconnue du solveur.
   sans quantificateur ni appel (`ArgumentException`). Les autres restent à la charge de l'appelant, et son
   commentaire le dit ; `--check-requires all` les vérifie aussi, à leur coût. Les appels entre fonctions Quod ne
   vérifient rien.
+- Une méthode avec une liste d'entiers a deux formes de plus, pour `int` et `long` : la liste est vue comme celle de
+  Quod, sans copie. Le résultat reste un `BigInteger`. Définir `QUOD_CHECK_REQUIRES` dans le projet appelant vérifie
+  aussi les `requires` quantifiés.
 - Une fonction récursive appelle `EnsureSufficientExecutionStack` : une récursion trop profonde lève une
   exception au lieu de mettre fin au processus.
 - Avec `--runtime-checks`, les contrats non prouvés lèvent `QuodContractException`, et les bornes lèvent toujours.

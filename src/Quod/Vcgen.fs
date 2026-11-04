@@ -1472,6 +1472,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 | _ -> "(= " + r1 + " " + r2 + ")"
         for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
             z3.Send("(assert " + a + ")")
+        z3.Push()
         z3.Send("(assert (not " + goal + "))")
         let answer = v.BudgetedCheck z3.Check
         let candidate () =
@@ -1484,8 +1485,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                   Fn = Some f.Name; Property = Some "the contract determines a unique result"
                   Counterexample = witness; Reason = None; Evidence = None; Message = message }
         /// Evaluate a candidate (inputs, result a, result b) on concrete values: Some witness
-        /// when the contract really accepts both results, None otherwise.
-        let confirm (values: Eval.Value list) : (string * string) list option =
+        /// when the contract really accepts both results and they are what `pair` looks for.
+        let confirmWith (pair: Map<string, Eval.Value> -> Eval.Value -> Eval.Value -> bool) (values: Eval.Value list) : (string * string) list option =
             let names = f.Params |> List.map (fun p -> p.Name)
             let inputs = List.zip names (List.take names.Length values)
             let a, b = values.[names.Length], values.[names.Length + 1]
@@ -1497,19 +1498,23 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 && ev.Fits(f.Ret, a) && ev.Fits(f.Ret, b)
                 && f.Requires |> List.forall (fun r -> holds r inEnv)
                 && f.Ensures |> List.forall (fun e -> holds e (inEnv.Add("result", a)) && holds e (inEnv.Add("result", b)))
-                && (match f.Loose with
-                    | Some l -> ev.Holds(l.Relation, inEnv.Add(l.Left, a).Add(l.Right, b)) = Some false
-                    | None -> a <> b)
+                && pair inEnv a b
             if ok then
                 Some((inputs |> List.map (fun (n, x) -> n, Eval.valueText x))
                      @ [ "result_a", Eval.valueText a; "result_b", Eval.valueText b ])
             else None
+        let confirm =
+            confirmWith (fun inEnv a b ->
+                let ev = Eval.Evaluator(fns)
+                match f.Loose with
+                | Some l -> ev.Holds(l.Relation, inEnv.Add(l.Left, a).Add(l.Right, b)) = Some false
+                | None -> a <> b)
         let fromCandidate () = candidate () |> Option.bind confirm
         /// When Z3 gives no usable model (sequences are axiomatized: a formula with no concrete
         /// sequence term is often "unknown"), search concretely: small inputs that satisfy the
         /// requires, small candidate results (and the parameters of the result type), checked
         /// against the ensures by the evaluator. Two accepted results are a confirmed witness.
-        let concrete () : (string * string) list option =
+        let concreteWith (check: Eval.Value list -> (string * string) list option) : (string * string) list option =
             let rnd = Random 5
             let ev = Eval.Evaluator(fns)
             let mutable found = None
@@ -1528,8 +1533,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                         |> List.filter (fun r -> ev.Fits(f.Ret, r) && f.Ensures |> List.forall (fun e -> ev.Holds(e, env.Add("result", r)) = Some true))
                     found <-
                         [ for a in accepted do for b in accepted -> a, b ]
-                        |> List.tryPick (fun (a, b) -> if a = b then None else confirm (values @ [ a; b ]))
+                        |> List.tryPick (fun (a, b) -> if a = b then None else check (values @ [ a; b ]))
             found
+        let concrete () = concreteWith confirm
         let witness =
             match answer with
             | Unsat -> None
@@ -1570,9 +1576,84 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 report "inconclusive" Warning ("completeness not decided: the solver found neither two results the contract accepts nor a proof that they are equal (the contract may well be complete). "
                         + "Try to find two different results it accepts on a small input; if there are none, state the result more directly: for an index, what holds before it and at it") []
                 false
+        z3.Pop()
+        // What a `loose` allows, shown rather than judged: any loose that passes holds under the
+        // ensures, so no check tells a freedom that was meant from one that gives everything away
+        // (review of 0.1.4: `ensures result >= 0`, `loose (a, b) => a + b >= 0`).
+        if f.Loose.IsSome && not v.OverBudget then
+            let accepted = confirmWith (fun _ a b -> a <> b)
+            let same =
+                match f.Ret with
+                | TySeq _ -> "(" + seqOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
+                | _ -> "(= " + r1 + " " + r2 + ")"
+            z3.Push()
+            z3.Send("(assert (not " + same + "))")
+            z3.Send "(set-option :smt.mbqi true)"
+            z3.SetTimeout(min 3000 z3.DefaultTimeout)
+            let found = match z3.Check() with Unsat -> None | _ -> candidate () |> Option.bind accepted
+            z3.Send "(set-option :smt.mbqi false)"
+            z3.SetTimeout z3.DefaultTimeout
+            z3.Pop()
+            let found = match found with Some _ -> found | None -> Eval.withBigStack (fun () -> concreteWith accepted)
+            match found with
+            | Some w ->
+                diags.Add
+                    { File = file; Span = f.Span; Kind = "loose"; Status = "witness"; Severity = Info
+                      Fn = Some f.Name; Property = Some "the freedom that 'loose' declares"; Counterexample = w
+                      Reason = None; Evidence = None
+                      Message = "'loose' accepts these two different results for this input: check that this freedom is intended" }
+            | None -> ()
         current <- None
         z3.Pop()
         determined
+
+    /// `--require-contracts`: can two valid inputs differ on each parameter? A `requires` that fixes
+    /// a parameter to one value, or a sequence to one length, reduces the function to a case, and the
+    /// contract says little however true it is (review of 0.1.4: a `sort` with `requires len(xs) == 0`).
+    /// Only a proof that they cannot differ is reported: a solver that gives up says nothing.
+    member v.PinnedInputs(f: TFn) =
+        let mentioned = f.Params |> List.filter (fun p -> f.Requires |> List.exists (mentions p.Name))
+        if not mentioned.IsEmpty && not v.OverBudget then
+            z3.Push()
+            let silent = Collector()
+            current <- Some { Fn = f; InitialMeasure = None; CheckDecreases = false }
+            let instance (tag: string) =
+                let consts = f.Params |> List.map (fun p -> p.Name, v.Const(p.Name + tag, p.Ty), p.Ty)
+                paramsOf.[f.Name] <- consts |> List.map (fun (_, c, t) -> c, t)
+                let env = consts |> List.map (fun (n, c, _) -> n, c) |> Map.ofList
+                let facts = consts |> List.collect (fun (_, c, t) -> typeFacts v.FreshQ t c)
+                let requires = f.Requires |> List.map (fun r -> v.Expr(r, env, [], silent))
+                env, facts @ requires
+            let a, factsA = instance "_a"
+            let b, factsB = instance "_b"
+            for fact in List.ofSeq silent.Facts @ factsA @ factsB do
+                z3.Send("(assert " + fact + ")")
+            z3.SetTimeout(min 2000 z3.DefaultTimeout)
+            // requires that never hold have their own message
+            if z3.Check() <> Unsat then
+                for p in mentioned do
+                    let differ =
+                        match p.Ty with
+                        | TySeq _ -> Some("(not (= (" + seqOp "len" p.Ty + " " + a.[p.Name] + ") (" + seqOp "len" p.Ty + " " + b.[p.Name] + ")))")
+                        | TyInt | TyNat | TyBool -> Some("(not (= " + a.[p.Name] + " " + b.[p.Name] + "))")
+                        | _ -> None
+                    match differ with
+                    | Some d ->
+                        z3.Push()
+                        z3.Send("(assert " + d + ")")
+                        let answer = z3.Check()
+                        z3.Pop()
+                        if answer = Unsat then
+                            let what = match p.Ty with TySeq _ -> "a single length of " | _ -> "a single value of "
+                            diags.Add
+                                { File = file; Span = f.Span; Kind = "contract"; Status = "pinned-input"; Severity = Error
+                                  Fn = Some f.Name; Property = Some "the requires leaves the inputs free"; Counterexample = []
+                                  Reason = None; Evidence = None
+                                  Message = "the requires allows " + what + p.Name + ", and --require-contracts asks for a contract about the function, not about one case: state only what the task guarantees" }
+                    | None -> ()
+            z3.SetTimeout z3.DefaultTimeout
+            current <- None
+            z3.Pop()
 
 type VerifyResult =
     { Diagnostics: Diagnostic list
@@ -1592,14 +1673,15 @@ type VerifyResult =
 /// 4. every function, with all the definitions that are safe to know.
 /// Within a time budget (seconds, 0: none), functions in the order of the file.
 let rec verify (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) : VerifyResult =
-    verifyWith file prog z3 budgetSeconds (fun _ _ _ -> ())
+    verifyWith file prog z3 budgetSeconds false (fun _ _ _ -> ())
 
 /// The same, telling `progress done total what` as it goes (`quod mcp` sends it on as MCP progress
 /// notifications): when it starts and ends each function and each completeness check, and when a
 /// try of the solver has run for a second (a quick one is not told). `done` grows at each call (MCP
 /// asks it): k + 1 when the k-th step (0-based) ends, between k and k + 1 while it runs (test of
 /// 0.1.2: notifications only at the end of each function told nothing during a long one).
-and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) (progress: float -> int -> string -> unit) : VerifyResult =
+/// `pinned`: also look for parameters that the requires fix (--require-contracts).
+and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int) (pinned: bool) (progress: float -> int -> string -> unit) : VerifyResult =
     let v = Verifier(file, prog, z3, budgetSeconds * 1000)
     let mutable step = 0
     let mutable within = 0
@@ -1663,5 +1745,8 @@ and verifyWith (file: string) (prog: TProgram) (z3: Session) (budgetSeconds: int
             finish ("checked the completeness of " + f.Name)
             d)
         |> List.length
+    if pinned then
+        for f in prog.Fns |> List.filter (fun f -> not f.IsLemma) do
+            v.PinnedInputs f
     { Diagnostics = v.Diagnostics; Proved = v.Proved; Determined = determined; WithContract = withContract.Length
       Lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.length; NotAttempted = v.NotAttempted }

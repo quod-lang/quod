@@ -45,7 +45,7 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 use logWriter = (match s.SmtLog with Some p -> new StreamWriter(p) | None -> null)
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, s.Timeout * 1000, log, s.Cancel)
-                let verified = Vcgen.verifyWith file typed session s.Budget s.Progress
+                let verified = Vcgen.verifyWith file typed session s.Budget s.RequireContracts s.Progress
                 let found = verified.Diagnostics @ ContractStyle.diagnostics file typed
                 let found = if s.RequireContracts then ContractStyle.required file typed found else found
                 Checked(typed, { verified with Diagnostics = found @ ContractStyle.review file typed })
@@ -73,8 +73,16 @@ let rec summary (r: Vcgen.VerifyResult) =
 /// "; loose: binary_search; to review with the contracts: sum (prefix_sums, range_sum)": what
 /// the proofs cannot vouch for, a reviewer reads.
 and private reviewSummary (r: Vcgen.VerifyResult) =
-    let names kind = r.Diagnostics |> List.filter (fun d -> d.Kind = kind) |> List.choose (fun d -> d.Fn)
-    let loose = names "loose"
+    // what each loose accepts: "binary_search (xs = [0, 0]: 0 or 1)"
+    let freedom (fn: string) =
+        match r.Diagnostics |> List.tryFind (fun d -> d.Kind = "loose" && d.Status = "witness" && d.Fn = Some fn) with
+        | None -> fn
+        | Some w ->
+            let value key = w.Counterexample |> List.find (fun (k, _) -> k = key) |> snd
+            let inputs = w.Counterexample |> List.filter (fun (k, _) -> k <> "result_a" && k <> "result_b")
+            fn + " (" + String.Join(", ", inputs |> List.map (fun (k, x) -> k + " = " + x)) + (if inputs.IsEmpty then "" else ": ")
+            + value "result_a" + " or " + value "result_b" + ")"
+    let loose = r.Diagnostics |> List.filter (fun d -> d.Kind = "loose" && d.Status = "declared") |> List.choose (fun d -> d.Fn) |> List.map freedom
     let models =
         r.Diagnostics
         |> List.filter (fun d -> d.Kind = "review")
@@ -87,19 +95,21 @@ and private styleSummary (r: Vcgen.VerifyResult) =
     let count status = r.Diagnostics |> List.filter (fun d -> d.Kind = "contract" && d.Status = status) |> List.length
     let parts =
         [ count "properties", " by properties"; count "model", " by a model"; count "restated", " restating the body"
-          count "none", " missing (no ensures)"; count "lemma-as-function", " lemma written as a function" ]
+          count "none", " missing (no ensures)"; count "lemma-as-function", " lemma written as a function"
+          count "pinned-input", " input fixed by its requires" ]
         |> List.filter (fun (n, _) -> n > 0)
         |> List.map (fun (n, text) -> string n + text)
     if parts.IsEmpty then "" else "; contracts: " + String.Join(", ", parts)
 
 type Target =
-    | Python
+    /// With all the requires checked at the public boundary (--check-requires all)?
+    | Python of allRequires: bool
     | CSharp of CodegenCSharp.Options
 
 /// The target named on the command line or in a tool call.
 let targetOf (name: string) (ns: string option) (allRequires: bool) : Result<Target, string> =
     match name with
-    | "python" -> Ok Python
+    | "python" -> Ok(Python allRequires)
     | "csharp" ->
         Ok(CSharp { Namespace = defaultArg ns CodegenCSharp.defaultOptions.Namespace; CheckAllRequires = allRequires })
     | t -> Result.Error("unknown target '" + t + "' (python or csharp)")
@@ -110,12 +120,12 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
     let errors = errorsOf r
     let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList
     if errors |> List.exists (fun d -> d.Kind = "contract") then
-        Result.Error "not built: a function has no contract, and --require-contracts asks for one"
+        Result.Error "not built: --require-contracts refuses a contract, as said above"
     elif errors |> List.exists (fun d -> d.Kind = "completeness") then
         Result.Error "not built: an underspecified contract cannot be compiled (fix it, or declare the freedom with 'loose')"
     elif not unproved.IsEmpty && not runtimeChecks then
         Result.Error("not built: " + summary r + ". Fix the proofs, or build with --runtime-checks")
     else
         match target with
-        | Python -> Ok(CodegenPython.generate file typed unproved, unproved)
+        | Python allRequires -> Ok(CodegenPython.generateWith file typed unproved allRequires, unproved)
         | CSharp options -> CodegenCSharp.generate file typed unproved options |> Result.map (fun code -> code, unproved)

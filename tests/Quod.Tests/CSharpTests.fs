@@ -44,7 +44,7 @@ let private runner =
     + "    static void Main()\n    {\n"
 
 /// Compile the generated classes and the calls into one program, and run it: label -> what it printed.
-let private buildAndRun (framework: string) (sources: (string * string) list) (calls: string list) : Map<string, string> =
+let private buildAndRunWith (defines: string) (framework: string) (sources: (string * string) list) (calls: string list) : Map<string, string> =
     let dir = Directory.CreateTempSubdirectory("quod-cs-").FullName
     try
         // C# 7.3 is what .NET Framework has: the code must compile with it on every target
@@ -52,7 +52,8 @@ let private buildAndRun (framework: string) (sources: (string * string) list) (c
             Path.Combine(dir, "T.csproj"),
             "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>" + framework
             + "</TargetFramework><LangVersion>7.3</LangVersion><TreatWarningsAsErrors>true</TreatWarningsAsErrors>"
-            + "<InvariantGlobalization>true</InvariantGlobalization><EnableDefaultCompileItems>true</EnableDefaultCompileItems></PropertyGroup>\n"
+            + "<InvariantGlobalization>true</InvariantGlobalization><EnableDefaultCompileItems>true</EnableDefaultCompileItems>"
+            + "<DefineConstants>$(DefineConstants);" + defines + "</DefineConstants></PropertyGroup>\n"
             + (if framework = "net472" then "  <ItemGroup><Reference Include=\"System.Numerics\" /></ItemGroup>\n" else "")
             + "</Project>\n")
         for name, code in sources do File.WriteAllText(Path.Combine(dir, name), code)
@@ -75,6 +76,8 @@ let private buildAndRun (framework: string) (sources: (string * string) list) (c
         |> Map.ofArray
     finally
         try Directory.Delete(dir, true) with _ -> ()
+
+let private buildAndRun = buildAndRunWith ""
 
 let private generated (index: int) (src: string) (checks: Set<string>) (allRequires: bool) =
     let options = { Namespace = "T" + string index; CheckAllRequires = allRequires }
@@ -149,6 +152,8 @@ let private traps =
             + "fn need(x: int) -> int requires x > 0 { x }\n"
             + "fn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }\n"
             + "fn eq_seq(a: seq<int>, b: seq<int>) -> bool { a == b }\n"
+            + "fn nested_ints(xs: seq<(int, seq<int>)>) -> seq<(int, seq<int>)> { xs + xs[..1] }\n"
+            + "fn search(xs: seq<int>, x: int) -> int { let mut i = 0; while i < len(xs) invariant 0 <= i && i <= len(xs) decreases len(xs) - i { if xs[i] == x { return i; } i = i + 1; } return -1; }\n"
          let checked' = "fn wrong(x: int) -> int ensures result > x { return x; }\nfn out_of_bounds(xs: seq<int>) -> int { return xs[3]; }\n"
          let big n = "new BigInteger(" + string n + ")"
          let arr (xs: int list) = "new BigInteger[] { " + (xs |> List.map big |> String.concat ", ") + " }"
@@ -165,7 +170,12 @@ let private traps =
                "        Case(\"huge\", () => T0.P.Huge());"
                "        Case(\"deep\", () => T0.P.Down(" + big 100000000 + "));"
                "        Case(\"requires\", () => T0.P.Need(" + big -1 + "));"
-               "        Case(\"null\", () => T0.P.LenOf(null));"
+               "        Case(\"null\", () => T0.P.LenOf((IReadOnlyList<BigInteger>)null));"
+               "        Case(\"null ints\", () => T0.P.LenOf((IReadOnlyList<int>)null));"
+               "        Case(\"ints\", () => T0.P.LenOf(new int[] { 1, 2, 3 }));"
+               "        Case(\"longs\", () => T0.P.LenOf(new List<long> { 1L, 2L }));"
+               "        Case(\"nested ints\", () => T0.P.NestedInts(new (int, IReadOnlyList<int>)[] { (1, new int[] { 2, 3 }), (4, new int[0]) }));"
+               "        Case(\"sorted ints\", () => T0.P.Search(new int[] { 1, 3, 5 }, 3));"
                "        Case(\"quantified left\", () => T0.P.SortedOnly(" + arr [ 2; 1 ] + "));"
                "        Case(\"quantified checked\", () => T2.P.SortedOnly(" + arr [ 2; 1 ] + "));"
                "        Case(\"same content\", () => T0.P.EqSeq(" + arr [ 1; 2 ] + ", " + arr [ 1; 2 ] + "));"
@@ -184,6 +194,11 @@ let private traps =
 [<InlineData("deep", "!InsufficientExecutionStackException")>]
 [<InlineData("requires", "!ArgumentException")>]
 [<InlineData("null", "!ArgumentNullException")>]
+[<InlineData("null ints", "!ArgumentNullException")>]
+[<InlineData("ints", "3")>]
+[<InlineData("longs", "2")>]
+[<InlineData("nested ints", "[(1, [2, 3]), (4, []), (1, [2, 3])]")>]
+[<InlineData("sorted ints", "1")>]
 [<InlineData("quantified left", "2")>]
 [<InlineData("quantified checked", "!ArgumentException")>]
 [<InlineData("same content", "true")>]
@@ -194,6 +209,24 @@ let ``what differs from Python`` (label: string, expected: string) =
     // an array raises IndexOutOfRangeException where a List raises ArgumentOutOfRangeException
     let got = traps.Value.[label]
     if label = "bounds" then Assert.Contains("OutOfRange", got) else Assert.Equal(expected, got)
+
+[<Fact>]
+let ``the calling project can turn on the quantified requires with a symbol`` () =
+    let src = "fn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }"
+    let got =
+        buildAndRunWith "QUOD_CHECK_REQUIRES" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"bad\", () => T0.P.SortedOnly(new int[] { 2, 1 }));"
+              "        Case(\"good\", () => T0.P.SortedOnly(new int[] { 1, 2 }));" ]
+    Assert.Equal("!ArgumentException", got.["bad"])
+    Assert.Equal("2", got.["good"])
+
+[<Fact>]
+let ``constants are named, not rebuilt at each use`` () =
+    match generate "p.quod" (typedOf "fn f(x: int) -> int ensures result == x + 2 { x + 2 }") Set.empty defaultOptions with
+    | Ok code ->
+        Assert.Contains("private static readonly BigInteger _quod_2", code)
+        Assert.Contains("(x + _quod_2)", code)
+    | Result.Error why -> failwith why
 
 [<Fact>]
 let ``two functions with the same public name are refused`` () =
@@ -221,5 +254,5 @@ let ``the comment of a public method says which requires it leaves to the caller
     match generate "p.quod" (typedOf src) Set.empty defaultOptions with
     | Ok code ->
         Assert.Contains("requires n &gt; 0 (checked)", code)
-        Assert.Contains("NOT CHECKED, the caller's duty: requires forall", code)
+        Assert.Contains("NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: requires forall", code)
     | Result.Error why -> failwith why

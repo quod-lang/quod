@@ -18,7 +18,7 @@ quod and z3 come with the package; the build runs on Windows x64, Linux x64 and 
 |---|---|---|
 | `QuodNamespace` | `$(RootNamespace)` | The namespace of the generated classes |
 | `QuodRequireContracts` | `false` | A function without a contract is an error |
-| `QuodCheckAllRequires` | `false` | Public methods also check their quantified `requires` |
+| `QuodCheckAllRequires` | `false` | Public methods also check their quantified `requires`; defining `QUOD_CHECK_REQUIRES` does the same without generating again |
 | `QuodBudget` | `300` | Seconds for the check of one file |
 | `QuodBuildOptions` | | Other options of `quod build` |
 

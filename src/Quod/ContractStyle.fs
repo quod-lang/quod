@@ -116,7 +116,34 @@ let valueUses (prog: TProgram) : Set<string> =
                 if body |> List.exists (readers x g) then used.Add g |> ignore
     Set.ofSeq used
 
-let styleOf (fnNames: Set<string>) (usedAsValue: Set<string>) (f: TFn) : Style option =
+/// An expression with its variables replaced, and the calls to `g` as calls to `f`: a model `g`
+/// of `f`, unfolded once where `f` is, reads as the body of `f` when it copies it.
+let rec private unfold (values: Map<string, TExpr>) (g: string) (f: string) (e: TExpr) : TExpr =
+    let go = unfold values g f
+    let kind =
+        match e.Kind with
+        | EVar n when values.ContainsKey n -> values.[n].Kind
+        | EInt _ | EBool _ | EVar _ | EResult -> e.Kind
+        | ESeq xs -> ESeq(List.map go xs)
+        | ETuple xs -> ETuple(List.map go xs)
+        | EIndex(a, b) -> EIndex(go a, go b)
+        | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
+        | EProj(a, k) -> EProj(go a, k)
+        | ELen a -> ELen(go a)
+        | ECall(h, xs) -> ECall((if h = g then f else h), List.map go xs)
+        | ENeg a -> ENeg(go a)
+        | ENot a -> ENot(go a)
+        | EArith(o, a, b) -> EArith(o, go a, go b)
+        | EConcat(a, b) -> EConcat(go a, go b)
+        | ECmp(o, a, b) -> ECmp(o, go a, go b)
+        | EEq(a, b) -> EEq(go a, go b)
+        | ELogic(o, a, b) -> ELogic(o, go a, go b)
+        | EIf(a, b, c) -> EIf(go a, go b, go c)
+        | EQuant(q, v, lo, hi, b) -> EQuant(q, v, go lo, go hi, go b)
+        | EToNat a -> EToNat(go a)
+    { e with Kind = kind }
+
+let styleOf (fns: Map<string, TFn>) (usedAsValue: Set<string>) (f: TFn) : Style option =
     if f.IsLemma then None // a proof, not a function: its ensures are what it proves
     elif f.Ensures.IsEmpty then (if f.IsExprFn then None else Some NoContract)
     else
@@ -132,17 +159,28 @@ let styleOf (fnNames: Set<string>) (usedAsValue: Set<string>) (f: TFn) : Style o
         let cs = f.Ensures |> List.collect claims
         if not f.IsExprFn && f.Ret = TyBool && alwaysTrue && not (usedAsValue.Contains f.Name) then Some LemmaAsFunction
         elif cs |> List.exists (fun c -> compound c && bodyKeys.Contains(key c)) then Some Restated
-        elif cs |> List.exists (fun c -> match c.Kind with ECall(g, _) -> fnNames.Contains g | _ -> false) then Some Model
+        // `result == copy(x)`, where `copy` is written as the body is (review of 0.1.4)
+        elif cs |> List.exists (fun c ->
+                match c.Kind with
+                | ECall(g, args) when g <> f.Name ->
+                    match fns.TryFind g with
+                    | Some { Body = TExprBody body; Params = ps } when ps.Length = args.Length ->
+                        let values = List.map2 (fun (p: TParam) a -> p.Name, a) ps args |> Map.ofList
+                        let copied = leaves (unfold values g f.Name body)
+                        copied |> List.exists compound && copied |> List.forall (fun x -> bodyKeys.Contains(key x))
+                    | _ -> false
+                | _ -> false) then Some Restated
+        elif cs |> List.exists (fun c -> match c.Kind with ECall(g, _) -> fns.ContainsKey g | _ -> false) then Some Model
         else Some Properties
 
 /// One diagnostic per classified function: a note for properties and models, a warning for a
 /// restated body or a missing contract.
 let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
-    let names = prog.Fns |> List.map (fun f -> f.Name) |> Set.ofList
+    let fns = prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
     let uses = valueUses prog
     prog.Fns
     |> List.choose (fun f ->
-        styleOf names uses f
+        styleOf fns uses f
         |> Option.map (fun style ->
             let status, severity, message =
                 match style with
@@ -236,7 +274,8 @@ let private callees (f: TFn) : string list =
 /// files accepted had no ensures at all, and a warning did not stop the agent.) An expression
 /// function no other function calls is covered too: it is not a helper its definition explains,
 /// but a result nothing is stated about. So is a `loose` that accepts every result, the same hole
-/// under another name (run t6-qwen3-30b-strict, rle_encode: `loose (r1, r2) => true`).
+/// under another name (run t6-qwen3-30b-strict, rle_encode: `loose (r1, r2) => true`), and a lemma
+/// written as a function, whose `ensures result` says nothing about a result (review of 0.1.4).
 /// `found` is every diagnostic of the check, the styles included.
 let required (file: string) (prog: TProgram) (found: Diagnostic list) : Diagnostic list =
     let message = "no ensures, and --require-contracts asks for a contract: nothing is proved about the result. State what the result is"
@@ -245,6 +284,7 @@ let required (file: string) (prog: TProgram) (found: Diagnostic list) : Diagnost
         |> List.map (fun d ->
             if d.Kind = "contract" && d.Status = "none" then { d with Severity = Error; Message = message }
             elif d.Kind = "completeness" && d.Status = "loose-accepts-all" then { d with Severity = Error }
+            elif d.Kind = "contract" && d.Status = "lemma-as-function" then { d with Severity = Error }
             else d)
     let called = prog.Fns |> List.collect (fun f -> callees f |> List.filter (fun g -> g <> f.Name)) |> Set.ofList
     let entries =

@@ -7,9 +7,9 @@ open Quod.ContractStyle
 let styles (src: string) : Map<string, Style> =
     let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
     Assert.True(errs.IsEmpty, "type errors: " + String.concat " | " (errs |> List.map (fun d -> d.Message)))
-    let names = typed.Fns |> List.map (fun f -> f.Name) |> Set.ofList
+    let fns = typed.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
     let uses = valueUses typed
-    typed.Fns |> List.choose (fun f -> styleOf names uses f |> Option.map (fun s -> f.Name, s)) |> Map.ofList
+    typed.Fns |> List.choose (fun f -> styleOf fns uses f |> Option.map (fun s -> f.Name, s)) |> Map.ofList
 
 [<Fact>]
 let ``properties of the result`` () =
@@ -50,6 +50,17 @@ let ``a model: the result is a function of the program`` () =
 let ``returning the model itself is a restatement`` () =
     let s = styles "fn double(x: int) -> int { 2 * x } fn g(x: int) -> int ensures result == double(x) { double(x) }"
     Assert.Equal(Restated, s.["g"])
+
+[<Fact>]
+let ``a model that copies the body is a restatement, whatever its parameters are called`` () =
+    let s =
+        styles (
+            "fn copy(y: int) -> int { if y > 0 { 2 * y } else { y - 1 } }\n"
+            + "fn f(x: int) -> int ensures result == copy(x) { if x > 0 { 2 * x } else { x - 1 } }")
+    Assert.Equal(Restated, s.["f"])
+    // a model written otherwise stays a model
+    let other = styles "fn sum(n: nat) -> int decreases n { if n == 0 { 0 } else { n + sum(n - 1) } }\nfn f(n: nat) -> int ensures result == sum(n) { n * (n + 1) / 2 }"
+    Assert.Equal(Model, other.["f"])
 
 [<Fact>]
 let ``a variable or a literal is no restatement`` () =

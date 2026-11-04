@@ -208,6 +208,19 @@ let ``proved contracts produce no checks; unproved ones are checked with --runti
     Assert.DoesNotContain("AssertionError", provedCode)
 
 [<Fact>]
+let ``a Python caller is held to the requires that are cheap to check`` () =
+    let src = "fn need(x: int) -> int requires x > 0 { x }\nfn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }"
+    let prog = Quod.Parser.parseProgram "test.quod" src
+    let typed, _ = Quod.Typecheck.check "test.quod" prog
+    let driver = "try:\n    need(-1)\nexcept ValueError as e:\n    print(e)\nprint(sorted_only([2, 1]))\n"
+    let code = Quod.CodegenPython.generate "test.quod" typed Set.empty
+    Assert.Equal("need: requires x > 0\n2\n", runPython code driver)
+    Assert.Contains("NOT CHECKED, the caller's duty", code)
+    // and --check-requires all
+    let all = Quod.CodegenPython.generateWith "test.quod" typed Set.empty true
+    Assert.Contains("sorted_only: requires", runPython all "try:\n    sorted_only([2, 1])\nexcept ValueError as e:\n    print(e)\n")
+
+[<Fact>]
 let ``quantified contracts checked at run time use Python's all and any`` () =
     let src =
         "fn top(xs: seq<int>) -> int requires exists i in 0..len(xs): xs[i] > 0 ensures forall i in 0..len(xs): xs[i] <= result { xs[0] }"

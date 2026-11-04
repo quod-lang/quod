@@ -55,3 +55,15 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
             | SReturn e -> uses true e
     walk body
     candidates |> Seq.filter (fun n -> not (shared.Contains n)) |> Set.ofSeq
+
+/// A `requires` cheap enough to check at every public call: no quantifier, and no call, which
+/// could hide one.
+let rec cheap (e: TExpr) =
+    match e.Kind with
+    | EQuant _ | ECall _ -> false
+    | EInt _ | EBool _ | EVar _ | EResult -> true
+    | ESeq xs | ETuple xs -> List.forall cheap xs
+    | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> cheap a && cheap b
+    | ESlice(a, b, c) -> cheap a && Option.forall cheap b && Option.forall cheap c
+    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> cheap a
+    | EIf(a, b, c) -> cheap a && cheap b && cheap c
