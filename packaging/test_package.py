@@ -87,17 +87,24 @@ OLD_PROJECT = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
+def fail(message: str) -> None:
+    """Stop here. On GitHub Actions the message is also an annotation, readable without the logs."""
+    if os.environ.get("GITHUB_ACTIONS"):
+        print("::error::" + message.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
+    sys.exit(message)
+
+
 def run(cmd, cwd, env, expect=0):
     r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
     out = r.stdout + r.stderr
     if expect is not None and (r.returncode == 0) != (expect == 0):
-        sys.exit(f"FAILED: {cmd} exit {r.returncode}\n{out[-2500:]}")
+        fail(f"FAILED: {cmd} exit {r.returncode}\n{out[-2500:]}")
     return out
 
 
 def check(condition, what, details=""):
     if not condition:
-        sys.exit(f"FAILED: {what}\n{details[-2500:]}")
+        fail(f"FAILED: {what}\n{details[-2500:]}")
     print("ok  ", what)
 
 
