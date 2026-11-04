@@ -76,8 +76,12 @@ against `quod` separates the effect of the check from that of the language.
 ## Frozen version and prompts
 
 - **Compiler:** tag `v0.1.5`, commit `0fa2df7`, the Windows package of its release. It is the compiler of all the runs.
-- **Prompts:** those of `bench/verifbench/run.py` at the commit of the first run. The prompt of `dafny-loop` is not written yet: no run
-  before it is recorded here.
+- **Prompts:** those of `bench/verifbench/run.py` at the commit of the first run. The prompt of `dafny-loop` is the one of `dafny` with two
+  changes: `ensures` clauses that fully capture the specified result, "`dafny-complete solution.dfy` reports a contract that accepts two
+  different results for the same input (`[UNDER]`, with a witness). Fix it, unless that freedom is what the specification allows"; and the
+  file must verify "and `dafny-complete solution.dfy` must report no `[UNDER]` that the specification does not allow. An undecided verdict is
+  acceptable." As in the Quod arms, an undecided verdict does not stop the agent. Unlike them, a freedom is justified only by the statement:
+  Dafny has no `loose`, so nothing declares or checks it.
 
 ## Corrections
 

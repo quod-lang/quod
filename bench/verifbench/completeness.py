@@ -177,7 +177,7 @@ def main() -> None:
     for run in runs:
         for line in (run / "results.jsonl").read_text(encoding="utf-8").splitlines():
             r = json.loads(line)
-            if r["arm"] != "dafny" or not r["accepted"]:
+            if r["arm"] not in ("dafny", "dafny-loop") or not r["accepted"]:
                 continue
             model = r.get("model", "default")
             src = (run / "work" / Path(r["workdir"]).name / "solution.dfy").read_text(encoding="utf-8")

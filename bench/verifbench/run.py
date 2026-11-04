@@ -86,6 +86,19 @@ inside `module Solution {{ ... }}`.
   It will be compiled to Python and evaluated against hidden tests.
 """
 
+# The Dafny arm with what the Quod arms have: the verdict on completeness while the agent writes.
+PROMPT_DFY_LOOP = PROMPT_DFY.replace(
+    """`ensures` clauses that fully capture the specified result.
+""",
+    """`ensures` clauses that fully capture the specified result: `dafny-complete solution.dfy` reports a
+  contract that accepts two different results for the same input (`[UNDER]`, with a witness). Fix it,
+  unless that freedom is what the specification allows.
+""").replace(
+    """The file must verify: `dafny verify solution.dfy`. {hint}""",
+    """The file must verify: `dafny verify solution.dfy`, and `dafny-complete solution.dfy` must report no
+  `[UNDER]` that the specification does not allow. An undecided verdict is acceptable. {hint}""")
+assert PROMPT_DFY_LOOP.count("dafny-complete") == 2
+
 PROMPT_QD = """\
 Implement the function below in Quod, in the file `solution.quod` in the current directory.
 
@@ -177,7 +190,21 @@ def build_prompt(task: Task, arm: str) -> str:
         return PROMPT_QD.format(spec=task.spec, sig=QUOD_SIGNATURES[task.id], hint=SHELL_HINT)
     if arm == "quod-mcp":
         return PROMPT_QD_MCP.format(spec=task.spec, sig=QUOD_SIGNATURES[task.id])
+    if arm == "dafny-loop":
+        return PROMPT_DFY_LOOP.format(spec=task.spec, sig=task.dfy_signature, hint=SHELL_HINT)
     return PROMPT_DFY.format(spec=task.spec, sig=task.dfy_signature, hint=SHELL_HINT)
+
+
+def dafny_complete_on_path(where: Path) -> None:
+    """`dafny-complete` for the agent, from the sources of this repository."""
+    where.mkdir(parents=True, exist_ok=True)
+    src = ROOT.parent / "tools" / "dafny-complete" / "src"
+    os.environ["PYTHONPATH"] = str(src) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    (where / "dafny-complete.cmd").write_text(f'@"{sys.executable}" -m dafny_complete %*\n', encoding="utf-8")
+    script = where / "dafny-complete"
+    script.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" -m dafny_complete "$@"\n', encoding="utf-8", newline="\n")
+    script.chmod(0o755)
+    os.environ["PATH"] = str(where) + os.pathsep + os.environ.get("PATH", "")
 
 
 def _sh(cmd: str | list[str], cwd: Path, timeout: int, stdin: str | None = None) -> dict[str, Any]:
@@ -269,7 +296,7 @@ def evaluate(task: Task, arm: str, workdir: Path) -> dict[str, Any]:
     if t["code"] != 0 or not pydirs:
         res["hidden"] = {"loaded": False, "error": "translate failed: " + (t["out"] + t["err"])[-600:]}
         return res
-    res["hidden"] = hidden(task.id, arm, pydirs[0])
+    res["hidden"] = hidden(task.id, "dafny", pydirs[0])
     return res
 
 
@@ -354,6 +381,8 @@ def main() -> None:
         jobs = [(TASKS[t], arm, m, i, work_root / f"{t}__{arm}__{m.replace(':', '-')}__{i}")
                 for i in range(a.trials) for m in a.models.split(",")
                 for t in task_ids for arm in a.arms.split(",")]
+    if any(arm == "dafny-loop" for _, arm, _, _, _ in jobs) and not a.evaluate_only:
+        dafny_complete_on_path(out_dir / "bin")
     if any(arm == "quod" for _, arm, _, _, _ in jobs) and not a.evaluate_only and shutil.which("quod") is None:
         sys.exit("quod is not on the PATH the agents inherit: set QUOD_EXE to the compiler")
     mcp_config = None
@@ -391,6 +420,9 @@ def main() -> None:
                        f'--quod "{QUOD_EXE}"')
             else:
                 base = mcp_agent_cmd(mcp_config) if arm == "quod-mcp" else a.agent_cmd
+                if arm == "dafny-loop":
+                    base = base.replace("Bash(dafny *),", "Bash(dafny *),Bash(dafny-complete *),").replace(
+                        "PowerShell(dafny *),", "PowerShell(dafny *),PowerShell(dafny-complete *),")
                 cmd = base if model == "default" else f"{base} --model {model}"
             rec["agent"] = run_agent(cmd, wd, prompt, a.agent_timeout)
             if usage_limit(wd):

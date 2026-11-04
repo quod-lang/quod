@@ -59,7 +59,7 @@ def main(path: Path) -> None:
             mark = "∅"
         elif r["eval"].get("cheats"):
             mark = "⛔"
-        elif r["arm"] == "dafny" and not r["eval"].get("verified"):
+        elif r["arm"] in ("dafny", "dafny-loop") and not r["eval"].get("verified"):
             mark = "✗v"
         else:
             mark = "✓" if r["all_pass"] else f"✗{h.get('passed')}/{h.get('total')}"
