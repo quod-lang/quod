@@ -87,7 +87,7 @@ This is a finite test, and it cannot show that a contract is sound for all input
 
 ## Frozen version and prompts
 
-- **Compiler:** tag `v0.1.6`, once published, the Windows package of its release. It replaces `v0.1.5`, recorded first, because the review of 0.1.5 found faults in the boundary and in `--require-contracts`, before any run. It will not be replaced again.
+- **Compiler:** tag `v0.1.6`, commit `e4d8c13`, the Windows package of its release. It replaces `v0.1.5`, recorded first, because the review of 0.1.5 found faults in the boundary and in `--require-contracts`, before any run. It will not be replaced again.
 - **The judge's prompt**, in a fresh conversation with `claude-opus-5-5`, for an undecided contract: "Here is a programming task and the contract of a solution, with its helper functions. Does the contract accept a result the task forbids, or reject an input the task allows? If so, give that input and that result. Answer only from the task and the contract." It is followed by the statement of the task and the contract.
 - **Prompts:** those of `bench/verifbench/run.py` at the commit of the first run. The prompt of `dafny-loop` is the one of `dafny` with two
   changes: `ensures` clauses that fully capture the specified result, "`dafny-complete solution.dfy` reports a contract that accepts two
