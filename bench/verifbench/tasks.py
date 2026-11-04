@@ -331,6 +331,8 @@ TASKS: dict[str, Task] = {t.id: t for t in [
 from verifbench.tasks_hard import HARD_TASKS  # noqa: E402 - needs Task defined above
 
 TASKS.update({t.id: t for t in HARD_TASKS})
+from verifbench.tasks_heldout import HELDOUT_TASKS  # noqa: E402 - needs Task defined above
+TASKS.update({t.id: t for t in HELDOUT_TASKS})
 
 
 def validate(task: Task, args: tuple, out: Any) -> str | None:
