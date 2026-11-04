@@ -86,7 +86,9 @@ même compilateur que quod3-haiku.
 
 L'agent ne tâtonne plus avec un shell, des chemins et des fichiers temporaires : il appelle
 `quod_check` et lit une réponse structurée. Un essai par tâche là encore : une tendance, pas une
-mesure.
+mesure. **Ce passage n'est pas comparable tel quel :**
+la référence servie par MCP contenait alors un binary_search complet, et les trois essais ci-dessous ne confirment pas
+le gain. Voir les corrections à la fin de la section suivante.
 
 ### Trois essais, Dafny, et un autre fournisseur
 
@@ -138,7 +140,7 @@ Contrat déterminé, par tâche (trois essais chacune) :
 - **Dafny est trois fois plus rapide et deux fois moins cher.** À critère égal, l'écart sur les
   contrats (17 contre 12) vient de deux tâches, merge_intervals et rle_encode, dont dafny-complete
   ne peut pas décider les contrats Dafny ; sur les quatre autres, les bras sont à égalité.
-  L'avantage de Quod est la qualité du contrat, pas son coût.
+  Les contrats de Quod sont plus souvent *décidés*, ce qui ne les rend pas meilleurs : voir plus bas.
 - Trois essais de six tâches font 18 essais, mais les essais d'une même tâche ne sont pas
   indépendants : ce sont des tendances sur six tâches, pas des taux.
 
@@ -192,6 +194,14 @@ complète de binary_search, à la différence du QUOD.md du bras shell. Les troi
 copient sa clause `loose` et son commentaire, et deux de celles de Qwen3 au dernier passage en reprennent le
 contrat. Sans cette tâche, les contrats déterminés sont 14 sur 15 par le shell, 9 sur 15 à travers MCP et 9 sur
 15 pour Dafny : **à travers MCP, l'agent est à égalité avec Dafny, pas devant**.
+
+**Une seconde correction : non décidé ne veut pas dire non déterminé.** Les tableaux comptent comme non déterminé un contrat
+que l'outil ne sait pas décider, pour Dafny comme pour Quod. [La lecture de chacun](../runs/t6-haiku/undecided-review.md)
+donne, sans binary_search, 15 sur 15 par le shell, 13 sur 15 à travers MCP et 14 sur 15 pour Dafny : **aucun gain mesuré sur la
+fréquence des contrats qui déterminent le résultat.** Ces tâches laissent peut-être peu de marge, le modèle écrivant déjà de tels
+contrats de lui-même. Ce que le contrôle change, c'est que le verdict est connu pendant que l'agent écrit : `quod check` en
+décide 14 sur 15 par le shell, dafny-complete 9 sur 15 après coup. Le seul contrat trouvé faux est un contrat Dafny qu'aucun
+outil n'a signalé : une couverture sur les entiers, qui accepte `[(1,4)]` pour `[(1,2),(3,4)]`.
 
 ## Ce que leur écriture a changé dans le vérificateur
 

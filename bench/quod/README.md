@@ -83,7 +83,9 @@ same compiler as quod3-haiku.
 | Time, cost | 47 min, 0.59 USD | 7 min, 0.08 USD |
 
 The agent no longer gropes with a shell, paths and temporary files: it calls `quod_check` and
-reads a structured answer. One trial per task again: a direction, not a measure.
+reads a structured answer. One trial per task again: a direction, not a measure. **This run is not comparable as
+it stands:** the reference served through MCP then contained a whole binary_search, and the three trials below do
+not confirm the gain. See the corrections at the end of the next section.
 
 ### Three trials, Dafny, and another vendor
 
@@ -134,8 +136,8 @@ Contract determined, by task (three trials each):
   tool. Each of these is a hypothesis.
 - **Dafny is three times faster and half as expensive.** At equal criteria the gap in contracts
   (17 against 12) comes from two tasks, merge_intervals and rle_encode, whose Dafny contracts
-  dafny-complete cannot decide; on the four others the arms are level. Quod's advantage is the
-  quality of the contract, not its cost.
+  dafny-complete cannot decide; on the four others the arms are level. Quod's contracts are more
+  often *decided*, which does not make them better: see below.
 - Three trials of six tasks are 18 runs, but the trials of one task are not independent: these
   are directions on six tasks, not rates.
 
@@ -188,6 +190,14 @@ solution of binary_search, unlike the QUOD.md of the shell arm. All three Haiku 
 its `loose` clause and its comment, and two of Qwen3's in the last run reuse the contract. Without that task,
 contracts determined are 14 of 15 through the shell, 9 of 15 through MCP and 9 of 15 for Dafny: **through MCP
 the agent is level with Dafny, not ahead of it**.
+
+**A second correction: undecided is not undetermined.** The tables count a contract the tool cannot decide as not
+determined, for Dafny as for Quod. [Reading each of them](../runs/t6-haiku/undecided-review.md) gives, without
+binary_search, 15 of 15 through the shell, 13 of 15 through MCP and 14 of 15 for Dafny: **no gain measured in how
+often a contract determines the result.** These tasks may leave little room, the model already writing such
+contracts by itself. What the check changes is that the verdict is known, while the agent writes: 14 of 15 are decided
+by `quod check` through the shell, 9 of 15 by dafny-complete afterwards. The one contract found wrong is a Dafny one that
+no tool flagged: a cover over the integers, which accepts `[(1,4)]` for `[(1,2),(3,4)]`.
 
 ## What writing them changed in the verifier
 
