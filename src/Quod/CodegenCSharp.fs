@@ -53,8 +53,49 @@ let rec csType (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> "BigInteger"
     | TyBool -> "bool"
+    // inside, a scalar value: C#'s char is a UTF-16 unit, and half an emoji is not a character
+    | TyChar -> "int"
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
+
+let rec private hasChar (t: Ty) =
+    match t with
+    | TyChar -> true
+    | TySeq e -> hasChar e
+    | TyTuple ts -> List.exists hasChar ts
+    | _ -> false
+
+/// The type a C# caller sees: `string` for a string, and an `int` for a char, its scalar value.
+let rec private publicType (t: Ty) =
+    match t with
+    | TySeq TyChar -> "string"
+    | TySeq e -> "IReadOnlyList<" + publicType e + ">"
+    | TyTuple ts -> "(" + (ts |> List.map publicType |> String.concat ", ") + ")"
+    | t -> csType t
+
+/// An argument from a caller as Quod's values: validated, since a lone surrogate is not a character.
+let rec private fromCaller (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TyChar -> "_quod_char(" + term + ")"
+    | TySeq TyChar -> "_quod_str(" + term + ")"
+    | TySeq e when hasChar e ->
+        let x = "_quod_x" + string depth
+        "new _QuodView<" + publicType e + ", " + csType e + ">(" + term + ", " + x + " => " + fromCaller e x (depth + 1) + ")"
+    | TyTuple ts when hasChar t ->
+        "(" + (ts |> List.mapi (fun k c -> fromCaller c (term + ".Item" + string (k + 1)) depth) |> String.concat ", ") + ")"
+    | _ -> term
+
+/// A result of Quod's as the caller's.
+let rec private toCaller (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TySeq TyChar -> "_quod_text(" + term + ")"
+    | TySeq e when hasChar e ->
+        let x = "_quod_x" + string depth
+        "new _QuodView<" + csType e + ", " + publicType e + ">(" + term + ", " + x + " => " + toCaller e x (depth + 1) + ")"
+    | TyTuple ts when hasChar t ->
+        // once: the tuple may be a call
+        "_quod_with(" + term + ", _quod_t" + string depth + " => (" + (ts |> List.mapi (fun k c -> toCaller c ("_quod_t" + string depth + ".Item" + string (k + 1)) (depth + 1)) |> String.concat ", ") + "))"
+    | _ -> term
 
 /// The empty literal has an unknown element type (`seq<error>`): what surrounds it knows it.
 let rec private merge (known: Ty) (other: Ty) =
@@ -77,7 +118,35 @@ let private literal (text: string) = "\"" + text.Replace("\\", "\\\\").Replace("
 let private xml (text: string) = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
 
 let private helpers =
-    [ "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
+    [ "text",
+      "private static IReadOnlyList<int> _quod_str(string s)
+        {
+            if (s == null) throw new ArgumentNullException(\"s\");
+            var r = new List<int>(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])) { r.Add(char.ConvertToUtf32(s[i], s[i + 1])); i++; }
+                else if (char.IsSurrogate(s[i])) throw new ArgumentException(\"a lone surrogate is not a character\");
+                else r.Add(s[i]);
+            }
+            return r;
+        }
+
+        private static int _quod_char(int c)
+        {
+            if (c < 0 || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) throw new ArgumentException(\"not a Unicode scalar value: \" + c);
+            return c;
+        }
+
+        private static string _quod_text(IReadOnlyList<int> xs)
+        {
+            var b = new System.Text.StringBuilder(xs.Count);
+            for (int i = 0; i < xs.Count; i++) b.Append(char.ConvertFromUtf32(xs[i]));
+            return b.ToString();
+        }
+
+        private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
+      "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
       "concat",
       "private static IReadOnlyList<T> _quod_concat<T>(IReadOnlyList<T> a, IReadOnlyList<T> b)
         {
@@ -245,6 +314,7 @@ type private Gen(checks: Set<string>) =
         let ty = merge (shape e.Ty) (shape want)
         let elem = match ty with TySeq t -> t | _ -> TyInt
         match e.Kind with
+        | EInt n when e.Ty = TyChar -> n.ToString()
         | EInt n -> g.Constant n
         | EBool b -> if b then "true" else "false"
         | EVar n -> g.Name n
@@ -305,6 +375,8 @@ type private Gen(checks: Set<string>) =
                 text <- f + "(" + l + ", " + h + ", " + name + " => " + g.Expr(body, TyBool) + ")")
             text
         | EToNat x -> g.Expr(x, TyInt)
+        | EConvert x when e.Ty = TyChar -> "((int)" + g.Expr(x, TyInt) + ")"
+        | EConvert x -> "new BigInteger(" + g.Expr(x, TyChar) + ")"
 
     /// The parameter types of the program, for arguments that do not know theirs (`f([])`).
     member val Signatures: Map<string, TFn> = Map.empty with get, set
@@ -316,7 +388,11 @@ type private Gen(checks: Set<string>) =
         let ps = g.Signatures.[f].Params
         let callee =
             match Quod.Modules.split f with
-            | Some m, h -> g.ModuleClasses.[m] + "." + pascal h
+            | Some m, h ->
+                // a module's own values go through: a string is converted once, at the outer boundary
+                let target = g.Signatures.[f]
+                let raw = hasChar target.Ret || target.Params |> List.exists (fun p -> hasChar p.Ty)
+                g.ModuleClasses.[m] + "." + (if raw then "_quod_pub_" + h else pascal h)
             | None, _ -> implName f
         callee + "(" + (List.map2 (fun (a: TExpr) (p: TParam) -> g.Expr(a, p.Ty)) args ps |> String.concat ", ") + ")"
 
@@ -437,7 +513,7 @@ let rec private hasIntegerList (t: Ty) =
 let rec private narrowType (narrow: string) (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> narrow
-    | TyBool -> "bool"
+    | TyBool | TyChar -> csType t
     | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
     | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
 
@@ -446,7 +522,7 @@ let rec private narrowType (narrow: string) (t: Ty) =
 let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
     match t with
     | TyInt | TyNat | TyError -> "new BigInteger(" + term + ")"
-    | TyBool -> term
+    | TyBool | TyChar -> term
     | TySeq e ->
         let x = "_quod_x" + string depth
         "new _QuodView<" + narrowType narrow e + ", " + csType e + ">(" + term + ", " + x + " => " + widen narrow e x (depth + 1) + ")"
@@ -506,9 +582,28 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 sb.Append(indent).Append("/// <remarks>\n") |> ignore
                 for n in notes do sb.Append(indent).Append("/// ").Append(xml n).Append("<br/>\n") |> ignore
                 sb.Append(indent).Append("/// </remarks>\n") |> ignore
-            sb.Append(indent).Append("public static ").Append(csType f.Ret).Append(' ').Append(pascal f.Name).Append('(').Append(ps).Append(")\n")
-              .Append(indent).Append("{\n") |> ignore
+            // with a string in the signature, the method below takes Quod's values, and another one
+            // converts the caller's. A call from another module has no need to convert twice.
+            let text' = hasChar f.Ret || f.Params |> List.exists (fun p -> hasChar p.Ty)
             let body = indent + "    "
+            if text' then
+                g.Help "text" |> ignore
+                let rec viewed (t: Ty) =
+                    match t with
+                    | TySeq TyChar -> false
+                    | TySeq e -> hasChar e
+                    | TyTuple ts -> List.exists viewed ts
+                    | _ -> false
+                if viewed f.Ret || f.Params |> List.exists (fun p -> viewed p.Ty) then g.Help "view" |> ignore
+                let outer = f.Params |> List.map (fun p -> publicType p.Ty + " " + csName p.Name) |> String.concat ", "
+                let call = "_quod_pub_" + f.Name + "(" + (f.Params |> List.map (fun p -> fromCaller p.Ty (csName p.Name) 0) |> String.concat ", ") + ")"
+                sb.Append(indent).Append("public static ").Append(publicType f.Ret).Append(' ').Append(pascal f.Name).Append('(').Append(outer).Append(")\n")
+                  .Append(indent).Append("{\n")
+                  .Append(body).Append("return ").Append(toCaller f.Ret call 0).Append(";\n")
+                  .Append(indent).Append("}\n\n") |> ignore
+            let publicName = if text' then "_quod_pub_" + f.Name else pascal f.Name
+            sb.Append(indent).Append(if text' then "internal static " else "public static ").Append(csType f.Ret).Append(' ').Append(publicName).Append('(').Append(ps).Append(")\n")
+              .Append(indent).Append("{\n") |> ignore
             g.Reset()
             for p in f.Params do g.Bind(p.Name, p.Ty) |> ignore
             for p in f.Params do
@@ -542,7 +637,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
               .Append(indent).Append("}\n\n") |> ignore
             // a real caller has a List<int>, not an IReadOnlyList<BigInteger>: the same method for
             // its integers, without a copy (review of 0.1.4). The result stays a BigInteger.
-            if f.Params |> List.exists (fun p -> hasIntegerList p.Ty) then
+            if not text' && f.Params |> List.exists (fun p -> hasIntegerList p.Ty) then
                 for narrow in [ "int"; "long" ] do
                     let narrowed = f.Params |> List.map (fun p -> narrowType narrow p.Ty + " " + csName p.Name) |> String.concat ", "
                     g.Help "view" |> ignore

@@ -2,6 +2,7 @@
 /// Used for debugging (`quod parse`) and by the tests: parse(print(t)) must give t back.
 module Quod.Printer
 
+open System
 open System.Text
 open Quod.Syntax
 
@@ -10,6 +11,7 @@ let rec typeText (t: TypeExpr) =
     | TInt -> "int"
     | TNat -> "nat"
     | TBool -> "bool"
+    | TChar -> "char"
     | TSeq e -> "seq<" + typeText e + ">"
     | TTuple ts -> "(" + (ts |> List.map typeText |> String.concat ", ") + ")"
 
@@ -24,6 +26,18 @@ let private prec = function
     | Eq | Ne | Lt | Le | Gt | Ge -> 5
     | Add | Sub -> 6
     | Mul | Div | Mod -> 7
+
+/// A Unicode scalar value as it is written in a literal.
+let private scalarText (quote: char) (v: int) =
+    match v with
+    | 10 -> "\\n"
+    | 9 -> "\\t"
+    | 13 -> "\\r"
+    | 0 -> "\\0"
+    | 92 -> "\\\\"
+    | _ when v = int quote -> "\\" + string quote
+    | _ when v < 32 || v = 127 -> "\\u{" + v.ToString "X" + "}"
+    | _ -> Char.ConvertFromUtf32 v
 
 let rec private exprPrec (e: Expr) =
     match e.Kind with
@@ -40,6 +54,8 @@ let rec exprText (e: Expr) : string =
     match e.Kind with
     | IntLit v -> v.ToString()
     | BoolLit b -> if b then "true" else "false"
+    | CharLit v -> "'" + scalarText '\'' v + "'"
+    | StrLit vs -> "\"" + String.Join("", vs |> List.map (scalarText '"')) + "\""
     | Var n -> n
     | Result -> "result"
     | SeqLit items -> "[" + (items |> List.map exprText |> String.concat ", ") + "]"

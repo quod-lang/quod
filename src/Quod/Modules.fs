@@ -30,7 +30,7 @@ let rec private expr (rename: Span -> string -> string) (e: Expr) : Expr =
     let go = expr rename
     let kind =
         match e.Kind with
-        | IntLit _ | BoolLit _ | Var _ | Result -> e.Kind
+        | IntLit _ | BoolLit _ | CharLit _ | StrLit _ | Var _ | Result -> e.Kind
         | SeqLit xs -> SeqLit(List.map go xs)
         | TupleLit xs -> TupleLit(List.map go xs)
         | Index(a, b) -> Index(go a, go b)
@@ -123,6 +123,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                             | Some x when x.IsPrivate -> refuse ("'" + g + "' is private to module '" + m + "'")
                             | Some _ -> callee
                         | None, g when locals.Contains g -> flat g
+                        | None, ("code" | "char_of") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
                             match elsewhere with

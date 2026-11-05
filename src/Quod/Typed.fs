@@ -11,6 +11,8 @@ type Ty =
     | TyNat
     | TyBool
     | TySeq of Ty
+    /// A Unicode scalar value: not an integer, though the verifier models it by one. `string` is `seq<char>`.
+    | TyChar
     | TyTuple of Ty list
     /// The type of an expression that already produced an error: absorbs further checks,
     /// so that one mistake does not cascade into many messages.
@@ -53,6 +55,8 @@ and TExprKind =
     | EQuant of Quantifier * string * TExpr * TExpr * TExpr
     /// An `int` used where a `nat` is expected: the verifier must prove it is `>= 0`.
     | EToNat of TExpr
+    /// `code(c)` (Ty nat) or `char_of(n)` (Ty char, with an obligation): the same number for the solver.
+    | EConvert of TExpr
 
 type TStmt = { Kind: TStmtKind; Span: Span }
 
@@ -107,6 +111,8 @@ let rec tyText (t: Ty) =
     | TyInt -> "int"
     | TyNat -> "nat"
     | TyBool -> "bool"
+    | TyChar -> "char"
+    | TySeq TyChar -> "string"
     | TySeq e -> "seq<" + tyText e + ">"
     | TyTuple ts -> "(" + (ts |> List.map tyText |> String.concat ", ") + ")"
     | TyError -> "<error>"
@@ -117,6 +123,7 @@ let rec ofSyntax (t: TypeExpr) =
     | TypeExpr.TNat -> TyNat
     | TypeExpr.TBool -> TyBool
     | TypeExpr.TSeq e -> TySeq(ofSyntax e)
+    | TypeExpr.TChar -> TyChar
     | TypeExpr.TTuple ts -> TyTuple(List.map ofSyntax ts)
 
 /// A typed expression back as a syntax tree: to print it (docstrings), or to compare two
@@ -125,7 +132,11 @@ let rec toSyntax (e: TExpr) : Syntax.Expr =
     let mk k : Syntax.Expr = { Kind = k; Span = e.Span }
     let u = toSyntax
     match e.Kind with
+    | EInt n when e.Ty = TyChar -> mk (Syntax.CharLit(int n))
     | EInt n -> mk (Syntax.IntLit n)
+    | ESeq xs when e.Ty = TySeq TyChar && xs |> List.forall (fun x -> match x.Kind with EInt _ -> true | _ -> false) ->
+        mk (Syntax.StrLit(xs |> List.map (fun x -> match x.Kind with EInt n -> int n | _ -> 0)))
+    | EConvert x -> mk (Syntax.Call((if e.Ty = TyChar then "char_of" else "code"), [ u x ]))
     | EBool b -> mk (Syntax.BoolLit b)
     | EVar n -> mk (Syntax.Var n)
     | EResult -> mk Syntax.Result

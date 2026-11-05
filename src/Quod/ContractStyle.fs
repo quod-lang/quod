@@ -78,7 +78,7 @@ let valueUses (prog: TProgram) : Set<string> =
         | ESeq xs | ETuple xs -> List.iter expr xs
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
-        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
         | EInt _ | EBool _ | EVar _ | EResult -> ()
     /// Does a variable named n appear in e?
@@ -88,7 +88,7 @@ let valueUses (prog: TProgram) : Set<string> =
         | ECall(_, xs) | ESeq xs | ETuple xs -> List.exists (reads n) xs
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> reads n a || reads n b
         | ESlice(a, b, c) -> reads n a || Option.exists (reads n) b || Option.exists (reads n) c
-        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> reads n a
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> reads n a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> reads n a || reads n b || reads n c
         | EInt _ | EBool _ | EResult -> false
     for f in prog.Fns do
@@ -130,6 +130,7 @@ let rec private unfold (values: Map<string, TExpr>) (g: string) (f: string) (e: 
         | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
         | EProj(a, k) -> EProj(go a, k)
         | ELen a -> ELen(go a)
+        | EConvert a -> EConvert(go a)
         | ECall(h, xs) -> ECall((if h = g then f else h), List.map go xs)
         | ENeg a -> ENeg(go a)
         | ENot a -> ENot(go a)
@@ -207,7 +208,7 @@ let rec private calls (e: TExpr) : string list =
     | ESeq xs | ETuple xs -> List.collect calls xs
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> calls a @ calls b
     | ESlice(a, b, c) -> calls a @ (Option.toList b |> List.collect calls) @ (Option.toList c |> List.collect calls)
-    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> calls a
+    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> calls a
     | EIf(a, b, c) | EQuant(_, _, a, b, c) -> calls a @ calls b @ calls c
     | EInt _ | EBool _ | EVar _ | EResult -> []
 

@@ -26,6 +26,7 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
         | EVar n -> if not whole then shared.Add n |> ignore
         | EConcat(a, b) | EEq(a, b) -> reads a; reads b
         | ELen s -> reads s
+        | EConvert a -> inner a
         | EIndex(s, i) -> reads s; inner i
         | ESlice(s, lo, hi) -> reads s; Option.iter inner lo; Option.iter inner hi
         | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter inner xs
@@ -78,7 +79,7 @@ let rec cheap (e: TExpr) =
     | ESeq xs | ETuple xs -> List.forall cheap xs
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> cheap a && cheap b
     | ESlice(a, b, c) -> cheap a && Option.forall cheap b && Option.forall cheap c
-    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> cheap a
+    | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> cheap a
     | EIf(a, b, c) -> cheap a && cheap b && cheap c
 
 // --- modules: the flattened program, seen from one module ---------------------------------------
@@ -105,6 +106,7 @@ let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
         | EIf(a, b, c) -> EIf(go a, go b, go c)
         | EQuant(q, v, a, b, c) -> EQuant(q, v, go a, go b, go c)
         | EToNat a -> EToNat(go a)
+        | EConvert a -> EConvert(go a)
     { e with Kind = kind }
 
 let rec private mapCallsS (rename: string -> string) (s: TStmt) : TStmt =

@@ -88,7 +88,9 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | TySeq x, TySeq y -> fits x y
             | TyTuple xs, TyTuple ys when xs.Length = ys.Length -> List.forall2 fits xs ys
             | _ -> false
-        if fits e.Ty expected then e
+        // `[]` where a string is expected is the empty string: the generators must know it
+        if expected = TySeq TyChar && e.Kind = ESeq [] then { e with Ty = expected }
+        elif fits e.Ty expected then e
         elif e.Ty = TyInt && expected = TyNat then { Kind = EToNat e; Ty = TyNat; Span = e.Span }
         else
             // a literal (or an if) is coerced part by part: (x, n + 1) as (int, nat) proves n + 1 >= 0
@@ -123,6 +125,8 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         match e.Kind with
         | IntLit v -> mk (EInt v) TyInt
         | BoolLit b -> mk (EBool b) TyBool
+        | CharLit v -> mk (EInt(bigint v)) TyChar
+        | StrLit vs -> mk (ESeq(vs |> List.map (fun v -> mk (EInt(bigint v)) TyChar))) (TySeq TyChar)
         | Var name ->
             match c.Lookup name with
             | Some b -> mk (EVar name) b.Ty
@@ -210,6 +214,18 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | _ ->
                 c.Error(e.Span, ctx.FnName, "len() takes exactly one argument")
                 fail ()
+        | Call("code", [ a ]) when not (fns.ContainsKey "code") ->
+            let ta = c.Expr(a, ctx, None)
+            match ta.Ty with
+            | TyChar -> mk (EConvert ta) TyNat
+            | TyError -> fail ()
+            | t ->
+                c.Error(a.Span, ctx.FnName, "code() takes a char, this is " + tyText t)
+                fail ()
+        | Call("char_of", [ a ]) when not (fns.ContainsKey "char_of") ->
+            let ta = c.Expr(a, ctx, None)
+            c.ExpectInt(ta, ctx, "the argument of char_of")
+            mk (EConvert ta) TyChar
         | Call(name, args) ->
             match fns.TryFind name with
             | None ->
@@ -292,8 +308,10 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         | Lt | Le | Gt | Ge ->
             let tl = c.Expr(l, ctx, None)
             let tr = c.Expr(r, ctx, None)
-            c.ExpectInt(tl, ctx, "a compared value")
-            c.ExpectInt(tr, ctx, "a compared value")
+            // two chars compare by their scalar values, without any locale
+            if not (tl.Ty = TyChar && tr.Ty = TyChar) then
+                c.ExpectInt(tl, ctx, "a compared value")
+                c.ExpectInt(tr, ctx, "a compared value")
             let cop = match op with Lt -> OLt | Le -> OLe | Gt -> OGt | _ -> OGe
             mk (ECmp(cop, tl, tr)) TyBool
         | Eq | Ne ->
@@ -467,7 +485,7 @@ let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
     | Binary(_, a, b) -> go a; go b
     | IfExpr(a, b, c) -> go a; go b; go c
     | Quant(_, _, a, b, c) -> go a; go b; go c
-    | IntLit _ | BoolLit _ | Var _ | Result -> ()
+    | IntLit _ | BoolLit _ | CharLit _ | StrLit _ | Var _ | Result -> ()
 
 let rec private callsStmts (acc: HashSet<string>) (ss: Stmt list) =
     for s in ss do

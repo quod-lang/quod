@@ -14,6 +14,7 @@ type TypeExpr =
     | TNat
     | TBool
     | TSeq of TypeExpr
+    | TChar
     | TTuple of TypeExpr list
 
 type UnOp =
@@ -34,6 +35,10 @@ type Expr = { Kind: ExprKind; Span: Span }
 and ExprKind =
     | IntLit of bigint
     | BoolLit of bool
+    /// `'a'`: one Unicode scalar value
+    | CharLit of int
+    /// `"ab"`: a `seq<char>`, written in one piece
+    | StrLit of int list
     | Var of string
     /// `result`, the value returned by the function (in `ensures` only)
     | Result

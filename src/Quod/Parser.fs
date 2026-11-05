@@ -97,6 +97,9 @@ type private Parser(file: string, toks: Token[]) =
         | TkKeyword "int" -> p.Next() |> ignore; TInt
         | TkKeyword "nat" -> p.Next() |> ignore; TNat
         | TkKeyword "bool" -> p.Next() |> ignore; TBool
+        // words only here: an existing variable may be called `string` or `char`
+        | TkIdent "char" -> p.Next() |> ignore; TChar
+        | TkIdent "string" -> p.Next() |> ignore; TSeq TChar
         | TkKeyword "seq" ->
             p.Next() |> ignore
             p.Sym "<"
@@ -285,6 +288,8 @@ type private Parser(file: string, toks: Token[]) =
         | TkInt v ->
             p.Next() |> ignore
             p.Mk(IntLit v, start)
+        | TkChar v -> p.Next() |> ignore; p.Mk(CharLit v, start)
+        | TkString v -> p.Next() |> ignore; p.Mk(StrLit v, start)
         | TkKeyword "true" -> p.Next() |> ignore; p.Mk(BoolLit true, start)
         | TkKeyword "false" -> p.Next() |> ignore; p.Mk(BoolLit false, start)
         | TkKeyword "result" -> p.Next() |> ignore; p.Mk(Result, start)

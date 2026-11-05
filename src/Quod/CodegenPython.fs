@@ -21,6 +21,7 @@ let rec private pyType (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> "int"
     | TyBool -> "bool"
+    | TyChar | TySeq TyChar -> "str"
     | TySeq e -> "list[" + pyType e + "]"
     | TyTuple ts -> "tuple[" + (ts |> List.map pyType |> String.concat ", ") + "]"
 
@@ -72,6 +73,41 @@ def _quod_slice(xs, lo: int, hi: int):
     return xs[lo:hi]
 """
 
+/// A string or a char at the public boundary: a surrogate is not a Unicode scalar value, and would
+/// contradict what was proved. Only in a module whose signatures have one.
+let private textPrelude =
+    """
+
+def _quod_str(s):
+    if type(s) is not str:
+        raise TypeError("a string is expected, not " + type(s).__name__)
+    for c in s:
+        if "\ud800" <= c <= "\udfff":
+            raise ValueError("a lone surrogate is not a character")
+    return s
+
+
+def _quod_char(c):
+    if type(c) is not str or _quod_len(c) != 1:
+        raise TypeError("one character is expected")
+    return _quod_str(c)
+"""
+
+/// A Python literal for these scalar values, the same whatever the encoding of the file.
+let private pyString (scalars: int list) =
+    let one (v: int) =
+        match v with
+        | 92 -> "\\\\"
+        | 34 -> "\\\""
+        | 10 -> "\\n"
+        | 13 -> "\\r"
+        | 9 -> "\\t"
+        | _ when v < 32 || v = 127 -> "\\x" + v.ToString "x2"
+        | _ when v < 127 -> string (char v)
+        | _ when v <= 0xFFFF -> "\\u" + v.ToString "x4"
+        | _ -> "\\U" + v.ToString "x8"
+    "\"" + (scalars |> List.map one |> String.concat "") + "\""
+
 /// The implementation of a Quod function: what Quod code calls. The public `def` only
 /// normalizes its arguments, once, then calls it.
 /// A call in Quod code: the implementation in this module, the public function of another one,
@@ -95,10 +131,15 @@ type private Gen(checks: Set<string>) =
     member g.Expr(e: TExpr) : string =
         let go = g.Expr
         match e.Kind with
+        | EInt n when e.Ty = TyChar -> pyString [ int n ]
         | EInt n -> if n.Sign < 0 then "(" + n.ToString() + ")" else n.ToString()
         | EBool b -> if b then "True" else "False"
         | EVar n -> pyName n
         | EResult -> "_quod_result"
+        | ESeq xs when e.Ty = TySeq TyChar ->
+            if xs |> List.forall (fun x -> match x.Kind with EInt _ -> true | _ -> false) then
+                pyString (xs |> List.map (fun x -> match x.Kind with EInt n -> int n | _ -> 0))
+            else "\"\".join([" + (xs |> List.map go |> String.concat ", ") + "])"
         | ESeq xs -> "[" + (xs |> List.map go |> String.concat ", ") + "]"
         | ETuple xs -> "(" + (xs |> List.map go |> String.concat ", ") + ")"
         | EIndex(s, i) -> if checking then "_quod_at(" + go s + ", " + go i + ")" else go s + "[" + go i + "]"
@@ -136,6 +177,7 @@ type private Gen(checks: Set<string>) =
             let f = match q with Syntax.Forall -> "_quod_all" | Syntax.Exists -> "_quod_any"
             f + "(" + go body + " for " + pyName v + " in _quod_range(" + go lo + ", " + go hi + "))"
         | EToNat x -> go x
+        | EConvert x -> (if e.Ty = TyChar then "chr(" else "ord(") + go x + ")"
 
     /// An argument from Python as the generated code expects it: sequences as lists, tuples as
     /// tuples. A list of numbers or booleans is taken as it is (O(1)); a sequence of tuples or of
@@ -143,6 +185,8 @@ type private Gen(checks: Set<string>) =
     /// boundary only: calls between Quod functions pass values already in shape).
     member g.Normalize(t: Ty, term: string) : string =
         match t with
+        | TyChar -> "_quod_char(" + term + ")"
+        | TySeq TyChar -> "_quod_str(" + term + ")"
         | TySeq e ->
             match g.Normalize(e, "_quod_x") with
             | "_quod_x" -> "_quod_seq(" + term + ")"
@@ -191,7 +235,7 @@ type private Gen(checks: Set<string>) =
         let line (text: string) = sb.Append(indent).Append(text).Append('\n') |> ignore
         let checked' = checks.Contains f.Name
         match s.Kind with
-        | SAssign(n, { Kind = EConcat({ Kind = EVar n2 }, tail) }) when n2 = n && inPlace.Contains n ->
+        | SAssign(n, { Kind = EConcat({ Kind = EVar n2 }, tail); Ty = ty }) when n2 = n && inPlace.Contains n && ty <> TySeq TyChar ->
             match tail.Kind with
             | ESeq [ x ] -> line (pyName n + ".append(" + g.Expr x + ")")
             | _ -> line (pyName n + ".extend(" + g.Expr tail + ")")
@@ -289,6 +333,14 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
         sb.Append("import ").Append(m).Append(" as _quod_m_").Append(m).Append("\n") |> ignore
     if not (Codegen.calledModules prog).IsEmpty then sb.Append("\n") |> ignore
     sb.Append(prelude) |> ignore
+    let rec hasChar (t: Ty) =
+        match t with
+        | TyChar -> true
+        | TySeq x -> hasChar x
+        | TyTuple ts -> List.exists hasChar ts
+        | _ -> false
+    if prog.Fns |> List.exists (fun f -> not f.IsLemma && f.Params |> List.exists (fun p -> hasChar p.Ty)) then
+        sb.Append(textPrelude) |> ignore
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
     sb.Append("\n\n__all__ = [").Append(fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
     let g = Gen(checks)

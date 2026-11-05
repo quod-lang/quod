@@ -4,18 +4,23 @@
 /// functions, which terminate (that is proved before they are used).
 module Quod.Eval
 
+open System
 open System.Numerics
 open Quod.Typed
 
 type Value =
     | VInt of BigInteger
     | VBool of bool
+    | VChar of int
     | VSeq of Value list
     | VTuple of Value list
 
 /// Raised when a value cannot be computed: an index out of bounds, a division by zero, a call
 /// to a statement function, a quantifier over a huge range. The caller then confirms nothing.
 exception CannotEvaluate of string
+
+let isScalar (n: BigInteger) =
+    n.Sign >= 0 && n <= BigInteger 0x10FFFF && not (n >= BigInteger 0xD800 && n <= BigInteger 0xDFFF)
 
 /// Raised in checking mode when running a function breaks one of its proof obligations: the
 /// label and position are those of the obligation in the verifier ("invariant #2 is preserved
@@ -57,10 +62,16 @@ let withBigStack (work: unit -> 'a) : 'a =
     if not (isNull error) then raise error
     result
 
+let private charText (c: int) =
+    if c < 32 || c = 127 then "\\u{" + c.ToString "X" + "}" else Char.ConvertFromUtf32 c
+
 let rec valueText (v: Value) =
     match v with
     | VInt n -> n.ToString()
     | VBool b -> if b then "true" else "false"
+    | VChar c -> "'" + charText c + "'"
+    | VSeq xs when not xs.IsEmpty && xs |> List.forall (function VChar _ -> true | _ -> false) ->
+        "\"" + (xs |> List.map (function VChar c -> charText c | _ -> "") |> String.concat "") + "\""
     | VSeq xs -> "[" + (xs |> List.map valueText |> String.concat ", ") + "]"
     | VTuple xs -> "(" + (xs |> List.map valueText |> String.concat ", ") + ")"
 
@@ -95,6 +106,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         let asBool x = match go x with VBool b -> b | _ -> raise (CannotEvaluate "not a bool")
         let asSeq x = match go x with VSeq s -> s | _ -> raise (CannotEvaluate "not a sequence")
         match e.Kind with
+        | EInt n when e.Ty = TyChar -> VChar(int n)
         | EInt n -> VInt n
         | EBool b -> VBool b
         | EVar n ->
@@ -168,7 +180,9 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
                 VInt(if op = ODiv then q else r)
         | EConcat(a, b) -> VSeq(asSeq a @ asSeq b)
         | ECmp(op, a, b) ->
-            let x, y = asInt a, asInt b
+            // two chars compare by their scalar values
+            let asNumber x = match go x with VChar c -> BigInteger c | VInt n -> n | _ -> raise (CannotEvaluate "not a number")
+            let x, y = asNumber a, asNumber b
             VBool(match op with OLt -> x < y | OLe -> x <= y | OGt -> x > y | OGe -> x >= y)
         | EEq(a, b) -> VBool(go a = go b)
         | ELogic(op, a, b) ->
@@ -189,6 +203,12 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
             match q with
             | Syntax.Forall -> VBool(Seq.forall test values)
             | Syntax.Exists -> VBool(Seq.exists test values)
+        | EConvert x ->
+            match go x with
+            | VChar c -> VInt(BigInteger c)
+            | VInt n when isScalar n -> VChar(int n)
+            | VInt _ when checking -> raise (Violation("the argument of char_of is a Unicode scalar value", e.Span))
+            | _ -> raise (CannotEvaluate "char_of of a value that is not a scalar value")
         | EToNat x ->
             let v = go x
             match v with
@@ -199,6 +219,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
     member ev.Fits(t: Ty, v: Value) : bool =
         match t, v with
         | TyNat, VInt n -> n.Sign >= 0
+        | TyChar, VChar c -> isScalar (BigInteger c)
         | TyInt, VInt _ -> true
         | TyBool, VBool _ -> true
         | TySeq e, VSeq xs -> xs |> List.forall (fun x -> ev.Fits(e, x))

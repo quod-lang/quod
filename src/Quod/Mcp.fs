@@ -73,6 +73,9 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
     match v with
     | Eval.VInt n -> if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then w.WriteNumberValue(int64 n) else w.WriteStringValue(n.ToString())
     | Eval.VBool b -> w.WriteBooleanValue b
+    | Eval.VChar c -> w.WriteStringValue(Char.ConvertFromUtf32 c)
+    | Eval.VSeq xs when not xs.IsEmpty && xs |> List.forall (function Eval.VChar _ -> true | _ -> false) ->
+        w.WriteStringValue(String.Join("", xs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))
     | Eval.VSeq xs | Eval.VTuple xs ->
         w.WriteStartArray()
         for x in xs do writeValue w x
@@ -90,6 +93,12 @@ let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
         match BigInteger.TryParse(e.GetString()) with
         | true, n -> Some(Eval.VInt n)
         | _ -> None
+    | TyChar, JsonValueKind.String ->
+        match [ for r in e.GetString().EnumerateRunes() -> r.Value ] with
+        | [ c ] -> Some(Eval.VChar c)
+        | _ -> None
+    | TySeq TyChar, JsonValueKind.String ->
+        Some(Eval.VSeq [ for r in e.GetString().EnumerateRunes() -> Eval.VChar r.Value ])
     | TyBool, JsonValueKind.True -> Some(Eval.VBool true)
     | TyBool, JsonValueKind.False -> Some(Eval.VBool false)
     | TySeq el, JsonValueKind.Array ->

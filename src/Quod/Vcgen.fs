@@ -22,6 +22,7 @@ let rec private tySig (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> "i"
     | TyBool -> "b"
+    | TyChar -> "c"
     | TySeq e -> "S" + tySig e + "E"
     | TyTuple ts -> "T" + (ts |> List.map tySig |> String.concat "") + "E"
 
@@ -29,7 +30,7 @@ let private tupleName (ts: Ty list) = "Tup_" + (ts |> List.map tySig |> String.c
 
 let rec sortOf (t: Ty) =
     match t with
-    | TyInt | TyNat | TyError -> "Int"
+    | TyInt | TyNat | TyChar | TyError -> "Int"
     | TyBool -> "Bool"
     | TySeq e -> "Seq_" + tySig e
     | TyTuple ts -> tupleName ts
@@ -111,10 +112,15 @@ let private implies (guards: string list) (goal: string) =
 
 let private intLit (v: bigint) = if v.Sign < 0 then "(- " + (-v).ToString() + ")" else v.ToString()
 
+/// A char is a Unicode scalar value: 0 to 10FFFF, without the surrogates.
+let private scalarFact (term: string) =
+    "(and (<= 0 " + term + ") (<= " + term + " 1114111) (not (and (<= 55296 " + term + ") (<= " + term + " 57343))))"
+
 /// Facts that a value of type t carries: a nat is >= 0, and so are the elements of a seq<nat>.
 let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : string list =
     match t with
     | TyNat -> [ "(>= " + term + " 0)" ]
+    | TyChar -> [ scalarFact term ]
     | TySeq e ->
         let q = fresh ()
         match typeFacts fresh e ("(" + seqOp "nth" t + " " + term + " " + q + ")") with
@@ -189,6 +195,10 @@ let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
         match bigint.TryParse n with
         | true, v -> Some(Eval.VInt(-v))
         | _ -> None
+    | TyChar, Atom n ->
+        match bigint.TryParse n with
+        | true, v when Eval.isScalar v -> Some(Eval.VChar(int v))
+        | _ -> None
     | TyBool, Atom "true" -> Some(Eval.VBool true)
     | TyBool, Atom "false" -> Some(Eval.VBool false)
     | TyTuple ts, List(Atom _ :: args) when args.Length = ts.Length ->
@@ -212,6 +222,7 @@ let rec private smallValues (t: Ty) : Eval.Value list =
     | TyInt | TyError -> [ 0; 1; -1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
     | TyNat -> [ 0; 1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
     | TyBool -> [ Eval.VBool false; Eval.VBool true ]
+    | TyChar -> [ 'a'; 'b'; 'A'; '0'; ' ' ] |> List.map (fun c -> Eval.VChar(int c))
     | TyTuple ts ->
         ts
         |> List.fold (fun acc ct -> [ for prefix in acc do for v in smallValues ct -> prefix @ [ v ] ]) [ [] ]
@@ -226,6 +237,7 @@ let rec private zeroValue (t: Ty) : Eval.Value =
     match t with
     | TyInt | TyNat | TyError -> Eval.VInt(bigint 0)
     | TyBool -> Eval.VBool false
+    | TyChar -> Eval.VChar(int 'a')
     | TySeq _ -> Eval.VSeq []
     | TyTuple ts -> Eval.VTuple(ts |> List.map zeroValue)
 
@@ -235,6 +247,8 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
     | TyInt | TyError -> Eval.VInt(bigint (rnd.Next(-6, 7)))
     | TyNat -> Eval.VInt(bigint (rnd.Next(0, 7)))
     | TyBool -> Eval.VBool(rnd.Next 2 = 0)
+    // ASCII, a space, a digit, and beyond: an accent, Greek, an emoji
+    | TyChar -> Eval.VChar [| int 'a'; int 'b'; int 'A'; int '0'; int '9'; int ' '; int ','; 0xE9; 0x3B1; 0x1F600 |].[rnd.Next 10]
     | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
 
@@ -249,7 +263,7 @@ let private programConstants (prog: TProgram) : bigint list =
         | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
-        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
         | EBool _ | EVar _ | EResult -> ()
     let rec stmt (s: TStmt) =
@@ -287,7 +301,7 @@ let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Valu
         let n = if not lengths.IsEmpty && rnd.Next 3 = 0 then int lengths.[rnd.Next lengths.Length] else rnd.Next(0, 6)
         Eval.VSeq [ for _ in 1 .. n -> inputValue rnd pool e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
-    | TyBool -> randomValue rnd t
+    | TyBool | TyChar -> randomValue rnd t
 
 /// Does e mention the variable `name`? (By the text of e: a whole word.)
 let private mentions (name: string) (e: TExpr) =
@@ -457,7 +471,7 @@ let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
         match q with
         | Syntax.Forall -> conjB parts
         | Syntax.Exists -> disjB parts
-    | EToNat x -> go x
+    | EToNat x | EConvert x -> go x
 
 /// The `if`s of a function's body (statements and expressions), by their span, in order.
 let private ifSpans (f: TFn) : Span list =
@@ -468,7 +482,7 @@ let private ifSpans (f: TFn) : Span list =
         | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
-        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> expr a
+        | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
         | EQuant _ | EInt _ | EBool _ | EVar _ | EResult -> ()
     let rec stmt (st: TStmt) =
         match st.Kind with
@@ -564,7 +578,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let name = v.Fresh baseName
         z3.Send("(declare-const " + name + " " + sortOf t + ")")
         match t with
-        | TyInt | TyNat | TyBool -> scalarSorts.[name] <- sortOf t
+        | TyInt | TyNat | TyBool | TyChar -> scalarSorts.[name] <- sortOf t
         | _ -> ()
         name
 
@@ -734,6 +748,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             let tx = go x
             ob ("(>= " + tx + " 0)") "value is a nat (>= 0)" e.Span
             tx
+        | EConvert x ->
+            let tx = go x
+            if e.Ty = TyChar then ob (scalarFact tx) "the argument of char_of is a Unicode scalar value" e.Span
+            tx
 
     /// A call: the callee's precondition is an obligation; its contract is a fact; a call
     /// inside the same recursive cycle must make the measure smaller.
@@ -788,7 +806,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// into a formula without quantifiers, easy for the solver (external counter-review). A
     /// random bound on one unknown varies the inputs from one try to the next.
     member private v.SolverInputs(f: TFn, rnd: Random) : Eval.Value list list =
-        let scalar (t: Ty) = match t with TyInt | TyNat | TyBool -> true | _ -> false
+        let scalar (t: Ty) = match t with TyInt | TyNat | TyBool | TyChar -> true | _ -> false
         let supported (t: Ty) =
             match t with
             | TyTuple ts -> List.forall scalar ts
@@ -813,6 +831,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                             let c = v.Fresh "in"
                             z3.Send("(declare-const " + c + (if t = TyBool then " Bool)" else " Int)"))
                             if t = TyNat then z3.Send("(assert (>= " + c + " 0))")
+                            if t = TyChar then z3.Send("(assert " + scalarFact c + ")")
                             unknowns.Add((c, t))
                             BTerm c
                         let one (t: Ty) = match t with TyTuple ts -> BTup(List.map fresh ts) | t -> fresh t
@@ -1267,7 +1286,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter visitE xs
             | EIndex(a, b) | EArith(_, a, b) | EConcat(a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> visitE a; visitE b
             | ESlice(a, b, c) -> visitE a; Option.iter visitE b; Option.iter visitE c
-            | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> visitE a
+            | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> visitE a
             | EIf(a, b, c) | EQuant(_, _, a, b, c) -> visitE a; visitE b; visitE c
             | _ -> ()
         let rec visitS (s: TStmt) =
@@ -1441,7 +1460,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 | EIndex(s, { Kind = EResult }) -> true
                 | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> indexed a || indexed b
                 | ESlice(a, b, c) -> indexed a || Option.exists indexed b || Option.exists indexed c
-                | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> indexed a
+                | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> indexed a
                 | EIf(a, b, c) | EQuant(_, _, a, b, c) -> indexed a || indexed b || indexed c
                 | ESeq xs | ETuple xs | ECall(_, xs) -> List.exists indexed xs
                 | EInt _ | EBool _ | EVar _ | EResult -> false
@@ -1638,7 +1657,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                     let differ =
                         match p.Ty with
                         | TySeq _ -> Some("(not (= (" + seqOp "len" p.Ty + " " + a.[p.Name] + ") (" + seqOp "len" p.Ty + " " + b.[p.Name] + ")))")
-                        | TyInt | TyNat | TyBool -> Some("(not (= " + a.[p.Name] + " " + b.[p.Name] + "))")
+                        | TyInt | TyNat | TyBool | TyChar -> Some("(not (= " + a.[p.Name] + " " + b.[p.Name] + "))")
                         | _ -> None
                     match differ with
                     | Some d ->
