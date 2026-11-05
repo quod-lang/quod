@@ -1,0 +1,11 @@
+{"file": "bench/runs/quod3-haiku/work/bounded_queue__quod__haiku__0/solution.quod", "old": 1, "new": 0, "diff": {"proof/inconclusive": [1, 0]}}
+{"file": "bench/runs/quod3-haiku/work/rle_encode__quod__haiku__0/solution.quod", "old": 1, "new": 1, "diff": {"proof/inconclusive": [2, 1]}}
+{"file": "bench/runs/quod4-haiku-mcp/work/max_subarray__quod-mcp__haiku__0/solution.quod", "old": 0, "new": 0, "diff": {"completeness/inconclusive": [0, 1]}}
+{"file": "bench/runs/quod4-haiku-mcp/work/rle_encode__quod-mcp__haiku__0/solution.quod", "old": 1, "new": 0, "diff": {"proof/inconclusive": [1, 0]}}
+{"file": "bench/runs/t6-haiku/work/max_subarray__quod-mcp__haiku__0/solution.quod", "old": 0, "new": 0, "diff": {"completeness/inconclusive": [0, 1]}}
+{"file": "bench/runs/t6-haiku/work/max_subarray__quod-mcp__haiku__2/solution.quod", "old": 0, "new": 0, "diff": {"completeness/inconclusive": [1, 0]}}
+{"file": "bench/runs/t6-haiku/work/max_subarray__quod__haiku__2/solution.quod", "old": 0, "new": 0, "diff": {"completeness/inconclusive": [1, 0]}}
+{"file": "bench/runs/t6-haiku/work/rotate__quod-mcp__haiku__0/solution.quod", "old": 1, "new": 1, "diff": {"proof/inconclusive": [1, 2]}}
+{"file": "bench/runs/t7-heldout/work/next_permutation__quod-mcp__claude-haiku-5-5__0/solution.quod", "old": 0, "new": 1, "diff": {"proof/inconclusive": [0, 1]}}
+{"file": "bench/runs/t7-heldout/work/next_permutation__quod-mcp__claude-haiku-5-5__1/solution.quod", "old": 0, "new": 1, "diff": {"proof/inconclusive": [0, 1]}}
+{"file": "bench/quod/max_subarray/solution.quod", "old": 0, "new": 0, "diff": {"completeness/inconclusive": [1, 0]}}

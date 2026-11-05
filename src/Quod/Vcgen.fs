@@ -31,7 +31,7 @@ let rec sortOf (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> "Int"
     | TyBool -> "Bool"
-    | TySeq e -> "(Seq " + sortOf e + ")"
+    | TySeq e -> "Seq_" + tySig e
     | TyTuple ts -> tupleName ts
 
 let private fnSym (name: string) = "f_" + name
@@ -40,8 +40,10 @@ let private fnSym (name: string) = "f_" + name
 /// (q.len.i, q.nth.i, q.cat.TiiE...), described by triggered axioms. Z3's sequence theory is not
 /// used. It does not carry a quantified fact about r over to r[..n] + [x] (it never creates the
 /// term r[i] that would trigger the fact), and even bridged to the axioms it made proofs
-/// unstable: each small change of the encoding fixed one program and broke another. The sort
-/// stays Z3's Seq, but only as a carrier; models are read through q.len and q.nth.
+/// unstable: each small change of the encoding fixed one program and broke another. The sort is
+/// uninterpreted too: Z3's Seq, even as a mere carrier, woke its theory, which answered "incomplete
+/// (theory seq)" and took most of the time. An "unsat" without that theory holds with it, since
+/// real sequences are a model of an uninterpreted sort. Models are read through q.len and q.nth.
 let private seqOp (op: string) (seqTy: Ty) =
     match seqTy with
     | TySeq e -> "q." + op + "." + tySig e
@@ -178,13 +180,6 @@ let private relevantFacts (live: Set<string>) (roots: Set<string>) (facts: strin
 /// Variables assigned anywhere in a loop body (the ones a loop must forget).
 /// A Z3 model value as a concrete Quod value, for the evaluator (None if not understood).
 let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
-    let rec seqItems (elem: Ty) (x: SExpr) : Eval.Value list option =
-        match x with
-        | List [ Atom "as"; Atom "seq.empty"; _ ] -> Some []
-        | List [ Atom "seq.unit"; y ] -> valueOf elem y |> Option.map (fun v -> [ v ])
-        | List(Atom "seq.++" :: parts) ->
-            parts |> List.map (seqItems elem) |> List.fold (fun acc p -> Option.map2 (@) acc p) (Some [])
-        | _ -> None
     match t, e with
     | (TyInt | TyNat), Atom n ->
         match bigint.TryParse n with
@@ -196,7 +191,6 @@ let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
         | _ -> None
     | TyBool, Atom "true" -> Some(Eval.VBool true)
     | TyBool, Atom "false" -> Some(Eval.VBool false)
-    | TySeq elem, x -> seqItems elem x |> Option.map Eval.VSeq
     | TyTuple ts, List(Atom _ :: args) when args.Length = ts.Length ->
         let parts = List.map2 valueOf ts args
         if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
@@ -1289,6 +1283,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             match f.Body with
             | TExprBody e -> visitE e
             | TStmtBody ss -> List.iter visitS ss
+        // before the tuples: a field of a tuple can be a sequence, and an element a tuple
+        for e in elems do
+            z3.Send("(declare-sort " + sortOf (TySeq e) + " 0)")
         for ts in tuples do
             let n = tupleName ts
             let fields = ts |> List.mapi (fun k t -> "(" + n + "_" + string k + " " + sortOf t + ")") |> String.concat " "

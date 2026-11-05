@@ -160,8 +160,8 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    séquences et tuples, avec contrats, lemmes (des preuves, effacées du code généré), contrôle de
    complétude et génération Python ; depuis la 0.1.1, un serveur MCP, pour que les agents écrivent
    et vérifient du Quod comme un outil ([docs/mcp.fr.md](docs/mcp.fr.md)).
-2. **Quod 0.2** : une génération C#, pour livrer des fonctions prouvées dans des bases de code
-   .NET existantes.
+2. **Quod 0.2** ([publié](https://github.com/quod-lang/quod/releases/latest)) : une génération C# et un paquet MSBuild, pour livrer des fonctions prouvées dans des bases de code
+   .NET existantes, et un dialogue plus fiable avec le solveur.
 3. **Quod 0.3** : chaînes, types algébriques, modules, génériques.
 4. **Quod 0.4** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
