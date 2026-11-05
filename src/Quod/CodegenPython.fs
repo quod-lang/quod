@@ -303,6 +303,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
     /// Two definitions: the public `def name`, which normalizes its arguments once and calls the
     /// implementation `_quod_f_name`, the one Quod code calls (recursion included).
     member g.Function(sb: StringBuilder, f: TFn, allRequires: bool) =
+        let f = if checks.Contains f.Name then f else Codegen.tailToLoop f
         checking <- checks.Contains f.Name
         let ps = f.Params |> List.map (fun p -> pyName p.Name + ": " + pyType p.Ty) |> String.concat ", "
         // a private function has only its implementation: code of its own module calls that

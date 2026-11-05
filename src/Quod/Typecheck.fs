@@ -809,7 +809,7 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
         c.Pop()
         { Name = f.Name; Params = ps; Ret = ret; Requires = req; Ensures = ens; Loose = loose
           Decreases = dec; Body = body; IsExprFn = isExpr; IsRecursive = recursive
-          Cycle = defaultArg cycle -1; IsLemma = f.IsLemma; IsPrivate = f.IsPrivate; Span = f.Span }
+          Cycle = defaultArg cycle -1; IsLemma = f.IsLemma; RunBy = f.RunBy; IsPrivate = f.IsPrivate; Span = f.Span }
 
 /// Names of the functions called in an expression or statement list (bodies only).
 let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
@@ -936,4 +936,28 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
             drain ()
         | None -> ()
     drain ()
-    { Types = checker.DataTypes; Fns = typed @ List.ofSeq copies }, List.ofSeq dups @ checker.Errors
+    let all = typed @ List.ofSeq copies
+    // `run_by`: the same parameters, and a contract that says it is the same function
+    for f in all do
+        match f.RunBy with
+        | None -> ()
+        | Some name ->
+            let refuse (message: string) =
+                dups.Add
+                    { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
+                      Property = None; Counterexample = []; Reason = None; Evidence = None; Message = message }
+            match all |> List.tryFind (fun g -> g.Name = name) with
+            | None -> refuse ("'run_by " + name + "': there is no such function")
+            | Some g ->
+                let sameShape = g.Ret = f.Ret && g.Params.Length = f.Params.Length && List.forall2 (fun (a: TParam) (b: TParam) -> a.Name = b.Name && a.Ty = b.Ty) g.Params f.Params
+                let isEquality (e: TExpr) =
+                    match e.Kind with
+                    | EEq({ Kind = EResult }, { Kind = ECall(n, args) }) ->
+                        n = f.Name && args.Length = f.Params.Length
+                        && List.forall2 (fun (a: TExpr) (p: TParam) -> match a.Kind with EVar v -> v = p.Name | _ -> false) args f.Params
+                    | _ -> false
+                if not sameShape then refuse ("'run_by " + name + "': it must have the same parameters and the same result as '" + f.Name + "'")
+                elif not f.IsExprFn then refuse ("'run_by' is for a function whose body is an expression: '" + f.Name + "' is the one contracts read")
+                elif not (g.Ensures |> List.exists isEquality) then
+                    refuse ("'run_by " + name + "': its contract must state 'ensures result == " + f.Name + "(" + String.Join(", ", f.Params |> List.map (fun p -> p.Name)) + ")'")
+    { Types = checker.DataTypes; Fns = all }, List.ofSeq dups @ checker.Errors

@@ -138,6 +138,8 @@ type TFn =
       /// A lemma: a statement function returning true, checked like the others, erased from the
       /// generated code. Its calls are `SLet` of a `lemmaBinding` name.
       IsLemma: bool
+      /// A statement function proved equal, which code runs instead of this definition.
+      RunBy: string option
       /// Called from its own module only: no public method or function is generated for it.
       IsPrivate: bool
       Span: Span }

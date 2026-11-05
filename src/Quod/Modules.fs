@@ -175,6 +175,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                     let e = expr rename
                     { f with
                         Name = flat f.Name
+                        RunBy = f.RunBy |> Option.map flat
                         Params = f.Params |> List.map (fun p -> { p with Type = ty p.Type })
                         Ret = ty f.Ret
                         Requires = List.map e f.Requires

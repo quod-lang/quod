@@ -85,6 +85,44 @@ let rec cheap (e: TExpr) =
     | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> cheap a
     | EIf(a, b, c) -> cheap a && cheap b && cheap c
 
+// --- tail calls ------------------------------------------------------------------------------------
+
+/// An expression function that ends by calling itself runs as a loop, whatever the length of its
+/// input: `i == len(s) || s[i] == sep` then `f(s, sep, i + 1)` would otherwise overflow a stack on a
+/// document. What is proved is the function; this is only how it runs.
+let tailToLoop (f: TFn) : TFn =
+    let isTail (e: TExpr) = match e.Kind with ECall(n, _) -> n = f.Name | _ -> false
+    let rec hasTail (e: TExpr) =
+        match e.Kind with
+        | EIf(_, a, b) -> hasTail a || hasTail b
+        | ELogic((OAnd | OOr), _, b) -> hasTail b
+        | _ -> isTail e
+    let mutable temps = 0
+    let rec items (e: TExpr) : TStmt list =
+        let stmt k : TStmt = { Kind = k; Span = e.Span }
+        match e.Kind with
+        | EIf(c, a, b) when hasTail e -> [ stmt (SIf(c, items a, items b)) ]
+        | ELogic(OAnd, a, b) when hasTail b -> [ stmt (SIf(a, items b, [ stmt (SReturn { e with Kind = EBool false; Ty = TyBool }) ])) ]
+        | ELogic(OOr, a, b) when hasTail b -> [ stmt (SIf(a, [ stmt (SReturn { e with Kind = EBool true; Ty = TyBool }) ], items b)) ]
+        | ECall(_, args) when isTail e ->
+            let names =
+                f.Params |> List.map (fun p ->
+                    temps <- temps + 1
+                    "_quod_tail" + string temps, p)
+            [ for (t, p), a in List.zip names args -> stmt (SLet(false, t, p.Ty, a))
+              for t, p in names -> stmt (SAssign(p.Name, { e with Kind = EVar t; Ty = p.Ty })) ]
+        | _ -> [ stmt (SReturn e) ]
+    match f.Body with
+    | TExprBody e when f.RunBy.IsSome ->
+        // what it says is proved: this is what runs
+        let call = { e with Kind = ECall(f.RunBy.Value, f.Params |> List.map (fun p -> { e with Kind = EVar p.Name; Ty = p.Ty })); Ty = f.Ret }
+        { f with Body = TExprBody call }
+    | TExprBody e when f.IsRecursive && hasTail e ->
+        let always = { e with Kind = EBool true; Ty = TyBool }
+        let measure = { e with Kind = EInt 0I; Ty = TyInt }
+        { f with Body = TStmtBody [ { Kind = SWhile(always, [], measure, items e); Span = e.Span } ] }
+    | _ -> f
+
 // --- modules: the flattened program, seen from one module ---------------------------------------
 
 let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
@@ -153,6 +191,7 @@ let moduleView (name: string option) (prog: TProgram) : TProgram =
         |> List.map (fun f ->
             { f with
                 Name = short f.Name
+                RunBy = Option.map short f.RunBy
                 Requires = List.map e f.Requires
                 Ensures = List.map e f.Ensures
                 Loose = f.Loose |> Option.map (fun l -> { l with Relation = e l.Relation })

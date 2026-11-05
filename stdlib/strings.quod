@@ -96,8 +96,25 @@ fn join_upto(xs: seq<string>, sep: string, n: nat) -> string
 
 fn join(xs: seq<string>, sep: string) -> string
   ensures result == join_upto(xs, sep, len(xs))
+  run_by join_run
 {
   join_upto(xs, sep, len(xs))
+}
+
+fn join_run(xs: seq<string>, sep: string) -> string
+  ensures result == join(xs, sep)
+{
+  let mut r: string = "";
+  let mut i: nat = 0;
+  while i < len(xs)
+    invariant i <= len(xs)
+    invariant r == join_upto(xs, sep, i)
+    decreases len(xs) - i
+  {
+    if i == 0 { r = xs[0]; } else { r = r + sep + xs[i]; }
+    i = i + 1;
+  }
+  r
 }
 
 // The first position from i on that holds sep, or len(s).
@@ -125,22 +142,43 @@ fn split_from(s: string, sep: char, i: nat) -> seq<string>
 // The parts of s between each sep: "a,,b" gives "a", "", "b", and "" gives one empty part.
 fn split(s: string, sep: char) -> seq<string>
   ensures result == split_from(s, sep, 0)
+  run_by split_run
 {
   split_from(s, sep, 0)
 }
 
-fn digits_upto(s: string, n: nat) -> bool
-  requires n <= len(s)
-  ensures result == forall i in 0..n: is_digit(s[i])
-  decreases n
+fn split_run(s: string, sep: char) -> seq<string>
+  ensures result == split(s, sep)
 {
-  if n == 0 { true } else { digits_upto(s, n - 1) && is_digit(s[n - 1]) }
+  let mut parts: seq<string> = [];
+  let mut i: nat = 0;
+  while i <= len(s)
+    invariant i <= len(s)
+    invariant parts + split_from(s, sep, i) == split_from(s, sep, 0)
+    decreases len(s) - i
+  {
+    let j: nat = next_sep(s, sep, i);
+    if j == len(s) {
+      return parts + [s[i..]];
+    }
+    parts = parts + [s[i..j]];
+    i = j + 1;
+  }
+  parts
+}
+
+fn digits_from(s: string, i: nat) -> bool
+  requires i <= len(s)
+  ensures result == forall k in i..len(s): is_digit(s[k])
+  decreases len(s) - i
+{
+  i == len(s) || (is_digit(s[i]) && digits_from(s, i + 1))
 }
 
 fn all_digits(s: string) -> bool
   ensures result == forall i in 0..len(s): is_digit(s[i])
 {
-  digits_upto(s, len(s))
+  digits_from(s, 0)
 }
 
 // The number written by the first `n` digits of s.

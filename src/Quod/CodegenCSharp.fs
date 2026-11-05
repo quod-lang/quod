@@ -184,6 +184,11 @@ let private helpers =
             return r.Sign < 0 ? r + BigInteger.Abs(b) : r;
         }"
       "div", "private static BigInteger _quod_div(BigInteger a, BigInteger b) { return BigInteger.Divide(a - _quod_mod(a, b), b); }"
+      // C# truncates, and Quod's division is Euclidean. None of these can overflow on a proved result.
+      "mod32", "private static int _quod_mod32(int a, int b) { int r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
+      "div32", "private static int _quod_div32(int a, int b) { int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
+      "mod64", "private static long _quod_mod64(long a, long b) { long r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
+      "div64", "private static long _quod_div64(long a, long b) { long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "all",
       "private static bool _quod_all(BigInteger lo, BigInteger hi, Func<BigInteger, bool> f)
         {
@@ -401,8 +406,8 @@ type private Gen(checks: Set<string>) =
             let wide (o: TExpr) = if isBounded o.Ty && not (isBounded e.Ty) then "new BigInteger(" + g.Expr(o, o.Ty) + ")" else g.Expr(o, TyInt)
             let x, y = wide a, wide b
             let euclid (name: string) =
-                let call = g.Help name + "(" + x + ", " + y + ")"
-                if isBounded e.Ty then "((" + csType e.Ty + ")" + call + ")" else call
+                let name = match e.Ty with TyI32 -> name + "32" | TyI64 -> name + "64" | _ -> name
+                g.Help name + "(" + x + ", " + y + ")"
             match op with
             | OAdd -> "(" + x + " + " + y + ")"
             | OSub -> "(" + x + " - " + y + ")"
@@ -632,6 +637,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let sb = StringBuilder()
         let indent = "        "
         for f in fns do
+            let f = if checks.Contains f.Name then f else Codegen.tailToLoop f
             let ps = f.Params |> List.map (fun p -> csType p.Ty + " " + csName p.Name) |> String.concat ", "
             let isChecked = checks.Contains f.Name
             let boundary = f.Requires |> List.filter (fun r -> match r.Kind with EBool true -> false | _ -> true)

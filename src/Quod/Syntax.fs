@@ -105,6 +105,8 @@ type FnDecl =
       /// `lemma name(...)`: a proof, checked like a function, erased from the generated code.
       /// It has no result (Ret is bool internally, its body returns true when it ends).
       IsLemma: bool
+      /// `run_by f`: code calls f, a statement function proved equal, and contracts see this definition.
+      RunBy: string option
       /// `fn first<T>(...)`: each use with other types makes a copy, proved and generated for them.
       TypeParams: string list
       /// `private fn`: called from its own module only, and absent from the generated API.

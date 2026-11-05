@@ -343,3 +343,36 @@ let ``types go across modules`` () =
             | Checked(_, r) -> Assert.Empty(errorsOf r)
             | other -> failwithf "%A" other)
 
+[<Fact>]
+let ``a tail call does not grow the stack`` () =
+    let src = "import strings\n\nfn t(s: string) -> string\n  ensures result == strings.trim(s)\n{\n  strings.trim(s)\n}\n\nfn n(s: string, c: char) -> nat\n  ensures result == len(strings.split(s, c))\n{\n  len(strings.split(s, c))\n}\n\nfn d(s: string) -> bool\n  ensures result == strings.all_digits(s)\n{\n  strings.all_digits(s)\n}\n\nfn j(xs: seq<string>) -> nat\n  ensures result == len(strings.join(xs, \",\"))\n{\n  len(strings.join(xs, \",\"))\n}\n"
+    withFiles [ "main", src ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                File.WriteAllText(Path.Combine(dir, "main.py"), g.Code)
+                for m, text in g.Imported do File.WriteAllText(Path.Combine(dir, m + ".py"), text)
+                let psi = Diagnostics.ProcessStartInfo("python", "-c \"import main; print(len(main.t(' ' * 50000 + 'a' + ' ' * 50000))); print(main.n(','.join(['x'] * 5000), ',')); print(main.d('1' * 50000)); print(main.j(['x'] * 5000))\"")
+                psi.WorkingDirectory <- dir
+                psi.RedirectStandardOutput <- true
+                psi.UseShellExecute <- false
+                use p = Diagnostics.Process.Start psi
+                let out = p.StandardOutput.ReadToEnd().Replace("\r\n", "\n").Trim()
+                p.WaitForExit()
+                Assert.Equal("1\n5000\nTrue\n9999", out)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``the fields of a case can have names`` () =
+    proved "enum D { Accepted(value: int, why: string), No }\n\nfn f(d: D) -> int\n  ensures result == match d { Accepted(v, _) => v, No => 0 }\n{\n  match d { Accepted(v, _) => v, No => 0 }\n}\n"
+
+[<Fact>]
+let ``run_by needs a proof of equality`` () =
+    typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n" "no such function"
+    typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(y: int) -> int\n  ensures result == f(y)\n{\n  y\n}\n" "same parameters"
+    typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == x\n{\n  x\n}\n" "must state"
+    proved "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == f(x)\n{\n  x\n}\n"
+

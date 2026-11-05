@@ -574,6 +574,7 @@ type private Parser(file: string, toks: Token[]) =
         let ens = ResizeArray<Expr>()
         let mutable loose = None
         let mutable dec = None
+        let mutable runBy = None
         let mutable go = true
         while go do
             match p.Peek.Kind with
@@ -590,6 +591,10 @@ type private Parser(file: string, toks: Token[]) =
                 p.Sym ")"
                 p.Sym "=>"
                 loose <- Some { Left = a; Right = b; Relation = p.Expr() }
+            | TkIdent "run_by" ->
+                let s = p.Next().Span
+                if runBy.IsSome then p.Fail(s, "a function has at most one 'run_by' clause")
+                runBy <- Some(p.Ident "the name of the function that runs this one")
             | TkKeyword "decreases" ->
                 let s = p.Next().Span
                 if dec.IsSome then p.Fail(s, "a function has at most one 'decreases' clause")
@@ -609,6 +614,7 @@ type private Parser(file: string, toks: Token[]) =
           Decreases = dec
           Body = (if isLemma then StmtBody items else classify items)
           IsLemma = isLemma
+          RunBy = runBy
           TypeParams = generics
           IsPrivate = false
           Span = spanOf start p.LastEnd }
@@ -634,7 +640,15 @@ type private Parser(file: string, toks: Token[]) =
                         p.Next() |> ignore
                         let ts = ResizeArray<string * TypeExpr>()
                         while not (p.IsSym ")") do
-                            ts.Add(("f" + string ts.Count, p.Type()))
+                            // `Accepted(value: int)`, or `Accepted(int)`: the name is for who reads the value outside
+                            let field =
+                                match p.Peek.Kind, (p.PeekAt 1).Kind with
+                                | TkIdent f, TkSymbol ":" ->
+                                    p.Next() |> ignore
+                                    p.Next() |> ignore
+                                    f
+                                | _ -> "f" + string ts.Count
+                            ts.Add((field, p.Type()))
                             if p.IsSym "," then p.Next() |> ignore
                         p.Sym ")"
                         List.ofSeq ts

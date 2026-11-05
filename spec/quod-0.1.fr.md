@@ -139,14 +139,14 @@ fn decide(f: Field, threshold: i32) -> Decision
 }
 ```
 
-- Une valeur se construit comme un appel, dans l'ordre de ses champs : `Field("total", 80)`, `Accepted(3)`. Un cas sans champ est son nom : `ToReview`. Les champs d'un `struct` se lisent avec `f.name`, ceux d'un `enum` avec `match`.
+- Les champs d'un cas peuvent être nommés, `Accepted(value: int)`, pour qui les lit hors de Quod ; dans un `match`, ils se donnent dans l'ordre. Une valeur se construit comme un appel, dans l'ordre de ses champs : `Field("total", 80)`, `Accepted(3)`. Un cas sans champ est son nom : `ToReview`. Les champs d'un `struct` se lisent avec `f.name`, ceux d'un `enum` avec `match`.
 - **`match` est une expression, et couvre tous les cas :** un cas oublié est une erreur de compilation qui le nomme. `_` couvre ceux qui ne sont pas nommés avant lui, et vient en dernier. Un nouveau cas y tombe alors sans bruit : dans un contrat, nommez-les plutôt.
 - `==` compare par valeur. Un type ne peut pas se contenir : les types récursifs ne sont pas en 0.3.
 - **Génériques :** `enum Option<T>`, `fn first<T>(xs: seq<T>) -> option.Option<T>`. Chaque usage fait une copie pour ses types, vérifiée et prouvée comme toute fonction : **une fonction générique n'est prouvée que pour les types où elle sert.** Les types viennent des arguments ou de ce qui est attendu ; si rien ne les dit, donnez son type à une variable. `T` n'a pas de contrainte.
 - `import option` donne `Option<T>` (`None`, `Some`) et `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
 - **Entre modules :** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. Dans un `match`, le type est connu, donc un cas s'écrit par son nom court : `Some(x)`.
 - **En Python,** des `dataclass` figées, qui contrôlent ce que les types de leurs champs promettent à leur construction ; une copie de générique a ses propres noms, comme `Option_int_Some`.
-- **En C#,** des classes immuables égales par valeur, imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `F0`, `F1`. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
+- **En C#,** des classes immuables égales par valeur, imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `Value`, ou `F0`, `F1` s'ils n'ont pas de nom. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
 
 ### Entiers bornés
 
@@ -166,6 +166,7 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **Ce qui élargit est implicite et exact :** `i32` vers `i64`, vers `int`. Ce qui rétrécit s'écrit, et doit être prouvé : `to_i32(x)`, `to_i64(x)`. Un littéral prend le type que son contexte attend, s'il tient.
 - Sous une séquence ou un tuple, il n'y a pas de conversion : une `seq<i32>` n'est pas une `seq<int>`.
 - Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat` ; un programme qui utilise des entiers bornés sait qu'il vaut au plus 2^31 - 1, donc `to_i32(len(xs))` peut se prouver.
+- **Pour C#, préférez `i32` et `i64`.** Le `int` et le `nat` de Quod sont des entiers mathématiques, que C# ne peut tenir que dans un `BigInteger` : `int` en Quod n'est pas `int` en C#. `i32` est le `int` de C#, et `i64` son `long`.
 - `/` et `%` sont euclidiens, comme pour `int`, dans tous les backends.
 - En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`. En C#, ce sont des `int` et des `long`.
 
@@ -178,6 +179,22 @@ Depuis la 0.3, `char` est une valeur scalaire Unicode, et `string` est `seq<char
 - `char` n'est pas un entier. `'a' + 1` est une erreur de type. `code(c)` donne son numéro, et `char_of(n)` le caractère, avec l'obligation que `n` soit une valeur scalaire (0 à 10FFFF, hors D800 à DFFF). Deux `char` se comparent avec `<` par leurs valeurs scalaires.
 - `import strings` donne la bibliothèque standard, écrite en Quod et prouvée avec votre programme : `is_digit`, `is_space`, `is_letter` (ASCII), `starts_with`, `ends_with`, `occurs_at`, `find`, `trim`, `split`, `join`, `all_digits`, `is_int`, `parse_int`, `int_to_string`. Un fichier local `strings.quod` la masque, avec un avertissement.
 - En Python, une chaîne est un `str` et un `char` un `str` d'un caractère. En C#, une chaîne est un `string` et un `char` un `int`, sa valeur scalaire. Les deux refusent un surrogate isolé à la frontière.
+
+- **Une longue entrée :** une fonction qui finit par s'appeler elle-même s'exécute en boucle, quelle que soit la longueur. Sinon, la profondeur d'une récursion suit son entrée. Pour ce cas, `run_by` : les contrats lisent une définition par récursion, et le code exécute une boucle prouvée égale.
+
+```rust
+fn total(xs: seq<int>) -> int
+  run_by total_loop
+{
+  total_upto(xs, len(xs))
+}
+
+fn total_loop(xs: seq<int>) -> int
+  ensures result == total(xs)
+{
+  ...
+}
+```
 
 ### Modules
 

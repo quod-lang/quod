@@ -148,7 +148,7 @@ let private traps =
             + "fn len_of(xs: seq<int>) -> int { len(xs) }\n"
             + "fn empty_arg() -> int { len_of([]) }\n"
             + "fn huge() -> int { 123456789012345678901234567890 }\n"
-            + "fn down(n: nat) -> int decreases n { if n == 0 { 0 } else { down(n - 1) } }\n"
+            + "fn down(n: nat) -> int decreases n { if n == 0 { 0 } else { 1 + down(n - 1) } }\n"
             + "fn need(x: int) -> int requires x > 0 { x }\n"
             + "fn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }\n"
             + "fn eq_seq(a: seq<int>, b: seq<int>) -> bool { a == b }\n"
