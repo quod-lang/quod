@@ -85,11 +85,11 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
 /// sequences and tuples as arrays.
 let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
     match t, e.ValueKind with
-    | (TyInt | TyNat), JsonValueKind.Number ->
+    | (TyInt | TyNat | TyI32 | TyI64), JsonValueKind.Number ->
         match BigInteger.TryParse(e.GetRawText()) with
         | true, n -> Some(Eval.VInt n)
         | _ -> None
-    | (TyInt | TyNat), JsonValueKind.String ->
+    | (TyInt | TyNat | TyI32 | TyI64), JsonValueKind.String ->
         match BigInteger.TryParse(e.GetString()) with
         | true, n -> Some(Eval.VInt n)
         | _ -> None

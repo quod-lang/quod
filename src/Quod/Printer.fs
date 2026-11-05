@@ -12,6 +12,8 @@ let rec typeText (t: TypeExpr) =
     | TNat -> "nat"
     | TBool -> "bool"
     | TChar -> "char"
+    | TI32 -> "i32"
+    | TI64 -> "i64"
     | TSeq e -> "seq<" + typeText e + ">"
     | TTuple ts -> "(" + (ts |> List.map typeText |> String.concat ", ") + ")"
 

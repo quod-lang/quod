@@ -13,6 +13,10 @@ type Ty =
     | TySeq of Ty
     /// A Unicode scalar value: not an integer, though the verifier models it by one. `string` is `seq<char>`.
     | TyChar
+    /// Integers that fit in 32 and 64 bits. In code, an operation that leaves the bounds is a proof
+    /// obligation not met; in contracts, arithmetic is mathematical.
+    | TyI32
+    | TyI64
     | TyTuple of Ty list
     /// The type of an expression that already produced an error: absorbs further checks,
     /// so that one mistake does not cascade into many messages.
@@ -99,6 +103,15 @@ type TFn =
       IsPrivate: bool
       Span: Span }
 
+/// The bounds of a bounded integer type.
+let boundsOf (t: Ty) : (bigint * bigint) option =
+    match t with
+    | TyI32 -> Some(bigint System.Int32.MinValue, bigint System.Int32.MaxValue)
+    | TyI64 -> Some(bigint System.Int64.MinValue, bigint System.Int64.MaxValue)
+    | _ -> None
+
+let isBounded (t: Ty) = (boundsOf t).IsSome
+
 /// The name bound to the k-th lemma call of a function (`name(args);`): no source variable can
 /// have it (a dot), it is a valid SMT symbol, and the code generators skip it.
 let lemmaBinding (k: int) = "lemma." + string k
@@ -112,6 +125,8 @@ let rec tyText (t: Ty) =
     | TyNat -> "nat"
     | TyBool -> "bool"
     | TyChar -> "char"
+    | TyI32 -> "i32"
+    | TyI64 -> "i64"
     | TySeq TyChar -> "string"
     | TySeq e -> "seq<" + tyText e + ">"
     | TyTuple ts -> "(" + (ts |> List.map tyText |> String.concat ", ") + ")"
@@ -124,6 +139,8 @@ let rec ofSyntax (t: TypeExpr) =
     | TypeExpr.TBool -> TyBool
     | TypeExpr.TSeq e -> TySeq(ofSyntax e)
     | TypeExpr.TChar -> TyChar
+    | TypeExpr.TI32 -> TyI32
+    | TypeExpr.TI64 -> TyI64
     | TypeExpr.TTuple ts -> TyTuple(List.map ofSyntax ts)
 
 /// A typed expression back as a syntax tree: to print it (docstrings), or to compare two
@@ -136,7 +153,7 @@ let rec toSyntax (e: TExpr) : Syntax.Expr =
     | EInt n -> mk (Syntax.IntLit n)
     | ESeq xs when e.Ty = TySeq TyChar && xs |> List.forall (fun x -> match x.Kind with EInt _ -> true | _ -> false) ->
         mk (Syntax.StrLit(xs |> List.map (fun x -> match x.Kind with EInt n -> int n | _ -> 0)))
-    | EConvert x -> mk (Syntax.Call((if e.Ty = TyChar then "char_of" else "code"), [ u x ]))
+    | EConvert x -> mk (Syntax.Call((match e.Ty with TyChar -> "char_of" | TyI32 -> "to_i32" | TyI64 -> "to_i64" | _ -> "code"), [ u x ]))
     | EBool b -> mk (Syntax.BoolLit b)
     | EVar n -> mk (Syntax.Var n)
     | EResult -> mk Syntax.Result

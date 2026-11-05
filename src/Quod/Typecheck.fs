@@ -71,7 +71,12 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         | TyError, t | t, TyError -> Some t
         | x, y when x = y -> Some x
         | (TyNat | TyInt), (TyNat | TyInt) -> Some TyInt
+        | TyI32, TyI64 | TyI64, TyI32 -> Some TyI64
+        | (TyI32 | TyI64), (TyNat | TyInt) | (TyNat | TyInt), (TyI32 | TyI64) -> Some TyInt
+        // under a sequence or a tuple the representation differs: a seq<i32> is not a seq<int>
+        | TySeq x, TySeq y when isBounded x || isBounded y -> None
         | TySeq x, TySeq y -> c.Join(x, y) |> Option.map TySeq
+        | TyTuple xs, TyTuple ys when xs.Length = ys.Length && List.exists2 (fun x y -> x <> y && (isBounded x || isBounded y)) xs ys -> None
         | TyTuple xs, TyTuple ys when xs.Length = ys.Length ->
             let parts = List.map2 (fun x y -> c.Join(x, y)) xs ys
             if parts |> List.forall Option.isSome then Some(TyTuple(parts |> List.map Option.get)) else None
@@ -90,8 +95,11 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | _ -> false
         // `[]` where a string is expected is the empty string: the generators must know it
         if expected = TySeq TyChar && e.Kind = ESeq [] then { e with Ty = expected }
+        elif (match e.Kind, boundsOf expected with EInt _, Some _ -> e.Ty = TyInt | _ -> false) then c.Literal(e, expected, fn)
         elif fits e.Ty expected then e
-        elif e.Ty = TyInt && expected = TyNat then { Kind = EToNat e; Ty = TyNat; Span = e.Span }
+        // always exact: a bounded integer is an integer, and an i32 an i64
+        elif (isBounded e.Ty && expected = TyInt) || (e.Ty = TyI32 && expected = TyI64) then e
+        elif (e.Ty = TyInt || isBounded e.Ty) && expected = TyNat then { Kind = EToNat e; Ty = TyNat; Span = e.Span }
         else
             // a literal (or an if) is coerced part by part: (x, n + 1) as (int, nat) proves n + 1 >= 0
             match e.Kind, expected with
@@ -105,8 +113,27 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 let ta, tb = c.Coerce(a, expected, fn, what), c.Coerce(b, expected, fn, what)
                 { e with Kind = EIf(cond, ta, tb); Ty = (if ta.Ty = TyError || tb.Ty = TyError then TyError else expected) }
             | _ ->
-                c.Error(e.Span, fn, what + " has type " + tyText e.Ty + ", but " + tyText expected + " is expected")
+                let hint = if isBounded expected && (match e.Ty with TyInt | TyNat | TyI64 -> true | _ -> false) then " (nothing narrows by itself: write to_" + tyText expected + "(...), which must then be proved to fit)" else ""
+                c.Error(e.Span, fn, what + " has type " + tyText e.Ty + ", but " + tyText expected + " is expected" + hint)
                 { e with Ty = TyError }
+
+    /// An integer literal takes the bounded type its context wants, if it fits.
+    member c.Literal(e: TExpr, t: Ty, fn: string) : TExpr =
+        match e.Kind, boundsOf t with
+        | EInt v, Some(lo, hi) ->
+            if v < lo || v > hi then
+                c.Error(e.Span, fn, v.ToString() + " does not fit in " + tyText t)
+                { e with Ty = TyError }
+            else
+                { e with Ty = t }
+        | _ -> e
+
+    /// A literal next to a bounded integer takes its type: `x + 1`, `x < 10`.
+    member c.Adopt(a: TExpr, b: TExpr, fn: string) : TExpr * TExpr =
+        let isLiteral (e: TExpr) = match e.Kind with EInt _ -> e.Ty = TyInt | _ -> false
+        if isLiteral a && isBounded b.Ty then c.Literal(a, b.Ty, fn), b
+        elif isLiteral b && isBounded a.Ty then a, c.Literal(b, a.Ty, fn)
+        else a, b
 
     member c.ExpectBool(e: TExpr, ctx: Ctx, what: string) =
         if e.Ty <> TyBool && e.Ty <> TyError then
@@ -114,7 +141,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
 
     member c.ExpectInt(e: TExpr, ctx: Ctx, what: string) =
         match e.Ty with
-        | TyInt | TyNat | TyError -> ()
+        | TyInt | TyNat | TyI32 | TyI64 | TyError -> ()
         | t -> c.Error(e.Span, ctx.FnName, what + " must be an int, not " + tyText t)
 
     // --- expressions --------------------------------------------------------------
@@ -222,6 +249,10 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             | t ->
                 c.Error(a.Span, ctx.FnName, "code() takes a char, this is " + tyText t)
                 fail ()
+        | Call(("to_i32" | "to_i64") as conversion, [ a ]) when not (fns.ContainsKey conversion) ->
+            let ta = c.Expr(a, ctx, None)
+            c.ExpectInt(ta, ctx, "the argument of " + conversion)
+            mk (EConvert ta) (if conversion = "to_i32" then TyI32 else TyI64)
         | Call("char_of", [ a ]) when not (fns.ContainsKey "char_of") ->
             let ta = c.Expr(a, ctx, None)
             c.ExpectInt(ta, ctx, "the argument of char_of")
@@ -245,7 +276,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         | Unary(Neg, x) ->
             let tx = c.Expr(x, ctx, None)
             c.ExpectInt(tx, ctx, "the operand of '-'")
-            mk (ENeg tx) TyInt
+            mk (ENeg tx) (if isBounded tx.Ty && not ctx.InSpec then tx.Ty else TyInt)
         | Unary(Not, x) ->
             let tx = c.Expr(x, ctx, None)
             c.ExpectBool(tx, ctx, "the operand of '!'")
@@ -304,7 +335,22 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 c.ExpectInt(tl, ctx, "the left operand of '" + sym + "'")
                 c.ExpectInt(tr, ctx, "the right operand of '" + sym + "'")
                 let aop = match op with Add -> OAdd | Sub -> OSub | Mul -> OMul | Div -> ODiv | _ -> OMod
-                mk (EArith(aop, tl, tr)) TyInt
+                let tl, tr = c.Adopt(tl, tr, ctx.FnName)
+                // two literals, where a bounded integer is expected
+                let tl, tr =
+                    match expected with
+                    | Some t when isBounded t && not ctx.InSpec && tl.Ty = TyInt && tr.Ty = TyInt ->
+                        (match tl.Kind with EInt _ -> c.Literal(tl, t, ctx.FnName) | _ -> tl), (match tr.Kind with EInt _ -> c.Literal(tr, t, ctx.FnName) | _ -> tr)
+                    | _ -> tl, tr
+                // in a contract, arithmetic is mathematical; in code, two bounded operands stay bounded
+                let ty =
+                    if ctx.InSpec then TyInt
+                    else
+                        match tl.Ty, tr.Ty with
+                        | TyI64, (TyI32 | TyI64) | TyI32, TyI64 -> TyI64
+                        | TyI32, TyI32 -> TyI32
+                        | _ -> TyInt
+                mk (EArith(aop, tl, tr)) ty
         | Lt | Le | Gt | Ge ->
             let tl = c.Expr(l, ctx, None)
             let tr = c.Expr(r, ctx, None)
@@ -312,11 +358,13 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             if not (tl.Ty = TyChar && tr.Ty = TyChar) then
                 c.ExpectInt(tl, ctx, "a compared value")
                 c.ExpectInt(tr, ctx, "a compared value")
+            let tl, tr = c.Adopt(tl, tr, ctx.FnName)
             let cop = match op with Lt -> OLt | Le -> OLe | Gt -> OGt | _ -> OGe
             mk (ECmp(cop, tl, tr)) TyBool
         | Eq | Ne ->
             let tl = c.Expr(l, ctx, None)
             let tr = c.Expr(r, ctx, Some tl.Ty)
+            let tl, tr = c.Adopt(tl, tr, ctx.FnName)
             if (c.Join(tl.Ty, tr.Ty)).IsNone then
                 c.Error(e.Span, ctx.FnName, "values of different types cannot be compared: " + tyText tl.Ty + " and " + tyText tr.Ty)
             let eq = mk (EEq(tl, tr)) TyBool

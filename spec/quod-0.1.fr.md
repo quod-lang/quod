@@ -108,6 +108,27 @@ return e;              // ou une expression finale à la fin du corps
 - Dans les contrats et assertions : `result`, et des quantificateurs bornés
   `forall i in a..b: P`, `exists i in a..b: P` (`a` inclus, `b` exclu).
 
+### Entiers bornés
+
+Depuis la 0.3, `i32` et `i64` contiennent ce qui tient sur 32 et 64 bits. `int` reste le défaut : c'est un entier mathématique, et rien ne peut y déborder.
+
+```rust
+fn midpoint(lo: i32, hi: i32) -> i32
+  requires 0 <= lo && lo <= hi
+  ensures result == lo + (hi - lo) / 2
+{
+  lo + (hi - lo) / 2   // lo + hi serait refusé : la somme peut sortir de i32
+}
+```
+
+- **Dans le code,** chaque `+ - * / %` et `-` unaire sur des opérandes bornés a une obligation : le résultat tient. Ce n'est ni un débordement silencieux ni une exception, mais une preuve non tenue, avec son contre-exemple.
+- **Dans les contrats, les invariants et les assertions, le calcul est mathématique :** `ensures result == a + b` dit ce qu'il dit, sans débordement possible.
+- **Ce qui élargit est implicite et exact :** `i32` vers `i64`, vers `int`. Ce qui rétrécit s'écrit, et doit être prouvé : `to_i32(x)`, `to_i64(x)`. Un littéral prend le type que son contexte attend, s'il tient.
+- Sous une séquence ou un tuple, il n'y a pas de conversion : une `seq<i32>` n'est pas une `seq<int>`.
+- Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat` ; un programme qui utilise des entiers bornés sait qu'il vaut au plus 2^31 - 1, donc `to_i32(len(xs))` peut se prouver.
+- `/` et `%` sont euclidiens, comme pour `int`, dans tous les backends.
+- En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`. En C#, ce sont des `int` et des `long`.
+
 ### Caractères et chaînes
 
 Depuis la 0.3, `char` est une valeur scalaire Unicode, et `string` est `seq<char>` : `len`, l'indice, les tranches, `+`, `==` et les quantificateurs s'y appliquent comme à toute séquence.

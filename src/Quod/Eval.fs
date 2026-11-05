@@ -166,18 +166,18 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
                 finally
                     depth <- depth - 1
             | TStmtBody _ -> raise (CannotEvaluate("'" + name + "' is a statement function"))
-        | ENeg x -> VInt(-(asInt x))
+        | ENeg x -> ev.Fitting(e, -(asInt x))
         | ENot x -> VBool(not (asBool x))
         | EArith(op, a, b) ->
             let x, y = asInt a, asInt b
             match op with
-            | OAdd -> VInt(x + y)
-            | OSub -> VInt(x - y)
-            | OMul -> VInt(x * y)
+            | OAdd -> ev.Fitting(e, x + y)
+            | OSub -> ev.Fitting(e, x - y)
+            | OMul -> ev.Fitting(e, x * y)
             | ODiv | OMod ->
                 if y.IsZero then ev.Fail("divisor is not zero", b.Span, "division by zero")
                 let q, r = euclidDivMod x y
-                VInt(if op = ODiv then q else r)
+                ev.Fitting(e, (if op = ODiv then q else r))
         | EConcat(a, b) -> VSeq(asSeq a @ asSeq b)
         | ECmp(op, a, b) ->
             // two chars compare by their scalar values
@@ -203,6 +203,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
             match q with
             | Syntax.Forall -> VBool(Seq.forall test values)
             | Syntax.Exists -> VBool(Seq.exists test values)
+        | EConvert x when isBounded e.Ty -> ev.Fitting(e, asInt x)
         | EConvert x ->
             match go x with
             | VChar c -> VInt(BigInteger c)
@@ -215,12 +216,23 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
             | VInt n when checking && n.Sign < 0 -> raise (Violation("value is a nat (>= 0)", e.Span))
             | _ -> v
 
+    /// A result in code of a bounded type must fit: running it is a real execution, so leaving the
+    /// bounds is a confirmed counterexample.
+    member ev.Fitting(e: TExpr, n: BigInteger) : Value =
+        match boundsOf e.Ty with
+        | Some(lo, hi) when n < lo || n > hi ->
+            let what = match e.Kind with EConvert _ -> "the value" | _ -> "the result"
+            if checking then raise (Violation(what + " fits in " + tyText e.Ty, e.Span))
+            raise (CannotEvaluate "a result out of its bounds")
+        | _ -> VInt n
+
     /// Is the value of the expected type (a nat is >= 0, recursively)?
     member ev.Fits(t: Ty, v: Value) : bool =
         match t, v with
         | TyNat, VInt n -> n.Sign >= 0
         | TyChar, VChar c -> isScalar (BigInteger c)
         | TyInt, VInt _ -> true
+        | (TyI32 | TyI64), VInt n -> (let lo, hi = (boundsOf t).Value in lo <= n && n <= hi)
         | TyBool, VBool _ -> true
         | TySeq e, VSeq xs -> xs |> List.forall (fun x -> ev.Fits(e, x))
         | TyTuple ts, VTuple xs when ts.Length = xs.Length -> List.forall2 (fun t x -> ev.Fits(t, x)) ts xs

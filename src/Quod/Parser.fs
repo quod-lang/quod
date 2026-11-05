@@ -99,6 +99,8 @@ type private Parser(file: string, toks: Token[]) =
         | TkKeyword "bool" -> p.Next() |> ignore; TBool
         // words only here: an existing variable may be called `string` or `char`
         | TkIdent "char" -> p.Next() |> ignore; TChar
+        | TkIdent "i32" -> p.Next() |> ignore; TI32
+        | TkIdent "i64" -> p.Next() |> ignore; TI64
         | TkIdent "string" -> p.Next() |> ignore; TSeq TChar
         | TkKeyword "seq" ->
             p.Next() |> ignore

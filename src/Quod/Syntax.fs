@@ -15,6 +15,8 @@ type TypeExpr =
     | TBool
     | TSeq of TypeExpr
     | TChar
+    | TI32
+    | TI64
     | TTuple of TypeExpr list
 
 type UnOp =

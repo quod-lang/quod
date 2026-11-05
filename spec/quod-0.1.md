@@ -105,6 +105,27 @@ return e;              // or a final expression at the end of the body
 - In contracts and assertions: `result`, and bounded quantifiers
   `forall i in a..b: P`, `exists i in a..b: P` (`a` included, `b` excluded).
 
+### Bounded integers
+
+Since 0.3, `i32` and `i64` hold what fits in 32 and 64 bits. `int` stays the default: it is a mathematical integer, and nothing can overflow.
+
+```rust
+fn midpoint(lo: i32, hi: i32) -> i32
+  requires 0 <= lo && lo <= hi
+  ensures result == lo + (hi - lo) / 2
+{
+  lo + (hi - lo) / 2   // lo + hi would be refused: the sum can leave i32
+}
+```
+
+- **In code,** every `+ - * / %` and unary `-` on bounded operands has an obligation: the result fits. It is neither a silent overflow nor an exception, but a proof not met, with its counterexample.
+- **In contracts, invariants and assertions, arithmetic is mathematical:** `ensures result == a + b` means what it says, and cannot overflow.
+- **What widens is implicit and exact:** `i32` to `i64`, to `int`. What narrows is written, and must be proved: `to_i32(x)`, `to_i64(x)`. A literal takes the type its context wants, if it fits.
+- Under a sequence or a tuple there is no conversion: a `seq<i32>` is not a `seq<int>`.
+- An operation between a bounded integer and an `int` or a `nat` is in `int`. `len(xs)` stays a `nat`; a program that uses bounded integers knows that it is at most 2^31 - 1, so `to_i32(len(xs))` can be proved.
+- `/` and `%` are Euclidean, as for `int`, in every backend.
+- In Python, a parameter is checked against its bounds at the public boundary; the elements of a list only with `--check-requires all`. In C#, they are `int` and `long`.
+
 ### Characters and strings
 
 Since 0.3, `char` is a Unicode scalar value, and `string` is `seq<char>`: `len`, indexing, slices, `+`, `==` and quantifiers work on it as on any sequence.

@@ -19,7 +19,7 @@ let pyName (n: string) = if reserved.Contains n || n.StartsWith "_quod_" then n 
 
 let rec private pyType (t: Ty) =
     match t with
-    | TyInt | TyNat | TyError -> "int"
+    | TyInt | TyNat | TyI32 | TyI64 | TyError -> "int"
     | TyBool -> "bool"
     | TyChar | TySeq TyChar -> "str"
     | TySeq e -> "list[" + pyType e + "]"
@@ -177,6 +177,7 @@ type private Gen(checks: Set<string>) =
             let f = match q with Syntax.Forall -> "_quod_all" | Syntax.Exists -> "_quod_any"
             f + "(" + go body + " for " + pyName v + " in _quod_range(" + go lo + ", " + go hi + "))"
         | EToNat x -> go x
+        | EConvert x when isBounded e.Ty -> go x
         | EConvert x -> (if e.Ty = TyChar then "chr(" else "ord(") + go x + ")"
 
     /// An argument from Python as the generated code expects it: sequences as lists, tuples as
@@ -200,6 +201,10 @@ type private Gen(checks: Set<string>) =
     member g.NatTest(t: Ty, term: string, deep: bool, depth: int) : string option =
         match t with
         | TyNat -> Some("(" + term + " >= 0)")
+        // a Python int has no bounds, and the proofs rely on them
+        | TyI32 | TyI64 ->
+            let lo, hi = (boundsOf t).Value
+            Some("(" + lo.ToString() + " <= " + term + " <= " + hi.ToString() + ")")
         | TySeq e when deep ->
             let x = "_quod_n" + string depth
             g.NatTest(e, x, deep, depth + 1) |> Option.map (fun inner -> "_quod_all(" + inner + " for " + x + " in " + term + ")")
@@ -291,7 +296,7 @@ type private Gen(checks: Set<string>) =
             match g.NatTest(p.Ty, pyName p.Name, allRequires, 0) with
             | Some test ->
                 sb.Append("    if not ").Append(test).Append(":\n        raise ValueError(\"")
-                  .Append(f.Name + ": argument " + p.Name + " must be >= 0").Append("\")\n") |> ignore
+                  .Append(f.Name + ": argument " + p.Name + (if isBounded p.Ty then " must fit in " + tyText p.Ty else " must be >= 0")).Append("\")\n") |> ignore
             | None -> ()
         for r in enforced do
             let negated = match r.Kind with ENot x -> g.Expr x | _ -> "not " + g.Expr r

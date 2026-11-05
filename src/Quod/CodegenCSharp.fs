@@ -54,7 +54,8 @@ let rec csType (t: Ty) =
     | TyInt | TyNat | TyError -> "BigInteger"
     | TyBool -> "bool"
     // inside, a scalar value: C#'s char is a UTF-16 unit, and half an emoji is not a character
-    | TyChar -> "int"
+    | TyChar | TyI32 -> "int"
+    | TyI64 -> "long"
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
 
@@ -293,7 +294,7 @@ type private Gen(checks: Set<string>) =
 
     member g.Eq(t: Ty, a: string, b: string) =
         match shape t with
-        | TyInt | TyBool -> "(" + a + " == " + b + ")"
+        | TyInt | TyBool | TyI32 | TyI64 | TyChar -> "(" + a + " == " + b + ")"
         | s -> g.EqName s + "(" + a + ", " + b + ")"
 
     member g.EqFunctions() : string list =
@@ -314,7 +315,8 @@ type private Gen(checks: Set<string>) =
         let ty = merge (shape e.Ty) (shape want)
         let elem = match ty with TySeq t -> t | _ -> TyInt
         match e.Kind with
-        | EInt n when e.Ty = TyChar -> n.ToString()
+        | EInt n when e.Ty = TyChar || e.Ty = TyI32 -> n.ToString()
+        | EInt n when e.Ty = TyI64 -> n.ToString() + "L"
         | EInt n -> g.Constant n
         | EBool b -> if b then "true" else "false"
         | EVar n -> g.Name n
@@ -334,18 +336,24 @@ type private Gen(checks: Set<string>) =
         | EProj(t, k) -> g.Expr(t, t.Ty) + ".Item" + string (k + 1)
         | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
         | ECall(f, args) -> g.Call(f, args)
+        | ENeg x when isBounded x.Ty && not (isBounded e.Ty) -> "(-new BigInteger(" + g.Expr(x, x.Ty) + "))"
         | ENeg x -> "(-" + g.Expr(x, TyInt) + ")"
         | ENot { Kind = EEq(a, b) } when (match shape (merge (shape a.Ty) (shape b.Ty)) with TyInt | TyBool -> true | _ -> false) ->
             "(" + g.Expr(a, a.Ty) + " != " + g.Expr(b, b.Ty) + ")"
         | ENot x -> "(!" + g.Expr(x, TyBool) + ")"
         | EArith(op, a, b) ->
-            let x, y = g.Expr(a, TyInt), g.Expr(b, TyInt)
+            // an operation in int on bounded operands (a contract) must not be computed in C#'s int
+            let wide (o: TExpr) = if isBounded o.Ty && not (isBounded e.Ty) then "new BigInteger(" + g.Expr(o, o.Ty) + ")" else g.Expr(o, TyInt)
+            let x, y = wide a, wide b
+            let euclid (name: string) =
+                let call = g.Help name + "(" + x + ", " + y + ")"
+                if isBounded e.Ty then "((" + csType e.Ty + ")" + call + ")" else call
             match op with
             | OAdd -> "(" + x + " + " + y + ")"
             | OSub -> "(" + x + " - " + y + ")"
             | OMul -> "(" + x + " * " + y + ")"
-            | ODiv -> g.Help "div" + "(" + x + ", " + y + ")"
-            | OMod -> g.Help "mod" + "(" + x + ", " + y + ")"
+            | ODiv -> euclid "div"
+            | OMod -> euclid "mod"
         | EConcat(a, b) ->
             let t = merge (merge ty (shape a.Ty)) (shape b.Ty)
             let elem = match t with TySeq x -> x | _ -> TyInt
@@ -353,6 +361,7 @@ type private Gen(checks: Set<string>) =
         | ECmp(op, a, b) ->
             let o = match op with OLt -> "<" | OLe -> "<=" | OGt -> ">" | OGe -> ">="
             "(" + g.Expr(a, TyInt) + " " + o + " " + g.Expr(b, TyInt) + ")"
+        | EEq(a, b) when isBounded a.Ty || isBounded b.Ty -> "(" + g.Expr(a, a.Ty) + " == " + g.Expr(b, b.Ty) + ")"
         | EEq(a, b) ->
             let t = merge (shape a.Ty) (shape b.Ty)
             g.Eq(t, g.Expr(a, t), g.Expr(b, t))
@@ -375,7 +384,8 @@ type private Gen(checks: Set<string>) =
                 text <- f + "(" + l + ", " + h + ", " + name + " => " + g.Expr(body, TyBool) + ")")
             text
         | EToNat x -> g.Expr(x, TyInt)
-        | EConvert x when e.Ty = TyChar -> "((int)" + g.Expr(x, TyInt) + ")"
+        | EConvert x when e.Ty = TyChar || e.Ty = TyI32 -> "((int)" + g.Expr(x, TyInt) + ")"
+        | EConvert x when e.Ty = TyI64 -> "((long)" + g.Expr(x, TyInt) + ")"
         | EConvert x -> "new BigInteger(" + g.Expr(x, TyChar) + ")"
 
     /// The parameter types of the program, for arguments that do not know theirs (`f([])`).
@@ -513,7 +523,7 @@ let rec private hasIntegerList (t: Ty) =
 let rec private narrowType (narrow: string) (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> narrow
-    | TyBool | TyChar -> csType t
+    | TyBool | TyChar | TyI32 | TyI64 -> csType t
     | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
     | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
 
@@ -522,7 +532,7 @@ let rec private narrowType (narrow: string) (t: Ty) =
 let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
     match t with
     | TyInt | TyNat | TyError -> "new BigInteger(" + term + ")"
-    | TyBool | TyChar -> term
+    | TyBool | TyChar | TyI32 | TyI64 -> term
     | TySeq e ->
         let x = "_quod_x" + string depth
         "new _QuodView<" + narrowType narrow e + ", " + csType e + ">(" + term + ", " + x + " => " + widen narrow e x (depth + 1) + ")"

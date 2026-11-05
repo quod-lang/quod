@@ -230,3 +230,48 @@ let ``string and char remain possible names of variables`` () =
         | Checked(_, r) -> Assert.Empty(errorsOf r)
         | other -> failwithf "%A" other)
 
+// --- i32 and i64 ------------------------------------------------------------------------------------
+
+let private proofError (src: string) (expected: string) =
+    withFiles [ "main", src ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) ->
+            Assert.Contains(errorsOf r, fun d -> d.Kind = "proof" && d.Message.Contains expected && not d.Counterexample.IsEmpty)
+        | other -> failwithf "%A" other)
+
+let private proved (src: string) =
+    withFiles [ "main", src ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.Empty(errorsOf r)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``an operation that can leave the bounds is refused, with a counterexample`` () =
+    proofError "fn add(a: i32, b: i32) -> i32\n  ensures result == a + b\n{\n  a + b\n}\n" "fits in i32"
+    proofError "fn neg(a: i32) -> i32\n  ensures result == -a\n{\n  -a\n}\n" "fits in i32"
+    proofError "fn mul(a: i64, b: i64) -> i64\n  ensures result == a * b\n{\n  a * b\n}\n" "fits in i64"
+    proofError "fn narrow(x: int) -> i32\n  ensures result == x\n{\n  to_i32(x)\n}\n" "fits in i32"
+
+[<Fact>]
+let ``arithmetic is mathematical in a contract`` () =
+    proved "fn add(a: i32, b: i32) -> i64\n  ensures result == a + b\n{\n  let x: i64 = a;\n  x + b\n}\n"
+
+[<Fact>]
+let ``nothing narrows by itself, and a literal must fit`` () =
+    typeError "fn f(x: int) -> i32 {\n  x\n}\n" "to_i32"
+    typeError "fn f(x: i64) -> i32 {\n  x\n}\n" "to_i32"
+    typeError "fn f() -> i32 {\n  3000000000\n}\n" "does not fit in i32"
+
+[<Fact>]
+let ``a sequence does not convert`` () =
+    typeError "fn f(xs: seq<i32>) -> seq<int> {\n  xs\n}\n" "seq<int> is expected"
+    typeError "fn f(xs: seq<i32>, ys: seq<int>) -> bool {\n  xs == ys\n}\n" "different types"
+
+[<Fact>]
+let ``a length converts, in a program with bounded integers`` () =
+    proved "fn last(xs: seq<i32>) -> i32\n  requires len(xs) >= 1\n  ensures result == xs[len(xs) - 1]\n{\n  xs[to_i32(len(xs)) - 1]\n}\n"
+
+[<Fact>]
+let ``i32 and i64 remain possible names of variables`` () =
+    proved "fn f(i32: int, i64: int) -> int\n  ensures result == i32 + i64\n{\n  i32 + i64\n}\n"
+

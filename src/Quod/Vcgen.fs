@@ -23,6 +23,8 @@ let rec private tySig (t: Ty) =
     | TyInt | TyNat | TyError -> "i"
     | TyBool -> "b"
     | TyChar -> "c"
+    | TyI32 -> "w"
+    | TyI64 -> "W"
     | TySeq e -> "S" + tySig e + "E"
     | TyTuple ts -> "T" + (ts |> List.map tySig |> String.concat "") + "E"
 
@@ -30,7 +32,7 @@ let private tupleName (ts: Ty list) = "Tup_" + (ts |> List.map tySig |> String.c
 
 let rec sortOf (t: Ty) =
     match t with
-    | TyInt | TyNat | TyChar | TyError -> "Int"
+    | TyInt | TyNat | TyChar | TyI32 | TyI64 | TyError -> "Int"
     | TyBool -> "Bool"
     | TySeq e -> "Seq_" + tySig e
     | TyTuple ts -> tupleName ts
@@ -116,11 +118,17 @@ let private intLit (v: bigint) = if v.Sign < 0 then "(- " + (-v).ToString() + ")
 let private scalarFact (term: string) =
     "(and (<= 0 " + term + ") (<= " + term + " 1114111) (not (and (<= 55296 " + term + ") (<= " + term + " 57343))))"
 
+/// A bounded integer between its bounds.
+let private boundFact (t: Ty) (term: string) =
+    let lo, hi = (boundsOf t).Value
+    "(and (<= " + intLit lo + " " + term + ") (<= " + term + " " + intLit hi + "))"
+
 /// Facts that a value of type t carries: a nat is >= 0, and so are the elements of a seq<nat>.
 let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : string list =
     match t with
     | TyNat -> [ "(>= " + term + " 0)" ]
     | TyChar -> [ scalarFact term ]
+    | TyI32 | TyI64 -> [ boundFact t term ]
     | TySeq e ->
         let q = fresh ()
         match typeFacts fresh e ("(" + seqOp "nth" t + " " + term + " " + q + ")") with
@@ -195,6 +203,14 @@ let rec private valueOf (t: Ty) (e: SExpr) : Eval.Value option =
         match bigint.TryParse n with
         | true, v -> Some(Eval.VInt(-v))
         | _ -> None
+    | (TyI32 | TyI64), Atom n ->
+        match bigint.TryParse n with
+        | true, v -> Some(Eval.VInt v)
+        | _ -> None
+    | (TyI32 | TyI64), List [ Atom "-"; Atom n ] ->
+        match bigint.TryParse n with
+        | true, v -> Some(Eval.VInt(-v))
+        | _ -> None
     | TyChar, Atom n ->
         match bigint.TryParse n with
         | true, v when Eval.isScalar v -> Some(Eval.VChar(int v))
@@ -219,7 +235,7 @@ let private reasonText (answer: string) =
 /// Small values of a type, for candidate results: [], singletons, pairs of small elements.
 let rec private smallValues (t: Ty) : Eval.Value list =
     match t with
-    | TyInt | TyError -> [ 0; 1; -1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
+    | TyInt | TyI32 | TyI64 | TyError -> [ 0; 1; -1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
     | TyNat -> [ 0; 1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
     | TyBool -> [ Eval.VBool false; Eval.VBool true ]
     | TyChar -> [ 'a'; 'b'; 'A'; '0'; ' ' ] |> List.map (fun c -> Eval.VChar(int c))
@@ -235,7 +251,7 @@ let rec private smallValues (t: Ty) : Eval.Value list =
 /// The simplest value of a type: 0, false, [], a tuple of those (an edge case worth running).
 let rec private zeroValue (t: Ty) : Eval.Value =
     match t with
-    | TyInt | TyNat | TyError -> Eval.VInt(bigint 0)
+    | TyInt | TyNat | TyI32 | TyI64 | TyError -> Eval.VInt(bigint 0)
     | TyBool -> Eval.VBool false
     | TyChar -> Eval.VChar(int 'a')
     | TySeq _ -> Eval.VSeq []
@@ -246,6 +262,13 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
     match t with
     | TyInt | TyError -> Eval.VInt(bigint (rnd.Next(-6, 7)))
     | TyNat -> Eval.VInt(bigint (rnd.Next(0, 7)))
+    // small, and one time in six the extreme values: where an overflow shows
+    | TyI32 | TyI64 ->
+        let lo, hi = (boundsOf t).Value
+        match rnd.Next 12 with
+        | 0 -> Eval.VInt lo
+        | 1 -> Eval.VInt hi
+        | _ -> Eval.VInt(bigint (rnd.Next(-6, 7)))
     | TyBool -> Eval.VBool(rnd.Next 2 = 0)
     // ASCII, a space, a digit, and beyond: an accent, Greek, an emoji
     | TyChar -> Eval.VChar [| int 'a'; int 'b'; int 'A'; int '0'; int '9'; int ' '; int ','; 0xE9; 0x3B1; 0x1F600 |].[rnd.Next 10]
@@ -301,7 +324,7 @@ let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Valu
         let n = if not lengths.IsEmpty && rnd.Next 3 = 0 then int lengths.[rnd.Next lengths.Length] else rnd.Next(0, 6)
         Eval.VSeq [ for _ in 1 .. n -> inputValue rnd pool e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
-    | TyBool | TyChar -> randomValue rnd t
+    | TyBool | TyChar | TyI32 | TyI64 -> randomValue rnd t
 
 /// Does e mention the variable `name`? (By the text of e: a whole word.)
 let private mentions (name: string) (e: TExpr) =
@@ -578,7 +601,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let name = v.Fresh baseName
         z3.Send("(declare-const " + name + " " + sortOf t + ")")
         match t with
-        | TyInt | TyNat | TyBool | TyChar -> scalarSorts.[name] <- sortOf t
+        | TyInt | TyNat | TyBool | TyChar | TyI32 | TyI64 -> scalarSorts.[name] <- sortOf t
         | _ -> ()
         name
 
@@ -699,17 +722,23 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | _ -> failwith "internal: projection of a non-tuple"
         | ELen s -> "(" + seqOp "len" s.Ty + " " + go s + ")"
         | ECall(name, args) -> v.Call(e, name, args |> List.map go, guards, out)
-        | ENeg x -> "(- " + go x + ")"
+        | ENeg x ->
+            let term = "(- " + go x + ")"
+            if isBounded e.Ty then ob (boundFact e.Ty term) ("the result fits in " + tyText e.Ty) e.Span
+            term
         | ENot x -> "(not " + go x + ")"
         | EArith(op, a, b) ->
             let ta, tb = go a, go b
-            match op with
-            | OAdd -> "(+ " + ta + " " + tb + ")"
-            | OSub -> "(- " + ta + " " + tb + ")"
-            | OMul -> "(* " + ta + " " + tb + ")"
-            | ODiv | OMod ->
-                ob ("(not (= " + tb + " 0))") "divisor is not zero" b.Span
-                (if op = ODiv then "(div " else "(mod ") + ta + " " + tb + ")"
+            let term =
+                match op with
+                | OAdd -> "(+ " + ta + " " + tb + ")"
+                | OSub -> "(- " + ta + " " + tb + ")"
+                | OMul -> "(* " + ta + " " + tb + ")"
+                | ODiv | OMod ->
+                    ob ("(not (= " + tb + " 0))") "divisor is not zero" b.Span
+                    (if op = ODiv then "(div " else "(mod ") + ta + " " + tb + ")"
+            if isBounded e.Ty then ob (boundFact e.Ty term) ("the result fits in " + tyText e.Ty) e.Span
+            term
         | EConcat(a, b) -> "(" + seqOp "cat" e.Ty + " " + go a + " " + go b + ")"
         | ECmp(op, a, b) ->
             let o = match op with OLt -> "<" | OLe -> "<=" | OGt -> ">" | OGe -> ">="
@@ -751,6 +780,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         | EConvert x ->
             let tx = go x
             if e.Ty = TyChar then ob (scalarFact tx) "the argument of char_of is a Unicode scalar value" e.Span
+            if isBounded e.Ty then ob (boundFact e.Ty tx) ("the value fits in " + tyText e.Ty) e.Span
             tx
 
     /// A call: the callee's precondition is an obligation; its contract is a fact; a call
@@ -806,7 +836,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// into a formula without quantifiers, easy for the solver (external counter-review). A
     /// random bound on one unknown varies the inputs from one try to the next.
     member private v.SolverInputs(f: TFn, rnd: Random) : Eval.Value list list =
-        let scalar (t: Ty) = match t with TyInt | TyNat | TyBool | TyChar -> true | _ -> false
+        let scalar (t: Ty) = match t with TyInt | TyNat | TyBool | TyChar | TyI32 | TyI64 -> true | _ -> false
         let supported (t: Ty) =
             match t with
             | TyTuple ts -> List.forall scalar ts
@@ -832,6 +862,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                             z3.Send("(declare-const " + c + (if t = TyBool then " Bool)" else " Int)"))
                             if t = TyNat then z3.Send("(assert (>= " + c + " 0))")
                             if t = TyChar then z3.Send("(assert " + scalarFact c + ")")
+                            if isBounded t then z3.Send("(assert " + boundFact t c + ")")
                             unknowns.Add((c, t))
                             BTerm c
                         let one (t: Ty) = match t with TyTuple ts -> BTup(List.map fresh ts) | t -> fresh t
@@ -909,9 +940,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 // each constant of the program in each int parameter, the others zero
                 for (k, p) in List.indexed f.Params do
                     match p.Ty with
-                    | TyInt | TyNat ->
+                    | TyInt | TyNat | TyI32 | TyI64 ->
                         for c in constants do
-                            if p.Ty = TyInt || c.Sign >= 0 then
+                            if (p.Ty = TyInt || c.Sign >= 0) && (match boundsOf p.Ty with Some(lo, hi) -> lo <= c && c <= hi | None -> true) then
                                 yield zero |> List.mapi (fun i z -> if i = k then Eval.VInt c else z)
                     | _ -> ()
                 for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> inputValue rnd constants p.Ty)
@@ -1270,7 +1301,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     member v.Prelude() =
         let tuples = ResizeArray<Ty list>()
         let elems = ResizeArray<Ty>()
+        let mutable usesBounded = false
         let rec visit (t: Ty) =
+            if isBounded t then usesBounded <- true
             match t with
             | TySeq e ->
                 visit e
@@ -1311,6 +1344,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             z3.Send("(declare-datatypes ((" + n + " 0)) (((mk_" + n + " " + fields + "))))")
         for e in elems do
             for line in seqAxioms e do z3.Send line
+            // a program that speaks of bounded integers may index and convert with a length: it fits.
+            // The fact is not given to other programs, whose proofs have no use for it.
+            if usesBounded then
+                z3.Send("(assert (forall ((a " + sortOf (TySeq e) + ")) (! (<= (" + seqOp "len" (TySeq e) + " a) 2147483647) :pattern ((" + seqOp "len" (TySeq e) + " a)))))")
         // Every function is an SMT function symbol. A pure function returns the same result for
         // the same arguments, so this is sound even for statement functions, which callers know
         // through their contract only.
@@ -1657,7 +1694,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                     let differ =
                         match p.Ty with
                         | TySeq _ -> Some("(not (= (" + seqOp "len" p.Ty + " " + a.[p.Name] + ") (" + seqOp "len" p.Ty + " " + b.[p.Name] + ")))")
-                        | TyInt | TyNat | TyBool | TyChar -> Some("(not (= " + a.[p.Name] + " " + b.[p.Name] + "))")
+                        | TyInt | TyNat | TyBool | TyChar | TyI32 | TyI64 -> Some("(not (= " + a.[p.Name] + " " + b.[p.Name] + "))")
                         | _ -> None
                     match differ with
                     | Some d ->

@@ -138,7 +138,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                             | Some x when x.IsPrivate -> refuse ("'" + g + "' is private to module '" + m + "'")
                             | Some _ -> callee
                         | None, g when locals.Contains g -> flat g
-                        | None, ("code" | "char_of") -> callee // built in, unless the module defines it
+                        | None, ("code" | "char_of" | "to_i32" | "to_i64") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
                             match elsewhere with
