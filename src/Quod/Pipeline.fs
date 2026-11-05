@@ -40,7 +40,9 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
         | Ok loaded ->
         let inFiles = List.map (Modules.inFile loaded.Files)
         let typed, typeErrors = Typecheck.check file loaded.Program
+        let refused = if typeErrors.IsEmpty then ContractStyle.beforeProofs file typed else []
         if not typeErrors.IsEmpty then Rejected(inFiles typeErrors)
+        elif not refused.IsEmpty then Rejected(inFiles refused)
         else
             match Smt.findZ3 s.Z3 with
             | None -> Failure("z3 not found; put it next to quod, set QUOD_Z3, or pass --z3 PATH", 2)
@@ -52,7 +54,20 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let verified = Vcgen.verifyWith file typed session s.Budget s.RequireContracts s.Progress
                 let found = verified.Diagnostics @ ContractStyle.diagnostics file typed
                 let found = if s.RequireContracts then ContractStyle.required file typed found else found
-                Checked(typed, { verified with Diagnostics = loaded.Warnings @ inFiles (found @ ContractStyle.review file typed) })
+                // a generic nothing uses was neither type-checked nor proved: "verified" says nothing of it
+                let unused =
+                    loaded.Program.Fns
+                    |> List.filter (fun f -> not f.TypeParams.IsEmpty && not (typed.Fns |> List.exists (fun g -> g.Name.StartsWith(f.Name + "__"))))
+                    // the standard library offers more than a program uses
+                    |> List.filter (fun f ->
+                        match Modules.split f.Name with
+                        | Some m, _ -> not (loaded.Files.[m].StartsWith "stdlib/")
+                        | None, _ -> true)
+                    |> List.map (fun f ->
+                        { File = file; Span = f.Span; Kind = "contract"; Status = "unused-generic"; Severity = Warning; Fn = Some f.Name
+                          Property = None; Counterexample = []; Reason = None; Evidence = None
+                          Message = "'" + f.Name + "' is generic and not used: it was neither type-checked nor proved. A generic is checked for the types it is used with" })
+                Checked(typed, { verified with Diagnostics = loaded.Warnings @ inFiles unused @ inFiles (found @ ContractStyle.review file typed) })
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)

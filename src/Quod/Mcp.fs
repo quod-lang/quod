@@ -319,7 +319,7 @@ let private run (args: JsonElement) : ToolResult =
         let ev = Eval.Evaluator(fns, true)
         try
             let v = Eval.withBigStack (fun () -> ev.Run(f, values))
-            outcome "ok" (name + " returns " + Eval.valueText v) (fun w -> w.WritePropertyName "result"; writeValue w v)
+            outcome "ok" (name + " returns " + (match f.Ret, v with TySeq TyChar, Eval.VSeq [] -> "\"\"" | _ -> Eval.valueText v)) (fun w -> w.WritePropertyName "result"; (match f.Ret, v with TySeq TyChar, Eval.VSeq [] -> w.WriteStringValue "" | _ -> writeValue w v))
         with
         | Eval.Violation(label, span) ->
             // what was broken: the clause of a postcondition, else the source line; and for a

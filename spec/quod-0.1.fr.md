@@ -146,7 +146,7 @@ fn decide(f: Field, threshold: i32) -> Decision
 - `import option` donne `Option<T>` (`None`, `Some`) et `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
 - **Entre modules :** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. Dans un `match`, le type est connu, donc un cas s'écrit par son nom court : `Some(x)`.
 - **En Python,** des `dataclass` figées, qui contrôlent ce que les types de leurs champs promettent à leur construction ; une copie de générique a ses propres noms, comme `Option_int_Some`.
-- **En C#,** des classes immuables égales par valeur, imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `Value`, ou `F0`, `F1` s'ils n'ont pas de nom. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
+- **En C#,** des classes immuables égales par valeur (`IEquatable<T>`, `==`, et un hachage sur ce qu'elles contiennent), qui copient les listes reçues et exposent des vues non convertibles. Un `enum` a une méthode `Match` avec une fonction par cas, qui donne à l'appelant l'exhaustivité de `match`. Imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `Value`, ou `F0`, `F1` s'ils n'ont pas de nom. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
 
 ### Entiers bornés
 
@@ -165,7 +165,7 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **Dans les contrats, les invariants et les assertions, le calcul est mathématique :** `ensures result == a + b` dit ce qu'il dit, sans débordement possible.
 - **Ce qui élargit est implicite et exact :** `i32` vers `i64`, vers `int`. Ce qui rétrécit s'écrit, et doit être prouvé : `to_i32(x)`, `to_i64(x)`. Un littéral prend le type que son contexte attend, s'il tient.
 - Sous une séquence ou un tuple, il n'y a pas de conversion : une `seq<i32>` n'est pas une `seq<int>`.
-- Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat` ; un programme qui utilise des entiers bornés sait qu'il vaut au plus 2^31 - 1, donc `to_i32(len(xs))` peut se prouver.
+- Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat`. Dans un programme qui utilise des entiers bornés, une liste qu'une fonction **reçoit** a une longueur d'au plus 2^31 - 1, donc `to_i32(len(xs))` peut se prouver sur un paramètre ; une liste construite dans la fonction n'a pas ce fait.
 - **Pour C#, préférez `i32` et `i64`.** Le `int` et le `nat` de Quod sont des entiers mathématiques, que C# ne peut tenir que dans un `BigInteger` : `int` en Quod n'est pas `int` en C#. `i32` est le `int` de C#, et `i64` son `long`.
 - `/` et `%` sont euclidiens, comme pour `int`, dans tous les backends.
 - En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`. En C#, ce sont des `int` et des `long`.
@@ -180,7 +180,7 @@ Depuis la 0.3, `char` est une valeur scalaire Unicode, et `string` est `seq<char
 - `import strings` donne la bibliothèque standard, écrite en Quod et prouvée avec votre programme : `is_digit`, `is_space`, `is_letter` (ASCII), `starts_with`, `ends_with`, `occurs_at`, `find`, `trim`, `split`, `join`, `all_digits`, `is_int`, `parse_int`, `int_to_string`. Un fichier local `strings.quod` la masque, avec un avertissement.
 - En Python, une chaîne est un `str` et un `char` un `str` d'un caractère. En C#, une chaîne est un `string` et un `char` un `int`, sa valeur scalaire. Les deux refusent un surrogate isolé à la frontière.
 
-- **Une longue entrée :** une fonction qui finit par s'appeler elle-même s'exécute en boucle, quelle que soit la longueur. Sinon, la profondeur d'une récursion suit son entrée. Pour ce cas, `run_by` : les contrats lisent une définition par récursion, et le code exécute une boucle prouvée égale.
+- **Une longue entrée :** une fonction qui finit par s'appeler elle-même s'exécute en boucle, quelle que soit la longueur. Sinon, la profondeur d'une récursion suit son entrée. Pour ce cas, `run_by` : les contrats lisent une définition par récursion, et le code exécute une boucle prouvée égale. La boucle ne peut pas exiger plus que la fonction qu'elle exécute, ni la rappeler.
 
 ```rust
 fn total(xs: seq<int>) -> int

@@ -335,8 +335,13 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
     /// A literal next to a bounded integer takes its type: `x + 1`, `x < 10`.
     member c.Adopt(a: TExpr, b: TExpr, fn: string) : TExpr * TExpr =
         let isLiteral (e: TExpr) = match e.Kind with EInt _ -> e.Ty = TyInt | _ -> false
-        if isLiteral a && isBounded b.Ty then c.Literal(a, b.Ty, fn), b
-        elif isLiteral b && isBounded a.Ty then a, c.Literal(b, a.Ty, fn)
+        // one that does not fit stays an int, and the operation is in int: `x < 3000000000` is fine
+        let fits (e: TExpr) (t: Ty) =
+            match e.Kind, boundsOf t with
+            | EInt v, Some(lo, hi) -> lo <= v && v <= hi
+            | _ -> false
+        if isLiteral a && fits a b.Ty then c.Literal(a, b.Ty, fn), b
+        elif isLiteral b && fits b a.Ty then a, c.Literal(b, a.Ty, fn)
         else a, b
 
     member c.ExpectBool(e: TExpr, ctx: Ctx, what: string) =
@@ -960,4 +965,10 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
                 elif not f.IsExprFn then refuse ("'run_by' is for a function whose body is an expression: '" + f.Name + "' is the one contracts read")
                 elif not (g.Ensures |> List.exists isEquality) then
                     refuse ("'run_by " + name + "': its contract must state 'ensures result == " + f.Name + "(" + String.Join(", ", f.Params |> List.map (fun p -> p.Name)) + ")'")
+                else
+                    // it runs wherever the function does: it may not ask for more (review of 0.3)
+                    let texts (rs: TExpr list) = rs |> List.map (fun r -> Printer.exprText (toSyntax r))
+                    match texts g.Requires |> List.tryFind (fun r -> not (List.contains r (texts f.Requires))) with
+                    | Some r -> refuse ("'run_by " + name + "': it requires " + r + ", which '" + f.Name + "' does not: it would run on inputs it was not proved for")
+                    | None -> ()
     { Types = checker.DataTypes; Fns = all }, List.ofSeq dups @ checker.Errors

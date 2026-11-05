@@ -221,6 +221,39 @@ let rec private calls (e: TExpr) : string list =
     | EIf(a, b, c) | EQuant(_, _, a, b, c) -> calls a @ calls b @ calls c
     | EInt _ | EBool _ | EVar _ | EResult -> []
 
+let rec private callsIn (items: TStmt list) : string list =
+    items |> List.collect (fun s ->
+        match s.Kind with
+        | SLet(_, _, _, e) | SAssign(_, e) | SAssert e | SReturn e -> calls e
+        | SIf(c, a, b) -> calls c @ callsIn a @ callsIn b
+        | SWhile(c, invs, _, b) -> calls c @ List.collect calls invs @ callsIn b)
+
+/// What must be refused before any proof. A `run_by` function that reaches the function it runs for
+/// would loop for ever, though each is proved. A contract that speaks of its own function says nothing
+/// of it, and the solver's definition of it would loop.
+let beforeProofs (file: string) (prog: TProgram) : Diagnostic list =
+    let byName = prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+    let bodyCalls (f: TFn) =
+        match f.Body with
+        | TExprBody e -> (if f.RunBy.IsSome then [] else calls e) @ Option.toList f.RunBy
+        | TStmtBody items -> callsIn items
+    let rec reaches (seen: Set<string>) (target: string) (from: string) =
+        from = target
+        || (not (seen.Contains from)
+            && (match byName.TryFind from with
+                | Some f -> bodyCalls f |> List.exists (reaches (seen.Add from) target)
+                | None -> false))
+    let error (f: TFn) (message: string) : Diagnostic =
+        { File = file; Span = f.Span; Kind = "type"; Status = "error"; Severity = Error; Fn = Some f.Name
+          Property = None; Counterexample = []; Reason = None; Evidence = None; Message = message }
+    [ for f in prog.Fns do
+          if f.Ensures @ f.Requires |> List.collect calls |> List.contains f.Name then
+              yield error f ("the contract of '" + f.Name + "' mentions '" + f.Name + "': a contract says what a function does in other terms")
+          match f.RunBy with
+          | Some g when reaches Set.empty f.Name g ->
+              yield error f ("'run_by " + g + "': it calls '" + f.Name + "' back, so the generated code would loop for ever")
+          | _ -> () ]
+
 /// The property of a review note, followed by the functions whose contracts use the model.
 let reviewProperty = "used by the contracts of "
 

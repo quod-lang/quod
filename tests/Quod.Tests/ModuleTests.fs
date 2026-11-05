@@ -388,3 +388,59 @@ let ``a class keeps a copy of the lists it is given`` () =
             | Result.Error why -> failwith why
         | other -> failwithf "%A" other)
 
+// --- what the review of 0.3 found ----------------------------------------------------------------------
+
+let private notVerified (src: string) =
+    withFiles [ "main", src ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.NotEmpty(errorsOf r)
+        | Rejected _ -> ()
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``the length of a term that does not exist has no bound`` () =
+    notVerified "fn wrong(xs: seq<bool>) -> bool\n  ensures !result\n{\n  let k: i32 = 0;\n  assert len(xs + xs) >= k;\n  len(xs) > 1073741823\n}\n"
+    // what it is for remains: a list received
+    proved "fn f(xs: seq<i32>) -> i32\n  ensures result == len(xs)\n{\n  to_i32(len(xs))\n}\n"
+    proved "struct B { xs: seq<i32> }\n\nfn f(b: B) -> i32\n  ensures result == len(b.xs)\n{\n  to_i32(len(b.xs))\n}\n"
+
+[<Fact>]
+let ``run_by cannot require more, nor call back`` () =
+    typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  requires x == 1\n  ensures result == f(x)\n{\n  1\n}\n" "does not: it would run"
+    typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == f(x)\n{\n  f(x)\n}\n" "would loop"
+    proved "fn f(x: int) -> int\n  requires x > 0\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  requires x > 0\n  ensures result == f(x)\n{\n  x\n}\n"
+
+[<Fact>]
+let ``a contract cannot mention its own function`` () =
+    typeError "fn f(x: int) -> int\n  ensures result == f(x)\n{\n  x + 1\n}\n" "mentions 'f'"
+
+[<Fact>]
+let ``a literal too large for a bounded integer makes the operation an int`` () =
+    proved "fn f(x: i32) -> bool\n  ensures result == true\n{\n  x < 3000000000\n}\n"
+
+[<Fact>]
+let ``an unused generic is said to be unchecked, but not those of the library`` () =
+    withFiles [ "main", "import option\n\nfn bad<T>(x: T) -> T {\n  x + 1\n}\n" ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) ->
+            let warned = r.Diagnostics |> List.filter (fun d -> d.Status = "unused-generic")
+            Assert.Equal(1, warned.Length)
+            Assert.Equal(Some "bad", warned.Head.Fn)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``C#: division by -1 is guarded, and a class is equal by value`` () =
+    withFiles [ "main", "struct B { xs: seq<i32> }\n\nenum E { A, C(value: i32) }\n\nfn md(a: i32, b: i32) -> i32\n  requires b != 0\n  ensures result == a % b\n{\n  a % b\n}\n" ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Ok g ->
+                Assert.Contains("if (b == -1) return 0;", g.Code)
+                Assert.Contains("IEquatable<B>", g.Code)
+                Assert.Contains("operator ==(B a, B b)", g.Code)
+                Assert.Contains("_quod_hash(_f0", g.Code)
+                Assert.Contains("public R Match<R>(Func<R> onA, Func<int, R> onC)", g.Code)
+                Assert.Contains("new _QuodView<int, int>(_f0", g.Code)
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+

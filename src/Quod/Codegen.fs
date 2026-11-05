@@ -96,6 +96,8 @@ let tailToLoop (f: TFn) : TFn =
         match e.Kind with
         | EIf(_, a, b) -> hasTail a || hasTail b
         | ELogic((OAnd | OOr), _, b) -> hasTail b
+        | EMatch(_, arms) -> arms |> List.exists (fun (_, _, b) -> hasTail b)
+        | EToNat x -> hasTail x // proved: at run time it is the value
         | _ -> isTail e
     let mutable temps = 0
     let rec items (e: TExpr) : TStmt list =
@@ -104,6 +106,27 @@ let tailToLoop (f: TFn) : TFn =
         | EIf(c, a, b) when hasTail e -> [ stmt (SIf(c, items a, items b)) ]
         | ELogic(OAnd, a, b) when hasTail b -> [ stmt (SIf(a, items b, [ stmt (SReturn { e with Kind = EBool false; Ty = TyBool }) ])) ]
         | ELogic(OOr, a, b) when hasTail b -> [ stmt (SIf(a, [ stmt (SReturn { e with Kind = EBool true; Ty = TyBool }) ], items b)) ]
+        | EToNat x when hasTail x -> items x
+        | EMatch(s, arms) when hasTail e ->
+            let d = match s.Ty with TyData d -> d | _ -> failwith "a match on no data type"
+            temps <- temps + 1
+            let holder = "_quod_tail" + string temps
+            let held = { s with Kind = EVar holder }
+            let boolean (v: bool) = { e with Kind = EBool v; Ty = TyBool }
+            let body (k: int, names: string list, b: TExpr) =
+                [ for i, n in List.indexed names do
+                      if n <> "_" then
+                          let ft = snd d.DataCases.[k].Fields.[i]
+                          yield stmt (SLet(false, n, ft, { e with Kind = EField(held, k, i); Ty = ft })) ]
+                @ items b
+            let rec chain (xs: (int * string list * TExpr) list) =
+                match xs with
+                | [ x ] -> body x
+                | ((k, names, _) as x) :: rest ->
+                    let test = { e with Ty = TyBool; Kind = EMatch(held, arms |> List.map (fun (i, ns, _) -> i, ns |> List.map (fun _ -> "_"), boolean (i = k))) }
+                    [ stmt (SIf(test, body x, chain rest)) ]
+                | [] -> []
+            stmt (SLet(false, holder, s.Ty, s)) :: chain arms
         | ECall(_, args) when isTail e ->
             let names =
                 f.Params |> List.map (fun p ->

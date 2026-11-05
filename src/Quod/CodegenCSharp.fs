@@ -122,6 +122,29 @@ let rec private frozen (t: Ty) (term: string) (depth: int) : string =
         "_quod_with(" + term + ", " + x + " => (" + (ts |> List.mapi (fun k c -> frozen c (x + ".Item" + string (k + 1)) (depth + 1)) |> String.concat ", ") + "))"
     | _ -> term
 
+/// A value read by a caller: a list of its own cannot be cast back to what the value holds.
+let rec private exposed (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TySeq TyChar -> "_quod_text(" + term + ")"
+    | TySeq e ->
+        let x = "_quod_e" + string depth
+        "new _QuodView<" + csType e + ", " + publicType e + ">(" + term + ", " + x + " => " + exposed e x (depth + 1) + ")"
+    | TyTuple ts when holdsList t ->
+        let x = "_quod_e" + string depth
+        "_quod_with(" + term + ", " + x + " => (" + (ts |> List.mapi (fun k c -> exposed c (x + ".Item" + string (k + 1)) (depth + 1)) |> String.concat ", ") + "))"
+    | _ -> term
+
+/// The hash of a value, on what it is made of.
+let rec private hashOf (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TySeq e ->
+        let x = "_quod_h" + string depth
+        "_quod_hash(" + term + ", " + x + " => " + hashOf e x (depth + 1) + ")"
+    | TyTuple ts ->
+        let x = "_quod_h" + string depth
+        "_quod_with(" + term + ", " + x + " => " + (ts |> List.mapi (fun k c -> hashOf c (x + ".Item" + string (k + 1)) (depth + 1)) |> List.fold (fun acc h -> "(" + acc + " * 31 + " + h + ")") "17") + ")"
+    | _ -> term + ".GetHashCode()"
+
 /// A result of Quod's as the caller's.
 let rec private toCaller (t: Ty) (term: string) (depth: int) : string =
     match t with
@@ -187,6 +210,13 @@ let private helpers =
         }
 "
       "with", "private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
+      "hash",
+      "private static int _quod_hash<T>(IReadOnlyList<T> xs, Func<T, int> f)
+        {
+            int h = xs.Count;
+            for (int i = 0; i < xs.Count; i++) h = unchecked(h * 31 + f(xs[i]));
+            return h;
+        }"
       "copy",
       "private static IReadOnlyList<T> _quod_copy<T>(IReadOnlyList<T> xs)
         {
@@ -228,11 +258,11 @@ let private helpers =
             return r.Sign < 0 ? r + BigInteger.Abs(b) : r;
         }"
       "div", "private static BigInteger _quod_div(BigInteger a, BigInteger b) { return BigInteger.Divide(a - _quod_mod(a, b), b); }"
-      // C# truncates, and Quod's division is Euclidean. None of these can overflow on a proved result.
-      "mod32", "private static int _quod_mod32(int a, int b) { int r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
-      "div32", "private static int _quod_div32(int a, int b) { int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
-      "mod64", "private static long _quod_mod64(long a, long b) { long r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
-      "div64", "private static long _quod_div64(long a, long b) { long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
+      // C# truncates, and Quod's division is Euclidean. int.MinValue % -1 throws in .NET, though its result is 0.
+      "mod32", "private static int _quod_mod32(int a, int b) { if (b == -1) return 0; int r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
+      "div32", "private static int _quod_div32(int a, int b) { if (b == -1) return -a; int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
+      "mod64", "private static long _quod_mod64(long a, long b) { if (b == -1) return 0; long r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
+      "div64", "private static long _quod_div64(long a, long b) { if (b == -1) return -a; long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "all",
       "private static bool _quod_all(BigInteger lo, BigInteger hi, Func<BigInteger, bool> f)
         {
@@ -409,7 +439,10 @@ type private Gen(checks: Set<string>) =
                 let case = d.DataCases.[k]
                 caseClass d k + "._quod_make(" + (List.map2 (fun (x: TExpr) (_, t: Ty) -> g.Expr(x, t)) xs case.Fields |> String.concat ", ") + ")"
             | _ -> failwith "a value of no data type"
-        | EField(a, _, i) -> g.Expr(a, a.Ty) + "._f" + string i
+        | EField(a, k, i) ->
+            match a.Ty with
+            | TyData d when not d.IsStruct -> "((" + caseClass d k + ")" + g.Expr(a, a.Ty) + ")._f" + string i
+            | _ -> g.Expr(a, a.Ty) + "._f" + string i
         | EMatch(s, arms) ->
             match s.Ty with
             | TyData d ->
@@ -762,8 +795,14 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
             if keeps && f.Params |> List.exists (fun p -> holdsList p.Ty) then
                 g.Help "copy" |> ignore
                 g.Help "with" |> ignore
-            sb.Append(body).Append("return ").Append(implName f.Name).Append('(')
-              .Append(f.Params |> List.map (fun p -> if keeps then frozen p.Ty (csName p.Name) 0 else csName p.Name) |> String.concat ", ").Append(");\n")
+            let impl = implName f.Name + "(" + (f.Params |> List.map (fun p -> if keeps then frozen p.Ty (csName p.Name) 0 else csName p.Name) |> String.concat ", ") + ")"
+            // a list read from a class may be the one it holds
+            let guarded = not prog.Types.IsEmpty && holdsList f.Ret && not text'
+            if guarded then
+                g.Help "view" |> ignore
+                g.Help "text" |> ignore
+                g.Help "with" |> ignore
+            sb.Append(body).Append("return ").Append(if guarded then exposed f.Ret impl 0 else impl).Append(";\n")
               .Append(indent).Append("}\n\n") |> ignore
             // a real caller has a List<int>, not an IReadOnlyList<BigInteger>: the same method for
             // its integers, without a copy (review of 0.1.4). The result stays a BigInteger.
@@ -813,7 +852,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 let args = fields |> List.map (fun (i, _) -> "f" + string i)
                 let member' (field: string) = (let p = pascal field in if p = name then p + "Value" else p)
                 let param' (field: string) = (let n = csName field in if n = "_quod_raw" then n + "_" else n)
-                dataText.Append(inner).Append("public sealed class ").Append(name).Append(if d.IsStruct then "" else " : " + dataName).Append("\n").Append(inner).Append("{\n") |> ignore
+                dataText.Append(inner).Append("public sealed class ").Append(name).Append(if d.IsStruct then " : IEquatable<" + name + ">" else " : " + dataName + ", IEquatable<" + name + ">").Append("\n").Append(inner).Append("{\n") |> ignore
                 for i, (_, t) in fields do
                     dataText.Append(i2).Append("internal readonly ").Append(csType t).Append(" _f").Append(i).Append(";\n") |> ignore
                 dataText.Append(i2).Append("private ").Append(name).Append("(").Append(String.Join(", ", raw @ [ "bool _quod_raw" ])).Append(")\n").Append(i2).Append("{\n") |> ignore
@@ -841,19 +880,41 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                     | None -> ()
                 dataText.Append(i2).Append("}\n\n") |> ignore
                 for i, (f, t) in fields do
-                    dataText.Append(i2).Append("public ").Append(publicType t).Append(' ').Append(member' f).Append(" { get { return ").Append(toCaller t ("_f" + string i) 0).Append("; } }\n") |> ignore
+                    if holdsList t then
+                        g.Help "view" |> ignore
+                        g.Help "text" |> ignore
+                        g.Help "with" |> ignore
+                    dataText.Append(i2).Append("public ").Append(publicType t).Append(' ').Append(member' f).Append(" { get { return ").Append(exposed t ("_f" + string i) 0).Append("; } }\n") |> ignore
                 let tests = fields |> List.map (fun (i, (_, t)) -> g.Eq(t, "_f" + string i, "x._f" + string i))
                 dataText.Append(if fields.IsEmpty then "" else "\n")
-                        .Append(i2).Append("public override bool Equals(object o) { var x = o as ").Append(name).Append("; return x != null").Append(String.Join("", tests |> List.map (fun t -> " && " + t))).Append("; }\n") |> ignore
-                let hashed =
-                    fields |> List.choose (fun (i, (_, t)) ->
-                        match t with
-                        | TyInt | TyNat | TyBool | TyChar | TyI32 | TyI64 -> Some("_f" + string i + ".GetHashCode()")
-                        | _ -> None)
-                dataText.Append(i2).Append("public override int GetHashCode() { return ").Append(List.fold (fun acc h -> "(" + acc + " * 31 + " + h + ")") (string (name.Length + 17)) hashed).Append("; }\n") |> ignore
+                        .Append(i2).Append("public bool Equals(").Append(name).Append(" x) { return !ReferenceEquals(x, null)").Append(String.Join("", tests |> List.map (fun t -> " && " + t))).Append("; }\n")
+                        .Append(i2).Append("public override bool Equals(object o) { return Equals(o as ").Append(name).Append("); }\n") |> ignore
+                if fields |> List.exists (fun (_, (_, t)) -> holdsList t) then g.Help "hash" |> ignore; g.Help "with" |> ignore
+                let hashed = fields |> List.map (fun (i, (_, t)) -> hashOf t ("_f" + string i) 0)
+                // on what it is made of, once: the value does not change
+                dataText.Append(i2).Append("private int _quod_hashed;\n")
+                        .Append(i2).Append("public override int GetHashCode() { if (_quod_hashed == 0) _quod_hashed = unchecked(").Append(List.fold (fun acc h -> "(" + acc + " * 31 + " + h + ")") (string (name.Length + 17)) hashed).Append(") | 1; return _quod_hashed; }\n") |> ignore
+                if d.IsStruct then
+                    dataText.Append("\n").Append(i2).Append("public static bool operator ==(").Append(name).Append(" a, ").Append(name).Append(" b) { return ReferenceEquals(a, b) || (!ReferenceEquals(a, null) && a.Equals(b)); }\n")
+                            .Append(i2).Append("public static bool operator !=(").Append(name).Append(" a, ").Append(name).Append(" b) { return !(a == b); }\n") |> ignore
                 dataText.Append(inner).Append("}\n\n") |> ignore
             if not d.IsStruct then
-                dataText.Length <- dataText.Length - 1
+                // what a `match` gives Quod: a C# caller must say what to do in every case
+                let handlers =
+                    d.DataCases |> List.map (fun c ->
+                        let short = shortName c.CaseName
+                        "Func<" + String.Join(", ", (c.Fields |> List.map (fun (_, t) -> publicType t)) @ [ "R" ]) + "> on" + pascal short)
+                dataText.Append(inner).Append("public R Match<R>(").Append(String.Join(", ", handlers)).Append(")\n").Append(inner).Append("{\n") |> ignore
+                for c in d.DataCases do
+                    let short = shortName c.CaseName
+                    let reads = c.Fields |> List.map (fun (f, _) -> (let p = pascal f in if p = short then p + "Value" else p))
+                    dataText.Append(inner).Append("    if (this is ").Append(short).Append(") { var c = (").Append(short).Append(")this; return on").Append(pascal short).Append("(")
+                            .Append(String.Join(", ", reads |> List.map (fun r -> "c." + r))).Append("); }\n") |> ignore
+                dataText.Append(inner).Append("    throw new InvalidOperationException(\"no other case\");\n").Append(inner).Append("}\n\n")
+                        .Append(inner).Append("public static bool operator ==(").Append(dataName).Append(" a, ").Append(dataName).Append(" b) { return ReferenceEquals(a, b) || (!ReferenceEquals(a, null) && a.Equals(b)); }\n")
+                        .Append(inner).Append("public static bool operator !=(").Append(dataName).Append(" a, ").Append(dataName).Append(" b) { return !(a == b); }\n")
+                        .Append(inner).Append("public override bool Equals(object o) { return ReferenceEquals(this, o); }\n")
+                        .Append(inner).Append("public override int GetHashCode() { return 0; }\n") |> ignore
                 dataText.Append(indent).Append("}\n\n") |> ignore
         let eqFunctions = g.EqFunctions()
         let helperText =
