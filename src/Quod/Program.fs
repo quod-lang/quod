@@ -128,16 +128,19 @@ let private buildCommand (file: string) (o: Options) =
                 | Result.Error why ->
                     Console.Error.WriteLine why
                     1
-                | Ok(code, unproved) ->
+                | Ok generated ->
+                    let code, unproved = generated.Code, generated.Unproved
                     let dir = defaultArg o.OutDir (Path.GetDirectoryName(Path.GetFullPath file))
                     Directory.CreateDirectory dir |> ignore
-                    let name =
-                        match target with
-                        | Pipeline.Python _ -> Path.GetFileNameWithoutExtension file + ".py"
-                        | Pipeline.CSharp _ -> CodegenCSharp.outputFile file
-                    let written = defaultArg o.OutputFile (Path.Combine(dir, name))
-                    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath written)) |> ignore
+                    let written = defaultArg o.OutputFile (Path.Combine(dir, Pipeline.outputOf target file))
+                    let writtenDir = Path.GetDirectoryName(Path.GetFullPath written)
+                    Directory.CreateDirectory writtenDir |> ignore
                     File.WriteAllText(written, code)
+                    // the imported modules go next to it: Python finds them there, and C# compiles them
+                    // with --output-file (Quod.Build), the names of the caller's convention: `name.g.cs`
+                    for m, text in generated.Imported do
+                        let name = if o.OutputFile.IsSome then m + ".g.cs" else Pipeline.outputOf target (m + ".quod")
+                        File.WriteAllText(Path.Combine(writtenDir, name), text)
                     if not o.Json then
                         Console.WriteLine("built " + written + " (" + Pipeline.summary result + ")")
                         if not unproved.IsEmpty then

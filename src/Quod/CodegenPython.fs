@@ -74,7 +74,12 @@ def _quod_slice(xs, lo: int, hi: int):
 
 /// The implementation of a Quod function: what Quod code calls. The public `def` only
 /// normalizes its arguments, once, then calls it.
-let private implName (f: string) = "_quod_f_" + f
+/// A call in Quod code: the implementation in this module, the public function of another one,
+/// through a name no parameter or local can shadow.
+let private implName (f: string) =
+    match Quod.Modules.split f with
+    | Some m, g -> "_quod_m_" + m + "." + pyName g
+    | None, _ -> "_quod_f_" + f
 
 type private Gen(checks: Set<string>) =
     let mutable counter = 0
@@ -217,6 +222,10 @@ type private Gen(checks: Set<string>) =
     member g.Function(sb: StringBuilder, f: TFn, allRequires: bool) =
         checking <- checks.Contains f.Name
         let ps = f.Params |> List.map (fun p -> pyName p.Name + ": " + pyType p.Ty) |> String.concat ", "
+        // a private function has only its implementation: code of its own module calls that
+        let head = StringBuilder()
+        let sb' = sb
+        let sb = if f.IsPrivate then head else sb'
         sb.Append("def ").Append(pyName f.Name).Append("(").Append(ps).Append(") -> ").Append(pyType f.Ret).Append(":\n") |> ignore
         let doc = ResizeArray<string>()
         let boundary = f.Requires |> List.filter (fun r -> match r.Kind with EBool true -> false | _ -> true)
@@ -246,6 +255,7 @@ type private Gen(checks: Set<string>) =
               .Append("\"" + (f.Name + ": requires " + Printer.exprText (toSyntax r)).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"").Append(")\n") |> ignore
         let args = f.Params |> List.map (fun p -> g.Normalize(p.Ty, pyName p.Name)) |> String.concat ", "
         sb.Append("    return ").Append(implName f.Name).Append("(").Append(args).Append(")\n\n\n") |> ignore
+        let sb = sb'
         sb.Append("def ").Append(implName f.Name).Append("(").Append(ps).Append(") -> ").Append(pyType f.Ret).Append(":\n") |> ignore
         inPlace <-
             match f.Body with
@@ -274,9 +284,13 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
     let lemmas = prog.Fns |> List.filter (fun f -> f.IsLemma) |> List.map (fun f -> f.Name)
     if not lemmas.IsEmpty then
         sb.Append("# Lemmas are proofs, not code, and are not generated: ").Append(String.Join(", ", lemmas)).Append("\n") |> ignore
-    sb.Append("from __future__ import annotations\n\n").Append(prelude) |> ignore
+    sb.Append("from __future__ import annotations\n\n") |> ignore
+    for m in Codegen.calledModules prog do
+        sb.Append("import ").Append(m).Append(" as _quod_m_").Append(m).Append("\n") |> ignore
+    if not (Codegen.calledModules prog).IsEmpty then sb.Append("\n") |> ignore
+    sb.Append(prelude) |> ignore
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
-    sb.Append("\n\n__all__ = [").Append(fns |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
+    sb.Append("\n\n__all__ = [").Append(fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
     let g = Gen(checks)
     for f in fns do
         sb.Append("\n\n") |> ignore

@@ -309,9 +309,16 @@ type private Gen(checks: Set<string>) =
     /// The parameter types of the program, for arguments that do not know theirs (`f([])`).
     member val Signatures: Map<string, TFn> = Map.empty with get, set
 
+    /// The class of each imported module, for a call to its public method.
+    member val ModuleClasses: Map<string, string> = Map.empty with get, set
+
     member g.Call(f: string, args: TExpr list) : string =
         let ps = g.Signatures.[f].Params
-        implName f + "(" + (List.map2 (fun (a: TExpr) (p: TParam) -> g.Expr(a, p.Ty)) args ps |> String.concat ", ") + ")"
+        let callee =
+            match Quod.Modules.split f with
+            | Some m, h -> g.ModuleClasses.[m] + "." + pascal h
+            | None, _ -> implName f
+        callee + "(" + (List.map2 (fun (a: TExpr) (p: TParam) -> g.Expr(a, p.Ty)) args ps |> String.concat ", ") + ")"
 
     /// A condition that holds when `e` does not: `b == 0`, not `!(b != 0)`.
     member g.Negated(e: TExpr) =
@@ -448,9 +455,13 @@ let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : str
 
 /// The C# of a verified program, or why it cannot be generated. `checks` lists the functions whose
 /// proofs did not all pass (built only with --runtime-checks): their contracts run at run time.
-let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
+let rec generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
+    generateIn sourceFile prog prog checks options
+
+/// The same, for one module (`prog`) of a flattened program (`whole`), whose other modules it calls.
+and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
-    let publicNames = fns |> List.map (fun f -> pascal f.Name)
+    let publicNames = fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> pascal f.Name)
     let clash = fns |> List.groupBy (fun f -> pascal f.Name) |> List.tryFind (fun (_, g) -> g.Length > 1)
     match clash with
     | Some(p, g) ->
@@ -460,7 +471,14 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
         Result.Error("not built: '" + options.Namespace + "' is not a C# namespace")
     | None ->
         let g = Gen(checks)
-        g.Signatures <- prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+        // names as this module calls them: its own short, the others in full
+        g.Signatures <- (whole.Fns |> List.map (fun f -> f.Name, f)) @ (prog.Fns |> List.map (fun f -> f.Name, f)) |> Map.ofList
+        g.ModuleClasses <-
+            Codegen.importedModules whole
+            |> List.map (fun m ->
+                let names = whole.Fns |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate && fst (Quod.Modules.split f.Name) = Some m) |> List.map (fun f -> pascal (snd (Quod.Modules.split f.Name)))
+                m, classNameOf m names)
+            |> Map.ofList
         let sb = StringBuilder()
         let indent = "        "
         for f in fns do
@@ -469,6 +487,9 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
             let boundary = f.Requires |> List.filter (fun r -> match r.Kind with EBool true -> false | _ -> true)
             let enforced, left = boundary |> List.partition (fun r -> options.CheckAllRequires || Codegen.cheap r)
             let text (e: TExpr) = Printer.exprText (toSyntax e)
+            let realSb = sb
+            // a private function has only its implementation: what follows is dropped
+            let sb = if f.IsPrivate then StringBuilder() else realSb
             // the public method: what a C# caller sees and what it cannot be trusted with
             sb.Append(indent).Append("/// <summary>")
               .Append(if isChecked then "NOT fully proved: contracts are checked at run time." else "Proved by quod.")
@@ -532,6 +553,7 @@ let generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (option
                       .Append(f.Params |> List.map (fun p -> widen narrow p.Ty (csName p.Name) 0) |> String.concat ", ").Append(");\n")
                       .Append(indent).Append("}\n\n") |> ignore
             // the implementation, which Quod code calls
+            let sb = realSb
             sb.Append(indent).Append("private static ").Append(csType f.Ret).Append(' ').Append(implName f.Name).Append('(').Append(ps).Append(")\n")
               .Append(indent).Append("{\n") |> ignore
             if f.IsRecursive then

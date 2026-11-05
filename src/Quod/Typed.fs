@@ -91,6 +91,8 @@ type TFn =
       /// A lemma: a statement function returning true, checked like the others, erased from the
       /// generated code. Its calls are `SLet` of a `lemmaBinding` name.
       IsLemma: bool
+      /// Called from its own module only: no public method or function is generated for it.
+      IsPrivate: bool
       Span: Span }
 
 /// The name bound to the k-th lemma call of a function (`name(args);`): no source variable can

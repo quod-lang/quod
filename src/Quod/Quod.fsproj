@@ -26,6 +26,7 @@
     <Compile Include="Diagnostics.fs" />
     <Compile Include="Lexer.fs" />
     <Compile Include="Parser.fs" />
+    <Compile Include="Modules.fs" />
     <Compile Include="Printer.fs" />
     <Compile Include="Typed.fs" />
     <Compile Include="Typecheck.fs" />

@@ -22,6 +22,12 @@ type private Ctx =
       FnName: string }
 
 /// Do these statements return on every path? A loop does not count: it may run zero times.
+/// In a file without `import`, a name with a dot is a module that was not imported.
+let private unknownFunction (name: string) =
+    match name.IndexOf '.' with
+    | -1 -> "unknown function '" + name + "'"
+    | k -> "'" + name + "': add 'import " + name.Substring(0, k) + "' at the top of this file"
+
 let rec private alwaysReturns (stmts: TStmt list) : bool =
     stmts |> List.exists (fun s ->
         match s.Kind with
@@ -207,7 +213,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         | Call(name, args) ->
             match fns.TryFind name with
             | None ->
-                c.Error(e.Span, ctx.FnName, "unknown function '" + name + "'")
+                c.Error(e.Span, ctx.FnName, unknownFunction name)
                 fail ()
             | Some f when f.IsLemma ->
                 // a lemma has no value: nothing proved by it can flow into the computed result
@@ -395,7 +401,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                     c.Error(s.Span, f.Name, "this call has no effect (Quod functions are pure); 'return' it or bind it with 'let' (only a lemma is called on its own)")
                     mk (SAssert ok)
                 | None ->
-                    c.Error(s.Span, f.Name, "unknown function '" + name + "'")
+                    c.Error(s.Span, f.Name, unknownFunction name)
                     mk (SAssert ok)
             | Return e -> mk (SReturn(c.Coerce(c.Expr(e, code, Some ret), ret, f.Name, "the returned value")))
             | FinalExpr e ->
@@ -445,7 +451,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         c.Pop()
         { Name = f.Name; Params = ps; Ret = ret; Requires = req; Ensures = ens; Loose = loose
           Decreases = dec; Body = body; IsExprFn = isExpr; IsRecursive = recursive
-          Cycle = defaultArg cycle -1; IsLemma = f.IsLemma; Span = f.Span }
+          Cycle = defaultArg cycle -1; IsLemma = f.IsLemma; IsPrivate = f.IsPrivate; Span = f.Span }
 
 /// Names of the functions called in an expression or statement list (bodies only).
 let rec private callsExpr (acc: HashSet<string>) (e: Expr) =

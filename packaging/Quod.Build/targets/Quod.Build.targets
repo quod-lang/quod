@@ -41,9 +41,22 @@
     </ItemGroup>
   </Target>
 
-  <Target Name="QuodGenerate" DependsOnTargets="QuodWriteArguments"
-          Inputs="@(QuodCompile);$(QuodExe);$(QuodArgumentsFile)"
+  <!-- A file proves against what it imports, which need not be listed: every .quod next to a listed one is an input.
+       Inputs and outputs do not pair up here, so a change to any of them verifies everything again. -->
+  <Target Name="QuodFindModules">
+    <ItemGroup>
+      <QuodModule Include="%(QuodCompile.RootDir)%(QuodCompile.Directory)*.quod" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="QuodGenerate" DependsOnTargets="QuodWriteArguments;QuodFindModules"
+          Inputs="@(QuodCompile);@(QuodModule);$(QuodExe);$(QuodArgumentsFile)"
           Outputs="@(QuodCompile->'$(QuodOutputDir)%(RecursiveDir)%(Filename).g.cs')">
+    <!-- a module no longer imported must not stay in the compilation -->
+    <ItemGroup>
+      <QuodStale Include="$(QuodOutputDir)**\*.g.cs" />
+    </ItemGroup>
+    <Delete Files="@(QuodStale)" />
     <!-- a NuGet package does not keep the execute permission -->
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="chmod +x &quot;$(QuodExe)&quot; &quot;$(QuodToolsRoot)$(QuodRid)/z3&quot;" />
     <!-- quod reports its diagnostics in MSBuild's format. They do not fail the build by themselves under every MSBuild (an
@@ -58,7 +71,8 @@
 
   <Target Name="QuodAddGenerated" BeforeTargets="CoreCompile" DependsOnTargets="QuodGenerate" Condition="'@(QuodCompile)' != ''">
     <ItemGroup>
-      <QuodGenerated Include="@(QuodCompile->'$(QuodOutputDir)%(RecursiveDir)%(Filename).g.cs')" />
+      <!-- the listed files, and the modules they import -->
+      <QuodGenerated Include="$(QuodOutputDir)**\*.g.cs" />
       <Compile Include="@(QuodGenerated)" />
       <FileWrites Include="@(QuodGenerated)" />
     </ItemGroup>

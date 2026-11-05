@@ -35,9 +35,12 @@ type Outcome =
 /// Parse, type-check, prove and check completeness.
 let check (file: string) (src: string) (s: Settings) : Outcome =
     try
-        let program = Parser.parseProgram file src
-        let typed, typeErrors = Typecheck.check file program
-        if not typeErrors.IsEmpty then Rejected typeErrors
+        match Modules.load file src with
+        | Result.Error ds -> Rejected ds
+        | Ok loaded ->
+        let inFiles = List.map (Modules.inFile loaded.Files)
+        let typed, typeErrors = Typecheck.check file loaded.Program
+        if not typeErrors.IsEmpty then Rejected(inFiles typeErrors)
         else
             match Smt.findZ3 s.Z3 with
             | None -> Failure("z3 not found; put it next to quod, set QUOD_Z3, or pass --z3 PATH", 2)
@@ -49,7 +52,7 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let verified = Vcgen.verifyWith file typed session s.Budget s.RequireContracts s.Progress
                 let found = verified.Diagnostics @ ContractStyle.diagnostics file typed
                 let found = if s.RequireContracts then ContractStyle.required file typed found else found
-                Checked(typed, { verified with Diagnostics = found @ ContractStyle.review file typed })
+                Checked(typed, { verified with Diagnostics = inFiles (found @ ContractStyle.review file typed) })
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)
@@ -118,9 +121,21 @@ let targetOf (name: string) (ns: string option) (allRequires: bool) : Result<Tar
         Ok(CSharp { Namespace = defaultArg ns CodegenCSharp.defaultOptions.Namespace; CheckAllRequires = allRequires })
     | t -> Result.Error("unknown target '" + t + "' (python or csharp)")
 
+/// The code of a file and of the modules it imports (by name), and the functions not fully proved.
+type Generated =
+    { Code: string
+      Imported: (string * string) list
+      Unproved: Set<string> }
+
+/// The file a module is written to, next to the one of the root.
+let outputOf (target: Target) (file: string) =
+    match target with
+    | Python _ -> Path.GetFileNameWithoutExtension file + ".py"
+    | CSharp _ -> CodegenCSharp.outputFile file
+
 /// What `build` does with a checked program: the generated code, with the functions whose
 /// contracts are checked at run time (--runtime-checks), or why it is not built.
-let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<string * Set<string>, string> =
+let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<Generated, string> =
     let errors = errorsOf r
     let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList
     if errors |> List.exists (fun d -> d.Kind = "contract") then
@@ -130,6 +145,20 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
     elif not unproved.IsEmpty && not runtimeChecks then
         Result.Error("not built: " + summary r + ". Fix the proofs, or build with --runtime-checks")
     else
-        match target with
-        | Python allRequires -> Ok(CodegenPython.generateWith file typed unproved allRequires, unproved)
-        | CSharp options -> CodegenCSharp.generate file typed unproved options |> Result.map (fun code -> code, unproved)
+        let shortNames (m: string option) =
+            unproved |> Set.filter (fun f -> fst (Modules.split f) = m) |> Set.map (fun f -> snd (Modules.split f))
+        let one (m: string option) (source: string) =
+            let view = Codegen.moduleView m typed
+            match target with
+            | Python allRequires -> Ok(CodegenPython.generateWith source view (shortNames m) allRequires)
+            | CSharp options -> CodegenCSharp.generateIn source view typed (shortNames m) options
+        one None file
+        |> Result.bind (fun code ->
+            let imported =
+                Codegen.importedModules typed
+                |> List.map (fun m -> m, one (Some m) (m + ".quod"))
+            match imported |> List.tryPick (fun (_, r) -> match r with Result.Error why -> Some why | Ok _ -> None) with
+            | Some why -> Result.Error why
+            | None ->
+                let others = imported |> List.map (fun (m, r) -> m, (match r with Ok c -> c | Result.Error _ -> ""))
+                Ok { Code = code; Imported = others; Unproved = unproved })

@@ -80,3 +80,89 @@ let rec cheap (e: TExpr) =
     | ESlice(a, b, c) -> cheap a && Option.forall cheap b && Option.forall cheap c
     | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a -> cheap a
     | EIf(a, b, c) -> cheap a && cheap b && cheap c
+
+// --- modules: the flattened program, seen from one module ---------------------------------------
+
+let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
+    let go = mapCalls rename
+    let kind =
+        match e.Kind with
+        | EInt _ | EBool _ | EVar _ | EResult -> e.Kind
+        | ESeq xs -> ESeq(List.map go xs)
+        | ETuple xs -> ETuple(List.map go xs)
+        | EIndex(a, b) -> EIndex(go a, go b)
+        | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
+        | EProj(a, k) -> EProj(go a, k)
+        | ELen a -> ELen(go a)
+        | ECall(f, args) -> ECall(rename f, List.map go args)
+        | ENeg a -> ENeg(go a)
+        | ENot a -> ENot(go a)
+        | EArith(op, a, b) -> EArith(op, go a, go b)
+        | EConcat(a, b) -> EConcat(go a, go b)
+        | ECmp(op, a, b) -> ECmp(op, go a, go b)
+        | EEq(a, b) -> EEq(go a, go b)
+        | ELogic(op, a, b) -> ELogic(op, go a, go b)
+        | EIf(a, b, c) -> EIf(go a, go b, go c)
+        | EQuant(q, v, a, b, c) -> EQuant(q, v, go a, go b, go c)
+        | EToNat a -> EToNat(go a)
+    { e with Kind = kind }
+
+let rec private mapCallsS (rename: string -> string) (s: TStmt) : TStmt =
+    let e = mapCalls rename
+    let block = List.map (mapCallsS rename)
+    let kind =
+        match s.Kind with
+        | SLet(m, n, t, v) -> SLet(m, n, t, e v)
+        | SAssign(n, v) -> SAssign(n, e v)
+        | SIf(c, a, b) -> SIf(e c, block a, block b)
+        | SWhile(c, invs, d, b) -> SWhile(e c, List.map e invs, e d, block b)
+        | SAssert x -> SAssert(e x)
+        | SReturn x -> SReturn(e x)
+    { s with Kind = kind }
+
+/// The imported modules of a flattened program, in the order of their functions.
+let importedModules (prog: TProgram) : string list =
+    prog.Fns |> List.choose (fun f -> fst (Quod.Modules.split f.Name)) |> List.distinct
+
+/// The functions of one module (None: the file itself) under their short names. A call to another
+/// module keeps its full name, by which the generators know it is one.
+let moduleView (name: string option) (prog: TProgram) : TProgram =
+    let prefix = match name with Some m -> m + "." | None -> ""
+    let mine (f: string) = fst (Quod.Modules.split f) = name
+    let short (f: string) = if mine f then f.Substring prefix.Length else f
+    let e = mapCalls short
+    { Fns =
+        prog.Fns
+        |> List.filter (fun f -> mine f.Name)
+        |> List.map (fun f ->
+            { f with
+                Name = short f.Name
+                Requires = List.map e f.Requires
+                Ensures = List.map e f.Ensures
+                Loose = f.Loose |> Option.map (fun l -> { l with Relation = e l.Relation })
+                Decreases = Option.map e f.Decreases
+                Body =
+                    match f.Body with
+                    | TExprBody x -> TExprBody(e x)
+                    | TStmtBody items -> TStmtBody(List.map (mapCallsS short) items) }) }
+
+let private moduleViewCalls (visit: string -> string) (view: TProgram) =
+    let e = mapCalls visit >> ignore
+    for f in view.Fns do
+        List.iter e f.Requires
+        List.iter e f.Ensures
+        f.Loose |> Option.iter (fun l -> e l.Relation)
+        Option.iter e f.Decreases
+        match f.Body with
+        | TExprBody x -> e x
+        | TStmtBody items -> items |> List.iter (mapCallsS visit >> ignore)
+
+/// The modules a view calls, in a stable order.
+let calledModules (view: TProgram) : string list =
+    let found = HashSet<string>()
+    let rename (f: string) =
+        (match fst (Quod.Modules.split f) with Some m -> found.Add m |> ignore | None -> ())
+        f
+    moduleViewCalls rename view
+    found |> Seq.sort |> List.ofSeq
+

@@ -141,7 +141,11 @@ let private settings (base': Pipeline.Settings) (args: JsonElement) =
 /// whether its requires accept the arguments, and whether its ensures accept each result, as true,
 /// false, or null when the evaluator cannot tell. The bench measures contracts with it (bench/heldout.md).
 let contractCases (file: string) (src: string) (fn: string) (casesJson: string) : Result<string, string> =
-    let prog = Parser.parseProgram file src
+    let prog =
+        match Modules.load file src with
+        | Ok loaded -> loaded.Program
+        | Result.Error(d :: _) -> raise (QuodError d)
+        | Result.Error [] -> failwith "unreachable: an error without a diagnostic"
     let typed, errors = Typecheck.check file prog
     if not errors.IsEmpty then Result.Error "the program has type errors"
     else
@@ -224,11 +228,13 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
     | Pipeline.Checked(typed, r) ->
         match Pipeline.generate target file typed r (bool' args "runtime_checks") with
         | Result.Error why -> notBuilt why r.Diagnostics
-        | Ok(code, unproved) ->
+        | Ok generated ->
+            let code, unproved = generated.Code, generated.Unproved
             let line =
                 "built (" + Pipeline.summary r + ")"
                 + (if unproved.IsEmpty then "" else "; not fully proved, contracts checked at run time in: " + String.Join(", ", unproved))
-            { Text = line + "\n\n" + code
+            let others = generated.Imported |> List.map (fun (m, text) -> "--- module " + m + " ---\n\n" + text)
+            { Text = String.Join("\n\n", line :: code :: others)
               Structured =
                 json (fun w ->
                     w.WriteStartObject()
@@ -236,6 +242,9 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
                     w.WriteString("summary", line)
                     w.WriteString("language", (match target with Pipeline.Python _ -> "python" | Pipeline.CSharp _ -> "csharp"))
                     w.WriteString("code", code)
+                    w.WriteStartObject "imported"
+                    for m, text in generated.Imported do w.WriteString(m, text)
+                    w.WriteEndObject()
                     w.WriteStartArray("runtime_checked")
                     for f in unproved do w.WriteStringValue f
                     w.WriteEndArray()
@@ -255,9 +264,12 @@ let private run (args: JsonElement) : ToolResult =
     let name = match str args "function" with Some n -> n | None -> failTool "give the 'function' to run"
     let typed =
         try
-            match Typecheck.check file (Parser.parseProgram file src) with
+            match Modules.load file src with
+            | Result.Error ds -> failTool ("the program does not parse or import:\n" + reportText ds)
+            | Ok loaded ->
+            match Typecheck.check file loaded.Program with
             | t, [] -> t
-            | _, errs -> failTool ("the program does not type-check:\n" + reportText errs)
+            | _, errs -> failTool ("the program does not type-check:\n" + reportText (errs |> List.map (Modules.inFile loaded.Files)))
         with QuodError d -> failTool ("the program does not parse:\n" + reportText (Parser.syntaxDiagnostics file src d))
     let f =
         match typed.Fns |> List.tryFind (fun f -> f.Name = name) with

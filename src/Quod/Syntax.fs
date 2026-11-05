@@ -89,8 +89,11 @@ type FnDecl =
       /// `lemma name(...)`: a proof, checked like a function, erased from the generated code.
       /// It has no result (Ret is bool internally, its body returns true when it ends).
       IsLemma: bool
+      /// `private fn`: called from its own module only, and absent from the generated API.
+      IsPrivate: bool
       Span: Span }
 
-type Program = { Fns: FnDecl list }
+/// `Imports` is empty once the modules are flattened (see Modules.fs).
+type Program = { Imports: (string * Span) list; Fns: FnDecl list }
 
 let spanOf (a: Pos) (b: Pos) = { Start = a; End = b }

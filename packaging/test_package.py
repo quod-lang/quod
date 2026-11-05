@@ -87,6 +87,19 @@ OLD_PROJECT = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
+LIMITS = """fn bound(x: int, lo: int, hi: int) -> int
+  requires lo <= hi
+  ensures result >= lo
+  ensures result <= hi
+  ensures lo <= x && x <= hi ==> result == x
+  ensures x < lo ==> result == lo
+  ensures x > hi ==> result == hi
+{
+  if x < lo { lo } else { if x > hi { hi } else { x } }
+}
+"""
+
+
 def fail(message: str) -> None:
     """Stop here. On GitHub Actions the message is also an annotation, readable without the logs."""
     if os.environ.get("GITHUB_ACTIONS"):
@@ -163,6 +176,16 @@ def main() -> None:
         out = run(build, d, env, expect=1)
         check(re.search(r"Rules\.quod\(\d+,\d+\): error QUOD0003", out) is not None, "a wrong proof fails the build, with its code and its place", out)
         check("MSB3073" not in out, "without a second error that repeats the command", out)
+
+        # a module that is imported and not listed: compiled, and an input of the proofs
+        d = sdk("sdk modules", "net10.0", "import limits\n\nfn clamp(x: int, lo: int, hi: int) -> int\n  requires lo <= hi\n  ensures result == limits.bound(x, lo, hi)\n{\n  limits.bound(x, lo, hi)\n}\n")
+        (d / "limits.quod").write_text(LIMITS, encoding="utf-8")
+        run(build, d, env)
+        out = run(["dotnet", "run", "-c", "Release", "--no-build"], d, env)
+        check("10" in out and "refused" in out, "a file with an import builds, and its module is compiled with it", out)
+        (d / "limits.quod").write_text(LIMITS.replace("ensures result >= lo", "ensures result > hi"), encoding="utf-8")
+        out = run(build, d, env, expect=1)
+        check(re.search(r"limits\.quod\(\d+,\d+\): error", out) is not None, "changing a module verifies again, and an error is reported in its file", out)
 
         d = sdk("sdk under", "net10.0", UNDERSPECIFIED)
         out = run(build, d, env, expect=1)

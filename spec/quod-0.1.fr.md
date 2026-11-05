@@ -108,6 +108,27 @@ return e;              // ou une expression finale à la fin du corps
 - Dans les contrats et assertions : `result`, et des quantificateurs bornés
   `forall i in a..b: P`, `exists i in a..b: P` (`a` inclus, `b` exclu).
 
+### Modules
+
+Depuis la 0.3, un fichier est un module, qui porte le nom du fichier. `import nom`, en tête de fichier, trouve `nom.quod` à côté de lui.
+
+```rust
+// planning.quod
+import intervals
+
+fn free_slot(a: (int, int), b: (int, int)) -> bool
+  ensures result == intervals.disjoint(a, b)
+{
+  intervals.disjoint(a, b)
+}
+```
+
+- Une fonction d'un autre module s'appelle toujours par son nom complet, `intervals.disjoint`. Une fonction du même module s'appelle par son nom court. Il n'y a ni alias ni import partiel.
+- `private fn` ou `private lemma` ne s'appelle que depuis son module, et n'a pas de nom public dans le code généré. Tout le reste est public. Un `ensures` public peut mentionner une fonction privée de son module.
+- Une preuve voit une fonction importée comme une fonction locale : une fonction à corps d'expression par sa définition, une fonction à instructions par son contrat seul.
+- `quod check` et `quod build` vérifient le fichier et tout ce qu'il importe, à chaque fois. Une erreur dans un module importé est rapportée dans ce fichier, et refuse le programme. Un cycle d'imports est une erreur.
+- Dans le serveur MCP, un programme donné en `source` trouve ses imports dans le répertoire du serveur.
+
 ### Commentaires
 
 `// ...` jusqu'à la fin de la ligne.
@@ -381,7 +402,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Contenu prévu |
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
-| 0.3 | chaînes et caractères, types algébriques (enums, `Option`), modules et imports, génériques, types raffinés généraux |
+| 0.3 | chaînes et caractères, types algébriques (enums, `Option`), génériques, types raffinés généraux |
 | 0.4 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 

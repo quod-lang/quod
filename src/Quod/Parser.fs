@@ -290,7 +290,13 @@ type private Parser(file: string, toks: Token[]) =
         | TkKeyword "result" -> p.Next() |> ignore; p.Mk(Result, start)
         | TkIdent name ->
             p.Next() |> ignore
-            if p.IsSym "(" then p.Mk(Call(name, p.Args()), start) else p.Mk(Var name, start)
+            // `module.function(...)`: a projection is `.` and a number, so this cannot be one
+            match p.Peek.Kind, (p.PeekAt 1).Kind, (p.PeekAt 2).Kind with
+            | TkSymbol ".", TkIdent g, TkSymbol "(" ->
+                p.Next() |> ignore
+                p.Next() |> ignore
+                p.Mk(Call(name + "." + g, p.Args()), start)
+            | _ -> if p.IsSym "(" then p.Mk(Call(name, p.Args()), start) else p.Mk(Var name, start)
         | TkSymbol "(" ->
             p.Next() |> ignore
             let first = p.Expr()
@@ -528,13 +534,25 @@ type private Parser(file: string, toks: Token[]) =
           Decreases = dec
           Body = (if isLemma then StmtBody items else classify items)
           IsLemma = isLemma
+          IsPrivate = false
           Span = spanOf start p.LastEnd }
 
     member p.Program() : Program =
+        let imports = ResizeArray<string * Span>()
         let fns = ResizeArray<FnDecl>()
+        // `import` and `private` are words only here: an existing variable may have these names
+        while p.Peek.Kind = TkIdent "import" do
+            let at = p.Next().Span
+            let name = p.Ident "a module name after 'import', the name of a file without '.quod'"
+            imports.Add((name, at))
         while p.Peek.Kind <> TkEof do
-            if p.IsKw "fn" || p.IsKw "lemma" then fns.Add(p.Function()) else p.FailHere "'fn' or 'lemma'"
-        { Fns = List.ofSeq fns }
+            if p.Peek.Kind = TkIdent "private" && (match (p.PeekAt 1).Kind with TkKeyword "fn" | TkKeyword "lemma" -> true | _ -> false) then
+                p.Next() |> ignore
+                fns.Add({ p.Function() with IsPrivate = true })
+            elif p.IsKw "fn" || p.IsKw "lemma" then fns.Add(p.Function())
+            elif p.Peek.Kind = TkIdent "import" then p.Fail(p.Peek.Span, "an 'import' goes at the top of the file, before any function")
+            else p.FailHere "'fn' or 'lemma'"
+        { Imports = List.ofSeq imports; Fns = List.ofSeq fns }
 
 /// Parse a whole file. Raises QuodError on the first syntax error.
 let parseProgram (file: string) (src: string) : Program =

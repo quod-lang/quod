@@ -105,6 +105,27 @@ return e;              // or a final expression at the end of the body
 - In contracts and assertions: `result`, and bounded quantifiers
   `forall i in a..b: P`, `exists i in a..b: P` (`a` included, `b` excluded).
 
+### Modules
+
+Since 0.3, a file is a module, named after the file. `import name`, at the top of a file, finds `name.quod` next to it.
+
+```rust
+// planning.quod
+import intervals
+
+fn free_slot(a: (int, int), b: (int, int)) -> bool
+  ensures result == intervals.disjoint(a, b)
+{
+  intervals.disjoint(a, b)
+}
+```
+
+- A function of another module is always called by its full name, `intervals.disjoint`. A function of the same module is called by its short name. There is no alias and no partial import.
+- `private fn` or `private lemma` is called from its own module only, and has no public name in the generated code. Everything else is public. A public `ensures` may mention a private function of its module.
+- A proof sees an imported function as it sees a local one: an expression function by its definition, a statement function by its contract only.
+- `quod check` and `quod build` verify the file and all it imports, every time. An error in an imported module is reported in that file, and refuses the program. A cycle of imports is an error.
+- In the MCP server, a program given as `source` finds its imports in the directory of the server.
+
 ### Comments
 
 `// ...` to the end of the line.
@@ -365,7 +386,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Planned content |
 |---|---|
 | 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
-| 0.3 | strings and characters, algebraic types (enums, `Option`), modules and imports, generics, general refinement types |
+| 0.3 | strings and characters, algebraic types (enums, `Option`), generics, general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 

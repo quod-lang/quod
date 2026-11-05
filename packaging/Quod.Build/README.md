@@ -10,7 +10,7 @@ fail, and its message appears in the error list of Visual Studio.
 </ItemGroup>
 ```
 
-Each file becomes a class, `Rules.quod` giving `Rules`, whose public methods can be called from C#. The
+Each file becomes a class, `Rules.quod` giving `Rules`, whose public methods can be called from C#. A module a file imports is compiled with it, and changing it verifies again, even if it is not listed. Each listed file verifies what it imports, so a module shared by several is proved several times. The
 generated code stays within C# 7.3 and the standard library, for .NET Framework 4.7.2 as for .NET Core.
 quod and z3 come with the package; the build runs on Windows x64, Linux x64 and macOS on Apple silicon.
 
