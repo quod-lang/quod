@@ -13,7 +13,7 @@ refuted      0.6s  quantified: line 35: let mut k = 1;  ->  let mut k = 0;
 refuted      0.6s  quantified: line 20: k = k + 1;  ->  k = k + 2;
 refuted     10.7s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 2] - xs[k];
 survived     0.6s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 1] - xs[k] <= best {
-refuted     10.7s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 2] - xs[k] < best {
+refuted     10.6s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 2] - xs[k] < best {
 refuted      0.6s  quantified: line 67: k = k + 1;  ->  k = k + 0;
 refuted     10.7s  quantified: line 67: k = k + 1;  ->  k = k - 1;
 refuted      0.6s  quantified: line 34: let mut w = 0;  ->  let mut w = 1;
