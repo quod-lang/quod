@@ -162,10 +162,10 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    et vérifient du Quod comme un outil ([docs/mcp.fr.md](docs/mcp.fr.md)).
 2. **Quod 0.2** ([publié](https://github.com/quod-lang/quod/releases/latest)) : une génération C# et un paquet MSBuild, pour livrer des fonctions prouvées dans des bases de code
    .NET existantes, et un dialogue plus fiable avec le solveur.
-3. **Quod 0.3** : chaînes, types algébriques, modules, génériques.
+3. **Quod 0.3** ([publié](https://github.com/quod-lang/quod/releases/latest)) : modules, caractères et chaînes avec une bibliothèque standard en Quod, `i32` et `i64`, structures, énumérations, `match` et génériques.
 4. **Quod 0.4** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
-   dictionnaires et ensembles.
+   dictionnaires et ensembles, types raffinés généraux.
 5. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
    Quod.**
 

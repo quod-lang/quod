@@ -376,3 +376,15 @@ let ``run_by needs a proof of equality`` () =
     typeError "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == x\n{\n  x\n}\n" "must state"
     proved "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == f(x)\n{\n  x\n}\n"
 
+[<Fact>]
+let ``a class keeps a copy of the lists it is given`` () =
+    withFiles [ "main", "struct Batch { scores: seq<i32> }\n\nfn wrap(xs: seq<i32>) -> Batch\n  ensures result == Batch(xs)\n{\n  Batch(xs)\n}\n" ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Ok g ->
+                Assert.Contains(": this(_quod_copy(scores), true)", g.Code)
+                Assert.Contains("return _quod_f_wrap(_quod_copy(xs));", g.Code)
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+

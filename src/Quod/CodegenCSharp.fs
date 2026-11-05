@@ -94,6 +94,34 @@ let rec private fromCaller (t: Ty) (term: string) (depth: int) : string =
         "(" + (ts |> List.mapi (fun k c -> fromCaller c (term + ".Item" + string (k + 1)) depth) |> String.concat ", ") + ")"
     | _ -> term
 
+let rec private holdsList (t: Ty) =
+    match t with
+    | TySeq _ -> true
+    | TyTuple ts -> List.exists holdsList ts
+    | _ -> false
+
+/// Does a value of this type keep a list inside a class, which outlives the call?
+let rec private dataHoldsList (t: Ty) =
+    match t with
+    | TyData d -> d.DataCases |> List.exists (fun c -> c.Fields |> List.exists (fun (_, ft) -> holdsList ft || dataHoldsList ft))
+    | TySeq e -> dataHoldsList e
+    | TyTuple ts -> List.exists dataHoldsList ts
+    | _ -> false
+
+/// A list of the caller's that a value will keep, copied: the caller's `list[0] = 9` must not change
+/// what was proved, and a class promises to be immutable. A string is converted already.
+let rec private frozen (t: Ty) (term: string) (depth: int) : string =
+    match t with
+    | TySeq TyChar -> term
+    | TySeq e when holdsList e ->
+        let x = "_quod_c" + string depth
+        "_quod_copy_of(" + term + ", " + x + " => " + frozen e x (depth + 1) + ")"
+    | TySeq _ -> "_quod_copy(" + term + ")"
+    | TyTuple ts when holdsList t ->
+        let x = "_quod_c" + string depth
+        "_quod_with(" + term + ", " + x + " => (" + (ts |> List.mapi (fun k c -> frozen c (x + ".Item" + string (k + 1)) (depth + 1)) |> String.concat ", ") + "))"
+    | _ -> term
+
 /// A result of Quod's as the caller's.
 let rec private toCaller (t: Ty) (term: string) (depth: int) : string =
     match t with
@@ -159,6 +187,22 @@ let private helpers =
         }
 "
       "with", "private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
+      "copy",
+      "private static IReadOnlyList<T> _quod_copy<T>(IReadOnlyList<T> xs)
+        {
+            if (xs == null) throw new ArgumentNullException(\"xs\");
+            var r = new T[xs.Count];
+            for (int i = 0; i < r.Length; i++) r[i] = xs[i];
+            return r;
+        }
+
+        private static IReadOnlyList<T> _quod_copy_of<T>(IReadOnlyList<T> xs, Func<T, T> f)
+        {
+            if (xs == null) throw new ArgumentNullException(\"xs\");
+            var r = new T[xs.Count];
+            for (int i = 0; i < r.Length; i++) r[i] = f(xs[i]);
+            return r;
+        }"
       "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
       "concat",
       "private static IReadOnlyList<T> _quod_concat<T>(IReadOnlyList<T> a, IReadOnlyList<T> b)
@@ -713,8 +757,13 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                     sb.Append(body).Append("if (!").Append(g.Expr(r, TyBool)).Append(") throw new ArgumentException(")
                       .Append(literal (f.Name + ": requires " + text r)).Append(");\n") |> ignore
                 sb.Append("#endif\n") |> ignore
+            // a class in the result may keep a list given here, and outlive this call
+            let keeps = dataHoldsList f.Ret
+            if keeps && f.Params |> List.exists (fun p -> holdsList p.Ty) then
+                g.Help "copy" |> ignore
+                g.Help "with" |> ignore
             sb.Append(body).Append("return ").Append(implName f.Name).Append('(')
-              .Append(f.Params |> List.map (fun p -> csName p.Name) |> String.concat ", ").Append(");\n")
+              .Append(f.Params |> List.map (fun p -> if keeps then frozen p.Ty (csName p.Name) 0 else csName p.Name) |> String.concat ", ").Append(");\n")
               .Append(indent).Append("}\n\n") |> ignore
             // a real caller has a List<int>, not an IReadOnlyList<BigInteger>: the same method for
             // its integers, without a copy (review of 0.1.4). The result stays a BigInteger.
@@ -774,7 +823,10 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 dataText.Append(i2).Append("internal static ").Append(dataName).Append(" _quod_make(").Append(String.Join(", ", raw)).Append(") { return new ").Append(name).Append("(").Append(String.Join(", ", args @ [ "true" ])).Append("); }\n\n") |> ignore
                 // what the caller sees
                 let publicParams = fields |> List.map (fun (_, (f, t)) -> publicType t + " " + param' f)
-                let converted = fields |> List.map (fun (_, (f, t)) -> fromCaller t (param' f) 0)
+                let converted = fields |> List.map (fun (_, (f, t)) -> frozen t (fromCaller t (param' f) 0) 0)
+                if fields |> List.exists (fun (_, (_, t)) -> holdsList t) then
+                    g.Help "copy" |> ignore
+                    g.Help "with" |> ignore
                 if fields |> List.exists (fun (_, (_, t)) -> hasChar t) then
                     g.Help "text" |> ignore
                     g.Help "with" |> ignore

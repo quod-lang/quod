@@ -157,9 +157,9 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    completeness check and a Python backend; since 0.1.1, an MCP server, so that agents write and
    check Quod as a tool ([docs/mcp.md](docs/mcp.md)).
 2. **Quod 0.2** ([released](https://github.com/quod-lang/quod/releases/latest)): a C# backend and an MSBuild package, to deliver proved functions into existing .NET code bases, and a more reliable dialogue with the solver.
-3. **Quod 0.3**: strings, algebraic types, modules, generics.
+3. **Quod 0.3** ([released](https://github.com/quod-lang/quod/releases/latest)): modules, characters and strings with a standard library in Quod, `i32` and `i64`, structs, enums, `match` and generics.
 4. **Quod 0.4**: capabilities (no ambient authority: a function touches the console, files or
-   the network only through a capability it receives), sealed contracts, maps and sets.
+   the network only through a capability it receives), sealed contracts, maps and sets, general refinement types.
 5. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
 
 Development happens in the open. If you write Dafny, or let agents write code you need to trust,

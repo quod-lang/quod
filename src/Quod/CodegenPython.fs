@@ -385,7 +385,7 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
        || prog.Types |> List.exists (fun d -> hasChar (TyData d)) then
         sb.Append(textPrelude) |> ignore
     if not prog.Types.IsEmpty then
-        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n") |> ignore
+        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n\n\ndef _quod_frozen(x):\n    if type(x) is list:\n        return [_quod_frozen(y) for y in x]\n    if type(x) is tuple:\n        return _quod_tuple(_quod_frozen(y) for y in x)\n    return x\n") |> ignore
         let dataGen = Gen(checks, local)
         for d in prog.Types do
             if not d.IsStruct then
@@ -405,7 +405,9 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
                           | None -> ()
                           match t with
                           | TyChar | TySeq _ | TyTuple _ ->
-                              yield "        object.__setattr__(self, \"" + pyName name + "\", " + dataGen.Normalize(t, term) + ")\n"
+                              // a copy: the caller's list must not change this value afterwards
+                              let held = match t with TySeq TyChar | TyChar -> dataGen.Normalize(t, term) | _ -> "_quod_frozen(" + dataGen.Normalize(t, term) + ")"
+                              yield "        object.__setattr__(self, \"" + pyName name + "\", " + held + ")\n"
                           | _ -> () ]
                 if not checks'.IsEmpty then
                     sb.Append("\n    def __post_init__(self):\n") |> ignore
