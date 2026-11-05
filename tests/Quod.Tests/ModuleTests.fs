@@ -163,3 +163,70 @@ let ``the generated modules run, in python`` () =
         Assert.Equal("12", out)
     finally
         Directory.Delete(dir, true)
+
+// --- char, string and the standard library ---------------------------------------------------------
+
+let private strProgram =
+    "import strings\n\nfn parts(s: string) -> seq<string>\n  ensures result == strings.split(strings.trim(s), ',')\n{\n  strings.split(strings.trim(s), ',')\n}\n\n"
+    + "fn again(s: string) -> string\n  ensures result == strings.join(parts(s), \"; \")\n{\n  strings.join(parts(s), \"; \")\n}\n\n"
+    + "fn plus_one(s: string) -> string\n  requires strings.is_int(s)\n  ensures result == strings.int_to_string(strings.parse_int(s) + 1)\n{\n  strings.int_to_string(strings.parse_int(s) + 1)\n}\n"
+
+[<Fact>]
+let ``the standard library is found, proved with the program, and runs`` () =
+    withFiles [ "main", strProgram ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                File.WriteAllText(Path.Combine(dir, "main.py"), g.Code)
+                for m, text in g.Imported do File.WriteAllText(Path.Combine(dir, m + ".py"), text)
+                let psi = Diagnostics.ProcessStartInfo("python", "-c \"import main; print(main.parts(' a,,b\\n')); print(main.again('x,y')); print(main.plus_one('-42')); print(main.plus_one('99'))\"")
+                psi.WorkingDirectory <- dir
+                psi.RedirectStandardOutput <- true
+                psi.UseShellExecute <- false
+                use p = Diagnostics.Process.Start psi
+                let out = p.StandardOutput.ReadToEnd().Replace("\r\n", "\n").Trim()
+                p.WaitForExit()
+                Assert.Equal("['a', '', 'b']\nx; y\n-41\n100", out)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``a local file hides a module of the standard library, with a warning`` () =
+    withFiles
+        [ "strings", "fn id(x: int) -> int\n  ensures result == x\n{\n  x\n}\n"
+          "main", "import strings\n\nfn f(x: int) -> int\n  ensures result == x\n{\n  strings.id(x)\n}\n" ]
+        (fun _ outcome ->
+            match outcome with
+            | Checked(_, r) -> Assert.Contains(r.Diagnostics, fun d -> d.Status = "shadow" && d.Severity = Warning)
+            | other -> failwithf "%A" other)
+
+let private typeError (src: string) (expected: string) =
+    rejectedWith expected "main.quod" [ "main", src ]
+
+[<Fact>]
+let ``a char is not an integer`` () =
+    typeError "fn f(c: char) -> int {\n  c + 1\n}\n" "must be an int"
+    typeError "fn f(x: int) -> char {\n  x\n}\n" "char"
+
+[<Fact>]
+let ``a literal holds one character, and an escape a scalar value`` () =
+    rejectedWith "one character" "main.quod" [ "main", "fn f() -> char {\n  'ab'\n}\n" ]
+    rejectedWith "scalar value" "main.quod" [ "main", "fn f() -> char {\n  '\\u{D800}'\n}\n" ]
+    rejectedWith "not closed" "main.quod" [ "main", "fn f() -> string {\n  \"ab\n}\n" ]
+
+[<Fact>]
+let ``char_of has an obligation`` () =
+    withFiles [ "main", "fn f(n: int) -> char {\n  char_of(n)\n}\n" ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.Contains(errorsOf r, fun d -> d.Kind = "proof")
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``string and char remain possible names of variables`` () =
+    withFiles [ "main", "fn f(string: int, char: int) -> int\n  ensures result == string + char\n{\n  string + char\n}\n" ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.Empty(errorsOf r)
+        | other -> failwithf "%A" other)
+

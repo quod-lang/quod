@@ -52,7 +52,7 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
                 let verified = Vcgen.verifyWith file typed session s.Budget s.RequireContracts s.Progress
                 let found = verified.Diagnostics @ ContractStyle.diagnostics file typed
                 let found = if s.RequireContracts then ContractStyle.required file typed found else found
-                Checked(typed, { verified with Diagnostics = inFiles (found @ ContractStyle.review file typed) })
+                Checked(typed, { verified with Diagnostics = loaded.Warnings @ inFiles (found @ ContractStyle.review file typed) })
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)

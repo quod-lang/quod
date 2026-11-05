@@ -105,6 +105,16 @@ return e;              // or a final expression at the end of the body
 - In contracts and assertions: `result`, and bounded quantifiers
   `forall i in a..b: P`, `exists i in a..b: P` (`a` included, `b` excluded).
 
+### Characters and strings
+
+Since 0.3, `char` is a Unicode scalar value, and `string` is `seq<char>`: `len`, indexing, slices, `+`, `==` and quantifiers work on it as on any sequence.
+
+- A literal is `'a'` or `"text"`, with the escapes `\n \t \r \0 \\ \' \" \u{1F600}`.
+- `len(s)` counts scalar values: an emoji is 1, and a letter with a combining accent is 2. Nothing is normalized, and nothing depends on a locale: normalize before the boundary.
+- `char` is not an integer. `'a' + 1` is a type error. `code(c)` gives its number, and `char_of(n)` the char, with the obligation that `n` be a scalar value (0 to 10FFFF, without D800 to DFFF). Two chars compare with `<` by their scalar values.
+- `import strings` gives the standard library, in Quod and proved with your program: `is_digit`, `is_space`, `is_letter` (ASCII), `starts_with`, `ends_with`, `occurs_at`, `find`, `trim`, `split`, `join`, `all_digits`, `is_int`, `parse_int`, `int_to_string`. A local file `strings.quod` hides it, with a warning.
+- In Python, a string is a `str` and a char a one-character `str`. In C#, a string is a `string` and a char an `int`, its scalar value. Both refuse a lone surrogate at the boundary.
+
 ### Modules
 
 Since 0.3, a file is a module, named after the file. `import name`, at the top of a file, finds `name.quod` next to it.
@@ -386,7 +396,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Planned content |
 |---|---|
 | 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
-| 0.3 | strings and characters, algebraic types (enums, `Option`), generics, general refinement types |
+| 0.3 | algebraic types (enums, `Option`), generics, general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 

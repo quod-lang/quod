@@ -108,6 +108,16 @@ return e;              // ou une expression finale à la fin du corps
 - Dans les contrats et assertions : `result`, et des quantificateurs bornés
   `forall i in a..b: P`, `exists i in a..b: P` (`a` inclus, `b` exclu).
 
+### Caractères et chaînes
+
+Depuis la 0.3, `char` est une valeur scalaire Unicode, et `string` est `seq<char>` : `len`, l'indice, les tranches, `+`, `==` et les quantificateurs s'y appliquent comme à toute séquence.
+
+- Un littéral s'écrit `'a'` ou `"texte"`, avec les échappements `\n \t \r \0 \\ \' \" \u{1F600}`.
+- `len(s)` compte les valeurs scalaires : un emoji vaut 1, une lettre avec un accent combinant vaut 2. Rien n'est normalisé et rien ne dépend d'une locale : normalisez avant la frontière.
+- `char` n'est pas un entier. `'a' + 1` est une erreur de type. `code(c)` donne son numéro, et `char_of(n)` le caractère, avec l'obligation que `n` soit une valeur scalaire (0 à 10FFFF, hors D800 à DFFF). Deux `char` se comparent avec `<` par leurs valeurs scalaires.
+- `import strings` donne la bibliothèque standard, écrite en Quod et prouvée avec votre programme : `is_digit`, `is_space`, `is_letter` (ASCII), `starts_with`, `ends_with`, `occurs_at`, `find`, `trim`, `split`, `join`, `all_digits`, `is_int`, `parse_int`, `int_to_string`. Un fichier local `strings.quod` la masque, avec un avertissement.
+- En Python, une chaîne est un `str` et un `char` un `str` d'un caractère. En C#, une chaîne est un `string` et un `char` un `int`, sa valeur scalaire. Les deux refusent un surrogate isolé à la frontière.
+
 ### Modules
 
 Depuis la 0.3, un fichier est un module, qui porte le nom du fichier. `import nom`, en tête de fichier, trouve `nom.quod` à côté de lui.
@@ -402,7 +412,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Contenu prévu |
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
-| 0.3 | chaînes et caractères, types algébriques (enums, `Option`), génériques, types raffinés généraux |
+| 0.3 | types algébriques (enums, `Option`), génériques, types raffinés généraux |
 | 0.4 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 

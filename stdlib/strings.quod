@@ -1,0 +1,181 @@
+// Characters and strings: written in Quod and proved. What classifies a character is ASCII only:
+// classifying Unicode needs its tables, which change. Nothing here normalizes or depends on a locale.
+
+fn is_digit(c: char) -> bool
+  ensures result == ('0' <= c && c <= '9')
+{
+  '0' <= c && c <= '9'
+}
+
+fn is_space(c: char) -> bool
+  ensures result == (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+{
+  c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+fn is_letter(c: char) -> bool
+  ensures result == (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'))
+{
+  ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
+fn starts_with(s: string, p: string) -> bool
+  ensures result == (len(p) <= len(s) && s[..len(p)] == p)
+{
+  len(p) <= len(s) && s[..len(p)] == p
+}
+
+fn ends_with(s: string, p: string) -> bool
+  ensures result == (len(p) <= len(s) && s[len(s) - len(p)..] == p)
+{
+  len(p) <= len(s) && s[len(s) - len(p)..] == p
+}
+
+// Does p occur in s at this position?
+fn occurs_at(s: string, p: string, i: nat) -> bool
+  ensures result == (i + len(p) <= len(s) && s[i..i + len(p)] == p)
+{
+  i + len(p) <= len(s) && s[i..i + len(p)] == p
+}
+
+// The first position of p in s, or -1.
+fn find(s: string, p: string) -> int
+  ensures -1 <= result && result <= len(s)
+  ensures result >= 0 ==> occurs_at(s, p, result)
+  ensures result >= 0 ==> forall k in 0..result: !occurs_at(s, p, k)
+  ensures result == -1 ==> forall k in 0..len(s) + 1: !occurs_at(s, p, k)
+{
+  let mut i: nat = 0;
+  while i <= len(s)
+    invariant i <= len(s) + 1
+    invariant forall k in 0..i: !occurs_at(s, p, k)
+    decreases len(s) + 1 - i
+  {
+    if occurs_at(s, p, i) {
+      return i;
+    }
+    i = i + 1;
+  }
+  -1
+}
+
+fn skip_left(s: string, i: nat) -> nat
+  requires i <= len(s)
+  ensures i <= result && result <= len(s)
+  ensures forall k in i..result: is_space(s[k])
+  ensures result == len(s) || !is_space(s[result])
+  decreases len(s) - i
+{
+  if i < len(s) && is_space(s[i]) { skip_left(s, i + 1) } else { i }
+}
+
+fn skip_right(s: string, lo: nat, j: nat) -> nat
+  requires lo <= j && j <= len(s)
+  ensures lo <= result && result <= j
+  ensures forall k in result..j: is_space(s[k])
+  ensures result == lo || !is_space(s[result - 1])
+  decreases j - lo
+{
+  if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 1) } else { j }
+}
+
+// s without the ASCII white space at its two ends.
+fn trim(s: string) -> string
+  ensures result == s[skip_left(s, 0)..skip_right(s, skip_left(s, 0), len(s))]
+{
+  s[skip_left(s, 0)..skip_right(s, skip_left(s, 0), len(s))]
+}
+
+// The first `n` strings of xs, with sep between them.
+fn join_upto(xs: seq<string>, sep: string, n: nat) -> string
+  requires n <= len(xs)
+  decreases n
+{
+  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }
+}
+
+fn join(xs: seq<string>, sep: string) -> string
+  ensures result == join_upto(xs, sep, len(xs))
+{
+  join_upto(xs, sep, len(xs))
+}
+
+// The first position from i on that holds sep, or len(s).
+fn next_sep(s: string, sep: char, i: nat) -> nat
+  requires i <= len(s)
+  ensures i <= result && result <= len(s)
+  ensures forall k in i..result: s[k] != sep
+  ensures result == len(s) || s[result] == sep
+  decreases len(s) - i
+{
+  if i == len(s) || s[i] == sep { i } else { next_sep(s, sep, i + 1) }
+}
+
+fn split_from(s: string, sep: char, i: nat) -> seq<string>
+  requires i <= len(s)
+  decreases len(s) - i
+{
+  if next_sep(s, sep, i) == len(s) {
+    [s[i..]]
+  } else {
+    [s[i..next_sep(s, sep, i)]] + split_from(s, sep, next_sep(s, sep, i) + 1)
+  }
+}
+
+// The parts of s between each sep: "a,,b" gives "a", "", "b", and "" gives one empty part.
+fn split(s: string, sep: char) -> seq<string>
+  ensures result == split_from(s, sep, 0)
+{
+  split_from(s, sep, 0)
+}
+
+fn digits_upto(s: string, n: nat) -> bool
+  requires n <= len(s)
+  ensures result == forall i in 0..n: is_digit(s[i])
+  decreases n
+{
+  if n == 0 { true } else { digits_upto(s, n - 1) && is_digit(s[n - 1]) }
+}
+
+fn all_digits(s: string) -> bool
+  ensures result == forall i in 0..len(s): is_digit(s[i])
+{
+  digits_upto(s, len(s))
+}
+
+// The number written by the first `n` digits of s.
+fn digits_value(s: string, n: nat) -> nat
+  requires n <= len(s)
+  requires all_digits(s)
+  decreases n
+{
+  if n == 0 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }
+}
+
+fn is_int(s: string) -> bool
+  ensures result == ((len(s) >= 1 && all_digits(s)) || (len(s) >= 2 && s[0] == '-' && all_digits(s[1..])))
+{
+  (len(s) >= 1 && all_digits(s)) || (len(s) >= 2 && s[0] == '-' && all_digits(s[1..]))
+}
+
+// The integer written in s, which is_int(s) says is one: no sign but a leading '-', no space.
+fn parse_int(s: string) -> int
+  requires is_int(s)
+  ensures all_digits(s) ==> result == digits_value(s, len(s))
+  ensures !all_digits(s) ==> result == -digits_value(s[1..], len(s) - 1)
+{
+  if all_digits(s) { digits_value(s, len(s)) } else { -digits_value(s[1..], len(s) - 1) }
+}
+
+fn digits_of(n: nat) -> string
+  decreases n
+{
+  if n < 10 { [char_of(48 + n)] } else { digits_of(n / 10) + [char_of(48 + n % 10)] }
+}
+
+fn int_to_string(n: int) -> string
+  ensures n >= 0 ==> result == digits_of(n)
+  ensures n < 0 ==> result == "-" + digits_of(-n)
+{
+  if n >= 0 { digits_of(n) } else { "-" + digits_of(-n) }
+}

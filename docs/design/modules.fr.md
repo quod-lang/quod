@@ -51,7 +51,7 @@ Un `ensures` public peut donc mentionner une fonction privée de son module, com
 
 **`quod check planning.quod` vérifie le fichier et tout ce qu'il importe, à chaque fois.** Il n'y a pas de cache en 0.3 : un cache mal invalidé donnerait une preuve fausse, et un cache par empreinte peut attendre qu'un vrai programme en ait besoin. Une erreur dans un module importé est rapportée avec son propre fichier et sa ligne, et elle refuse la compilation. `--require-contracts` s'applique à tous les modules.
 
-**Exception :** la bibliothèque standard est prouvée une fois par notre CI, à chaque version, et n'est pas reprouvée chez l'utilisateur. On lui fait confiance comme au compilateur. Elle arrivera avec les chaînes : cette note ne fait que réserver la place.
+**La bibliothèque standard n'y fait pas exception**, contrairement à ce que prévoyait la première version de cette note. Elle se prouve en 1,4 s : la reprouver chez l'utilisateur coûte peu, et évite de lui faire confiance comme au compilateur. On pourra revoir ce choix si elle grossit.
 
 ## Le code généré
 

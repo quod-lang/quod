@@ -13,7 +13,17 @@ open Quod.Diagnostics
 type Loaded =
     { Program: Program
       /// The file of each imported module.
-      Files: Map<string, string> }
+      Files: Map<string, string>
+      /// A local file that hides a module of the standard library.
+      Warnings: Diagnostic list }
+
+/// A module of the standard library, embedded in the binary: None if there is no such module.
+let private standard (name: string) =
+    use stream = Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("stdlib/" + name + ".quod")
+    if isNull stream then None
+    else
+        use reader = new StreamReader(stream)
+        Some(reader.ReadToEnd().Replace("\r\n", "\n"))
 
 let private error (file: string) (span: Span) (fn: string option) (message: string) : Diagnostic =
     { File = file; Span = span; Kind = "type"; Status = "error"; Severity = Error; Fn = fn
@@ -71,13 +81,14 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
             None
     match parse file src with
     | None -> Result.Error(List.ofSeq errors)
-    | Some root when root.Imports.IsEmpty -> Ok { Program = root; Files = Map.empty }
+    | Some root when root.Imports.IsEmpty -> Ok { Program = root; Files = Map.empty; Warnings = [] }
     | Some root ->
         let dir = Path.GetDirectoryName file
         let rootName = Path.GetFileNameWithoutExtension file
         // dependencies first: an imported module comes before the modules that import it
         let modules = ResizeArray<string * string * Program>()
         let known = HashSet<string>()
+        let warnings = ResizeArray<Diagnostic>()
         let rec visit (path: string) (stack: string list) (program: Program) =
             for name, span in program.Imports do
                 if name = rootName || List.contains name stack then
@@ -89,10 +100,14 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                     // the exact name: a program must not compile on Windows and fail on Linux
                     let look = if String.IsNullOrEmpty dir then "." else dir
                     let found = Directory.Exists look && (Directory.GetFiles(look, wanted) |> Array.exists (fun f -> Path.GetFileName f = wanted))
-                    if not found then
-                        errors.Add(error path span None ("no module '" + name + "': there is no file " + wanted + " next to " + Path.GetFileName path))
+                    let library = standard name
+                    if found && library.IsSome then
+                        warnings.Add { error path span None ("the file " + wanted + " hides the module '" + name + "' of the standard library") with Severity = Warning; Status = "shadow" }
+                    if not found && library.IsNone then
+                        errors.Add(error path span None ("no module '" + name + "': there is no file " + wanted + " next to " + Path.GetFileName path + ", and the standard library has none"))
                     else
-                        let text = File.ReadAllText target
+                        let target = if found then target else "stdlib/" + wanted
+                        let text = if found then File.ReadAllText target else library.Value
                         match parse target text with
                         | None -> ()
                         | Some program' ->
@@ -145,7 +160,8 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
             if errors.Count > 0 then Result.Error(List.ofSeq errors)
             else
                 Ok { Program = { Imports = []; Fns = imported @ own }
-                     Files = modules |> Seq.map (fun (n, path, _) -> n, path) |> Map.ofSeq }
+                     Files = modules |> Seq.map (fun (n, path, _) -> n, path) |> Map.ofSeq
+                     Warnings = List.ofSeq warnings }
 
 /// A diagnostic about a function of an imported module belongs to that module's file.
 let inFile (files: Map<string, string>) (d: Diagnostic) : Diagnostic =
