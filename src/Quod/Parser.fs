@@ -103,7 +103,25 @@ type private Parser(file: string, toks: Token[]) =
         | TkIdent "i64" -> p.Next() |> ignore; TI64
         | TkIdent name when name <> "string" ->
             p.Next() |> ignore
-            TNamed(name, [])
+            // `module.Type`
+            let name =
+                match p.Peek.Kind, (p.PeekAt 1).Kind with
+                | TkSymbol ".", TkIdent t ->
+                    p.Next() |> ignore
+                    p.Next() |> ignore
+                    name + "." + t
+                | _ -> name
+            if p.IsSym "<" then
+                p.Next() |> ignore
+                let args = ResizeArray<TypeExpr>()
+                args.Add(p.Type())
+                while p.IsSym "," do
+                    p.Next() |> ignore
+                    args.Add(p.Type())
+                p.Sym ">"
+                TNamed(name, List.ofSeq args)
+            else
+                TNamed(name, [])
         | TkIdent "string" -> p.Next() |> ignore; TSeq TChar
         | TkKeyword "seq" ->
             p.Next() |> ignore
@@ -509,11 +527,25 @@ type private Parser(file: string, toks: Token[]) =
     // --- functions ----------------------------------------------------------------
 
     /// `fn name(params) -> type contract { body }`, or `lemma name(params) contract { steps }`.
+    /// `<T, U>` after the name of a function or of a type, if there is one.
+    member p.Generics() : string list =
+        if p.IsSym "<" then
+            p.Next() |> ignore
+            let names = ResizeArray<string>()
+            names.Add(p.Ident "the name of a type parameter")
+            while p.IsSym "," do
+                p.Next() |> ignore
+                names.Add(p.Ident "the name of a type parameter")
+            p.Sym ">"
+            List.ofSeq names
+        else []
+
     member p.Function() : FnDecl =
         let start = p.Peek.Span.Start
         let isLemma = p.IsKw "lemma"
         p.Next() |> ignore
         let name = p.Ident(if isLemma then "a lemma name after 'lemma'" else "a function name after 'fn'")
+        let generics = p.Generics()
         p.Sym "("
         let ps = ResizeArray<Param>()
         if not (p.IsSym ")") then
@@ -577,6 +609,7 @@ type private Parser(file: string, toks: Token[]) =
           Decreases = dec
           Body = (if isLemma then StmtBody items else classify items)
           IsLemma = isLemma
+          TypeParams = generics
           IsPrivate = false
           Span = spanOf start p.LastEnd }
 
@@ -586,6 +619,7 @@ type private Parser(file: string, toks: Token[]) =
         let isStruct = p.Peek.Kind = TkIdent "struct"
         p.Next() |> ignore
         let name = p.Ident(if isStruct then "a name after 'struct'" else "a name after 'enum'")
+        let generics = p.Generics()
         p.Sym "{"
         let items = ResizeArray<string * (string * TypeExpr) list>()
         let fields = ResizeArray<string * TypeExpr>()
@@ -610,6 +644,7 @@ type private Parser(file: string, toks: Token[]) =
             elif not (p.IsSym "}") then p.FailHere "',' or '}'"
         p.Sym "}"
         { TypeName = name
+          Generics = generics
           IsStruct = isStruct
           TypeCases = (if isStruct then [ name, List.ofSeq fields ] else List.ofSeq items)
           TypeSpan = spanOf start p.LastEnd }

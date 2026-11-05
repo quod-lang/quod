@@ -46,6 +46,9 @@ type Ty =
 
 and DataDecl =
     { DataName: string
+      /// The generic type this is a copy of, and for which types: `Option_int` of `Option`, [int].
+      Origin: string
+      TypeArgs: Ty list
       IsStruct: bool
       /// Each case with its fields; a struct has one case, named like it.
       DataCases: DataCase list }
@@ -138,6 +141,12 @@ type TFn =
       /// Called from its own module only: no public method or function is generated for it.
       IsPrivate: bool
       Span: Span }
+
+/// A name without its module: `m.first` is `first`.
+let shortName (n: string) =
+    match n.IndexOf '.' with
+    | -1 -> n
+    | k -> n.Substring(k + 1)
 
 /// The bounds of a bounded integer type.
 let boundsOf (t: Ty) : (bigint * bigint) option =

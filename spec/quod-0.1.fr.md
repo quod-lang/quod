@@ -108,6 +108,46 @@ return e;              // ou une expression finale à la fin du corps
 - Dans les contrats et assertions : `result`, et des quantificateurs bornés
   `forall i in a..b: P`, `exists i in a..b: P` (`a` inclus, `b` exclu).
 
+### Structures, énumérations et génériques
+
+Depuis la 0.3, un programme peut nommer ses données.
+
+```rust
+enum Decision {
+  Accepted(int),
+  Rejected(string),
+  ToReview,
+}
+
+struct Field {
+  name: string,
+  confidence: i32,
+}
+
+fn decide(f: Field, threshold: i32) -> Decision
+  ensures match result {
+    Accepted(c) => c == f.confidence && c >= threshold && c >= 0,
+    Rejected(_) => f.confidence < 0,
+    ToReview => 0 <= f.confidence && f.confidence < threshold,
+  }
+{
+  if f.confidence < 0 {
+    Rejected("invalid: " + f.name)
+  } else {
+    if f.confidence >= threshold { Accepted(f.confidence) } else { ToReview }
+  }
+}
+```
+
+- Une valeur se construit comme un appel, dans l'ordre de ses champs : `Field("total", 80)`, `Accepted(3)`. Un cas sans champ est son nom : `ToReview`. Les champs d'un `struct` se lisent avec `f.name`, ceux d'un `enum` avec `match`.
+- **`match` est une expression, et couvre tous les cas :** un cas oublié est une erreur de compilation qui le nomme. `_` couvre ceux qui ne sont pas nommés avant lui, et vient en dernier. Un nouveau cas y tombe alors sans bruit : dans un contrat, nommez-les plutôt.
+- `==` compare par valeur. Un type ne peut pas se contenir : les types récursifs ne sont pas en 0.3.
+- **Génériques :** `enum Option<T>`, `fn first<T>(xs: seq<T>) -> option.Option<T>`. Chaque usage fait une copie pour ses types, vérifiée et prouvée comme toute fonction : **une fonction générique n'est prouvée que pour les types où elle sert.** Les types viennent des arguments ou de ce qui est attendu ; si rien ne les dit, donnez son type à une variable. `T` n'a pas de contrainte.
+- `import option` donne `Option<T>` (`None`, `Some`) et `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
+- **Entre modules :** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. Dans un `match`, le type est connu, donc un cas s'écrit par son nom court : `Some(x)`.
+- **En Python,** des `dataclass` figées, qui contrôlent ce que les types de leurs champs promettent à leur construction ; une copie de générique a ses propres noms, comme `Option_int_Some`.
+- **En C#,** des classes immuables égales par valeur, imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `F0`, `F1`. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
+
 ### Entiers bornés
 
 Depuis la 0.3, `i32` et `i64` contiennent ce qui tient sur 32 et 64 bits. `int` reste le défaut : c'est un entier mathématique, et rien ne peut y déborder.
@@ -433,7 +473,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Contenu prévu |
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
-| 0.3 | types algébriques (enums, `Option`), génériques, types raffinés généraux |
+| 0.4 | types raffinés généraux |
 | 0.4 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 

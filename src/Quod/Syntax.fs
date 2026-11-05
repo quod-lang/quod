@@ -105,6 +105,8 @@ type FnDecl =
       /// `lemma name(...)`: a proof, checked like a function, erased from the generated code.
       /// It has no result (Ret is bool internally, its body returns true when it ends).
       IsLemma: bool
+      /// `fn first<T>(...)`: each use with other types makes a copy, proved and generated for them.
+      TypeParams: string list
       /// `private fn`: called from its own module only, and absent from the generated API.
       IsPrivate: bool
       Span: Span }
@@ -112,6 +114,8 @@ type FnDecl =
 /// `struct Name { a: int }` is one case named Name; an enum case's fields have no names.
 type TypeDecl =
     { TypeName: string
+      /// `enum Option<T>`, for the copies that its uses make.
+      Generics: string list
       IsStruct: bool
       TypeCases: (string * (string * TypeExpr) list) list
       TypeSpan: Span }

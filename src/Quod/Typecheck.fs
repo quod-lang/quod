@@ -36,11 +36,55 @@ let rec private alwaysReturns (stmts: TStmt list) : bool =
         | SIf(_, t, e) -> alwaysReturns t && alwaysReturns e
         | _ -> false)
 
-type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl list) =
+/// The name of a copy of a generic, from the types it is for: `Option_int`, `first__seq_int`.
+let rec private tySuffix (t: Ty) =
+    match t with
+    | TySeq TyChar -> "string"
+    | TySeq e -> "seq_" + tySuffix e
+    | TyTuple ts -> "tuple_" + (ts |> List.map tySuffix |> String.concat "_")
+    | TyData d -> d.DataName.Replace('.', '_')
+    | t -> tyText t
+
+/// A resolved type back as syntax, to put it where a type parameter was.
+let rec private typeExprOf (t: Ty) : TypeExpr =
+    match t with
+    | TyInt | TyError -> TInt
+    | TyNat -> TNat
+    | TyBool -> TBool
+    | TyChar -> TChar
+    | TyI32 -> TI32
+    | TyI64 -> TI64
+    | TySeq e -> TSeq(typeExprOf e)
+    | TyTuple ts -> TTuple(List.map typeExprOf ts)
+    | TyData d -> TNamed(d.DataName, [])
+
+let rec private substType (env: Map<string, TypeExpr>) (t: TypeExpr) : TypeExpr =
+    match t with
+    | TSeq e -> TSeq(substType env e)
+    | TTuple ts -> TTuple(List.map (substType env) ts)
+    | TNamed(n, []) when env.ContainsKey n -> env.[n]
+    | TNamed(n, args) -> TNamed(n, List.map (substType env) args)
+    | other -> other
+
+let rec private substStmt (env: Map<string, TypeExpr>) (s: Stmt) : Stmt =
+    let block = List.map (substStmt env)
+    let kind =
+        match s.Kind with
+        | Let(m, n, t, v) -> Let(m, n, Option.map (substType env) t, v)
+        | IfStmt(c, a, b) -> IfStmt(c, block a, Option.map block b)
+        | While(c, i, d, b) -> While(c, i, d, block b)
+        | other -> other
+    { s with Kind = kind }
+
+type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeDecl list) =
     let errors = ResizeArray<Diagnostic>()
-    let declared = types |> List.map (fun t -> t.TypeName, t) |> Map.ofList
+    let mutable fns = initialFns
+    /// The copies of generic functions still to check: each with the name of its generic.
+    let pending = Queue<FnDecl * string>()
+    let mutable declared = types |> List.map (fun t -> t.TypeName, t) |> Map.ofList
     let resolved = Dictionary<string, DataDecl>()
     let order = ResizeArray<DataDecl>()
+    let origins = Dictionary<string, string * Ty list>()
     /// The type and the case of each constructor.
     let constructors =
         types
@@ -55,6 +99,96 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
     /// The structs and enums, each after those it holds.
     member _.DataTypes = List.ofSeq order
 
+    member _.NextCopy() = if pending.Count > 0 then Some(pending.Dequeue()) else None
+
+    /// Which types the parameters stand for, from a type and what is there instead. A conflict
+    /// keeps the first: the call is then checked against it, and says what is wrong.
+    member private c.Unify(pattern: TypeExpr, actual: Ty, names: string list, env: Map<string, TypeExpr>) : Map<string, TypeExpr> =
+        match pattern, actual with
+        | _, TyError -> env
+        | TNamed(n, []), _ when List.contains n names ->
+            if env.ContainsKey n then env
+            else env.Add(n, typeExprOf (match actual with TyNat -> TyInt | t -> t))
+        | TSeq p, TySeq a -> c.Unify(p, a, names, env)
+        | TTuple ps, TyTuple xs when ps.Length = xs.Length -> List.fold2 (fun e p x -> c.Unify(p, x, names, e)) env ps xs
+        | TNamed(n, args), TyData d when d.Origin = n && args.Length = d.TypeArgs.Length ->
+            List.fold2 (fun e p x -> c.Unify(p, x, names, e)) env args d.TypeArgs
+        | _ -> env
+
+    /// The types of these arguments, for an inference only: errors are reported when they are checked.
+    member private c.QuietTypes(args: Expr list, ctx: Ctx) : Ty list =
+        let before = errors.Count
+        let types = args |> List.map (fun a -> (c.Expr(a, ctx, None)).Ty)
+        errors.RemoveRange(before, errors.Count - before)
+        types
+
+    /// The copy of a generic function for the types of this call.
+    member private c.Copy(e: Expr, f: FnDecl, args: Expr list, ctx: Ctx, expected: Ty option) : FnDecl option =
+        if args.Length <> f.Params.Length then
+            c.Error(e.Span, ctx.FnName, "'" + f.Name + "' takes " + string f.Params.Length + " argument(s), " + string args.Length + " given")
+            None
+        else
+            let fromArgs = List.fold2 (fun env (p: Param) t -> c.Unify(p.Type, t, f.TypeParams, env)) Map.empty f.Params (c.QuietTypes(args, ctx))
+            let env = match expected with Some t -> c.Unify(f.Ret, t, f.TypeParams, fromArgs) | None -> fromArgs
+            match f.TypeParams |> List.tryFind (fun n -> not (env.ContainsKey n)) with
+            | Some n ->
+                c.Error(e.Span, ctx.FnName, "nothing here says what the type parameter " + n + " of '" + f.Name + "' is: give a variable or a result its type")
+                None
+            | None ->
+                let suffix = f.TypeParams |> List.map (fun n -> tySuffix (c.Ty env.[n])) |> String.concat "__"
+                let name = f.Name + "__" + suffix
+                match fns.TryFind name with
+                | Some copy -> Some copy
+                | None ->
+                    let copy =
+                        { f with
+                            Name = name
+                            TypeParams = []
+                            Params = f.Params |> List.map (fun p -> { p with Type = substType env p.Type })
+                            Ret = substType env f.Ret
+                            Body =
+                                match f.Body with
+                                | StmtBody items -> StmtBody(List.map (substStmt env) items)
+                                | b -> b }
+                    fns <- fns.Add(name, copy)
+                    pending.Enqueue((copy, f.Name))
+                    Some copy
+
+    /// A constructor by its name here: in full, or by its short name inside its module.
+    member private c.Constructor(name: string, fn: string) =
+        match constructors.TryFind name with
+        | Some x -> Some x
+        | None ->
+            match fn.IndexOf '.' with
+            | -1 -> None
+            | k -> constructors.TryFind(fn.Substring(0, k + 1) + name)
+
+    /// The data type of a constructor here: a generic one from what is expected, or from the fields given.
+    member private c.DataOf(e: Expr, tn: string, k: int, args: Expr list, ctx: Ctx, expected: Ty option) : DataDecl option =
+        let decl = declared.[tn]
+        if decl.Generics.IsEmpty then
+            match c.Ty(TNamed(tn, [])) with
+            | TyData d -> Some d
+            | _ -> None
+        else
+            match expected with
+            | Some(TyData d) when d.Origin = tn -> Some d
+            | _ ->
+                let fields = snd decl.TypeCases.[k] |> List.map snd
+                if fields.Length <> args.Length then
+                    c.Error(e.Span, ctx.FnName, "'" + fst decl.TypeCases.[k] + "' takes " + string fields.Length + " value(s), " + string args.Length + " given")
+                    None
+                else
+                    let env = List.fold2 (fun env p t -> c.Unify(p, t, decl.Generics, env)) Map.empty fields (c.QuietTypes(args, ctx))
+                    match decl.Generics |> List.tryFind (fun n -> not (env.ContainsKey n)) with
+                    | Some n ->
+                        c.Error(e.Span, ctx.FnName, "nothing here says what " + n + " is in this '" + tn + "': give a variable or a result its type, as in 'let x: " + tn + "<int> = ...'")
+                        None
+                    | None ->
+                        match c.Ty(TNamed(tn, decl.Generics |> List.map (fun n -> env.[n]))) with
+                        | TyData d -> Some d
+                        | _ -> None
+
     /// A type of the syntax. A struct or an enum is resolved once. It cannot hold itself.
     member c.Ty(t: TypeExpr) : Ty = c.TyWithin(t, [])
 
@@ -62,6 +196,24 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
         match t with
         | TSeq e -> TySeq(c.TyWithin(e, within))
         | TTuple ts -> TyTuple(ts |> List.map (fun x -> c.TyWithin(x, within)))
+        | TNamed(n, args) when (match declared.TryFind n with Some d -> not d.Generics.IsEmpty | None -> false) ->
+            let d = declared.[n]
+            if args.Length <> d.Generics.Length then
+                c.Error(d.TypeSpan, "", "'" + n + "' takes " + string d.Generics.Length + " type(s), " + string args.Length + " given")
+                TyError
+            else
+                let tys = args |> List.map (fun a -> c.TyWithin(a, within))
+                let name = n + "_" + (tys |> List.map tySuffix |> String.concat "_")
+                if not (declared.ContainsKey name) then
+                    let env = List.zip d.Generics (tys |> List.map typeExprOf) |> Map.ofList
+                    declared <-
+                        declared.Add(name,
+                            { d with
+                                TypeName = name
+                                Generics = []
+                                TypeCases = d.TypeCases |> List.map (fun (cn, fs) -> cn, fs |> List.map (fun (f, ft) -> f, substType env ft)) })
+                    origins.[name] <- (n, tys)
+                c.TyWithin(TNamed(name, []), within)
         | TNamed(n, _) ->
             match resolved.TryGetValue n with
             | true, d -> TyData d
@@ -77,7 +229,8 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
                     let cases =
                         d.TypeCases |> List.map (fun (name, fields) ->
                             { CaseName = name; Fields = fields |> List.map (fun (f, ft) -> f, c.TyWithin(ft, n :: within)) })
-                    let data = { DataName = n; IsStruct = d.IsStruct; DataCases = cases }
+                    let origin, tys = match origins.TryGetValue n with | true, x -> x | _ -> n, []
+                    let data = { DataName = n; Origin = origin; TypeArgs = tys; IsStruct = d.IsStruct; DataCases = cases }
                     resolved.[n] <- data
                     order.Add data
                     TyData data
@@ -205,6 +358,12 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
         | BoolLit b -> mk (EBool b) TyBool
         | CharLit v -> mk (EInt(bigint v)) TyChar
         | StrLit vs -> mk (ESeq(vs |> List.map (fun v -> mk (EInt(bigint v)) TyChar))) (TySeq TyChar)
+        // `module.Case`, a case without fields: a module is not a value
+        | Field({ Kind = Var m }, name) when (c.Lookup m).IsNone && constructors.ContainsKey(m + "." + name) ->
+            let tn, k = constructors.[m + "." + name]
+            match c.DataOf(e, tn, k, [], ctx, expected) with
+            | Some d -> c.Build(e, d, k, [], ctx)
+            | None -> fail ()
         | Field(a, name) ->
             let ta = c.Expr(a, ctx, None)
             match ta.Ty with
@@ -248,7 +407,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
                         others <- Some arm.Body
                     | Some name ->
                         if others.IsSome then c.Error(arm.ArmSpan, ctx.FnName, "'_' comes last: it covers every case not named before it")
-                        match d.DataCases |> List.tryFindIndex (fun x -> x.CaseName = name) with
+                        match d.DataCases |> List.tryFindIndex (fun x -> x.CaseName = name || shortName x.CaseName = name) with
                         | None -> c.Error(arm.ArmSpan, ctx.FnName, "'" + d.DataName + "' has no case '" + name + "'")
                         | Some k when seen.ContainsKey k -> c.Error(arm.ArmSpan, ctx.FnName, "the case '" + name + "' appears twice in this 'match'")
                         | Some k ->
@@ -273,16 +432,20 @@ type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl lis
             | t ->
                 c.Error(scrutinee.Span, ctx.FnName, "'match' needs an enum, this is " + tyText t)
                 fail ()
-        | Var name when (c.Lookup name).IsNone && constructors.ContainsKey name ->
-            let tn, k = constructors.[name]
-            match c.Ty(TNamed(tn, [])) with
-            | TyData d -> c.Build(e, d, k, [], ctx)
-            | _ -> fail ()
-        | Call(name, args) when not (fns.ContainsKey name) && constructors.ContainsKey name ->
-            let tn, k = constructors.[name]
-            match c.Ty(TNamed(tn, [])) with
-            | TyData d -> c.Build(e, d, k, args, ctx)
-            | _ -> fail ()
+        | Var name when (c.Lookup name).IsNone && (c.Constructor(name, ctx.FnName)).IsSome ->
+            let tn, k = (c.Constructor(name, ctx.FnName)).Value
+            match c.DataOf(e, tn, k, [], ctx, expected) with
+            | Some d -> c.Build(e, d, k, [], ctx)
+            | None -> fail ()
+        | Call(name, args) when not (fns.ContainsKey name) && (c.Constructor(name, ctx.FnName)).IsSome ->
+            let tn, k = (c.Constructor(name, ctx.FnName)).Value
+            match c.DataOf(e, tn, k, args, ctx, expected) with
+            | Some d -> c.Build(e, d, k, args, ctx)
+            | None -> fail ()
+        | Call(name, args) when (match fns.TryFind name with Some f -> not f.TypeParams.IsEmpty | None -> false) ->
+            match c.Copy(e, fns.[name], args, ctx, expected) with
+            | Some copy -> c.Expr({ e with Kind = Call(copy.Name, args) }, ctx, expected)
+            | None -> fail ()
         | Var name ->
             match c.Lookup name with
             | Some b -> mk (EVar name) b.Ty
@@ -761,6 +924,16 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
                 dups.Add
                     { File = file; Span = t.TypeSpan; Kind = "type"; Status = "error"; Severity = Error; Fn = None
                       Property = None; Counterexample = []; Reason = None; Evidence = None; Message = "'" + name + "' has two fields of the same name" }
-    for t in program.Types do checker.Ty(TNamed(t.TypeName, [])) |> ignore
-    let typed = program.Fns |> List.map (fun f -> checker.Function(f, recursive.TryFind f.Name))
-    { Types = checker.DataTypes; Fns = typed }, List.ofSeq dups @ checker.Errors
+    for t in program.Types do
+        if t.Generics.IsEmpty then checker.Ty(TNamed(t.TypeName, [])) |> ignore
+    // a generic function is checked, and proved, for the types it is used with
+    let typed = program.Fns |> List.filter (fun f -> f.TypeParams.IsEmpty) |> List.map (fun f -> checker.Function(f, recursive.TryFind f.Name))
+    let copies = ResizeArray<TFn>()
+    let rec drain () =
+        match checker.NextCopy() with
+        | Some(copy, origin) ->
+            copies.Add(checker.Function(copy, recursive.TryFind origin))
+            drain ()
+        | None -> ()
+    drain ()
+    { Types = checker.DataTypes; Fns = typed @ List.ofSeq copies }, List.ofSeq dups @ checker.Errors

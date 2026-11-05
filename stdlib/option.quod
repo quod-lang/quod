@@ -1,0 +1,30 @@
+// A value that may be absent, and a result that may be an error: written in Quod and proved.
+
+enum Option<T> {
+  None,
+  Some(T),
+}
+
+enum Result<T, E> {
+  Ok(T),
+  Err(E),
+}
+
+fn is_some<T>(o: Option<T>) -> bool
+  ensures result == match o { Some(_) => true, None => false }
+{
+  match o { Some(_) => true, None => false }
+}
+
+// The value, or `other` if there is none.
+fn value_or<T>(o: Option<T>, other: T) -> T
+  ensures result == match o { Some(x) => x, None => other }
+{
+  match o { Some(x) => x, None => other }
+}
+
+fn is_ok<T, E>(r: Result<T, E>) -> bool
+  ensures result == match r { Ok(_) => true, Err(_) => false }
+{
+  match r { Ok(_) => true, Err(_) => false }
+}

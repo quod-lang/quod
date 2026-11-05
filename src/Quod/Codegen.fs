@@ -97,9 +97,14 @@ let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
         | EIndex(a, b) -> EIndex(go a, go b)
         | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
         | EProj(a, k) -> EProj(go a, k)
-        | ECons(k, xs) -> ECons(k, List.map go xs)
+        | ECons(k, xs) ->
+            // visited too: a generator must import the module of a data type it builds
+            (match e.Ty with TyData d -> rename d.DataName |> ignore | _ -> ())
+            ECons(k, List.map go xs)
         | EField(a, k, i) -> EField(go a, k, i)
-        | EMatch(a, arms) -> EMatch(go a, arms |> List.map (fun (k, n, b) -> k, n, go b))
+        | EMatch(a, arms) ->
+            (match a.Ty with TyData d -> rename d.DataName |> ignore | _ -> ())
+            EMatch(go a, arms |> List.map (fun (k, n, b) -> k, n, go b))
         | ELen a -> ELen(go a)
         | ECall(f, args) -> ECall(rename f, List.map go args)
         | ENeg a -> ENeg(go a)
@@ -130,7 +135,9 @@ let rec private mapCallsS (rename: string -> string) (s: TStmt) : TStmt =
 
 /// The imported modules of a flattened program, in the order of their functions.
 let importedModules (prog: TProgram) : string list =
-    prog.Fns |> List.choose (fun f -> fst (Quod.Modules.split f.Name)) |> List.distinct
+    (prog.Types |> List.map (fun d -> d.DataName)) @ (prog.Fns |> List.map (fun f -> f.Name))
+    |> List.choose (fun n -> fst (Quod.Modules.split n))
+    |> List.distinct
 
 /// The functions of one module (None: the file itself) under their short names. A call to another
 /// module keeps its full name, by which the generators know it is one.
@@ -139,7 +146,7 @@ let moduleView (name: string option) (prog: TProgram) : TProgram =
     let mine (f: string) = fst (Quod.Modules.split f) = name
     let short (f: string) = if mine f then f.Substring prefix.Length else f
     let e = mapCalls short
-    { Types = prog.Types
+    { Types = prog.Types |> List.filter (fun d -> mine d.DataName)
       Fns =
         prog.Fns
         |> List.filter (fun f -> mine f.Name)
@@ -173,5 +180,7 @@ let calledModules (view: TProgram) : string list =
         (match fst (Quod.Modules.split f) with Some m -> found.Add m |> ignore | None -> ())
         f
     moduleViewCalls rename view
-    found |> Seq.sort |> List.ofSeq
+    // its own data types are not an import
+    let own = view.Types |> List.choose (fun d -> fst (Quod.Modules.split d.DataName)) |> Set.ofList
+    found |> Seq.filter (fun m -> not (own.Contains m)) |> Seq.sort |> List.ofSeq
 

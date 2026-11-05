@@ -275,3 +275,71 @@ let ``a length converts, in a program with bounded integers`` () =
 let ``i32 and i64 remain possible names of variables`` () =
     proved "fn f(i32: int, i64: int) -> int\n  ensures result == i32 + i64\n{\n  i32 + i64\n}\n"
 
+// --- struct, enum, match and generics -----------------------------------------------------------------
+
+let private color = "enum Color { Red, Green, Rgb(int, int, int) }\n\n"
+
+[<Fact>]
+let ``a match covers every case`` () =
+    typeError (color + "fn f(c: Color) -> int {\n  match c { Red => 1, Green => 2 }\n}\n") "forgets the case(s) 'Rgb'"
+    typeError (color + "fn f(c: Color) -> int {\n  match c { Red => 1, Red => 2, _ => 3 }\n}\n") "appears twice"
+    typeError (color + "fn f(c: Color) -> int {\n  match c { Blue => 1, _ => 3 }\n}\n") "no case 'Blue'"
+    typeError (color + "fn f(c: Color) -> int {\n  match c { Rgb(a) => a, _ => 3 }\n}\n") "3 field(s), 1 named"
+    typeError (color + "fn f(c: Color) -> int {\n  match c { _ => 3, Red => 1 }\n}\n") "'_' comes last"
+    typeError "fn f(x: int) -> int {\n  match x { _ => 3 }\n}\n" "needs an enum"
+
+[<Fact>]
+let ``a type cannot hold itself`` () =
+    typeError "enum L { Nil, Cons(int, L) }\n\nfn f() -> int {\n  1\n}\n" "holds itself"
+    typeError "enum L<T> { Nil, Cons(T, L<T>) }\n\nfn f(x: L<int>) -> int {\n  1\n}\n" "holds itself"
+
+[<Fact>]
+let ``fields and names are checked`` () =
+    typeError "struct P { x: int }\n\nfn f(p: P) -> int {\n  p.y\n}\n" "no field 'y'"
+    typeError "struct P { x: int }\n\nfn f() -> P {\n  P(1, 2)\n}\n" "takes 1 value(s)"
+    typeError "struct P { x: nat }\n\nfn f() -> P {\n  P(true)\n}\n" "the field 'x'"
+    typeError (color + "enum Other { Red }\n\nfn f() -> int {\n  1\n}\n") "already the name"
+    typeError (color + "fn f(c: Color) -> int {\n  c.x\n}\n") "read with 'match'"
+
+[<Fact>]
+let ``a proof goes through each case, and a counterexample names one`` () =
+    proved (color + "fn f(c: Color) -> int\n  ensures match c { Rgb(a, _, _) => result == a, _ => result == 0 }\n{\n  match c { Rgb(a, _, _) => a, _ => 0 }\n}\n")
+    proofError (color + "fn f(c: Color) -> int\n  ensures result > 1\n{\n  match c { Red => 1, _ => 3 }\n}\n") "postcondition"
+
+[<Fact>]
+let ``a field keeps what its type promises`` () =
+    proved "struct P { n: nat, s: i32 }\n\nfn f(p: P) -> bool\n  ensures result == true\n{\n  p.n >= 0 && p.s <= 2147483647\n}\n"
+
+[<Fact>]
+let ``completeness speaks of data`` () =
+    withFiles [ "main", color + "fn f(x: int) -> Color\n  ensures x > 0 ==> result == Red\n{\n  if x > 0 { Red } else { Green }\n}\n" ] (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.Contains(errorsOf r, fun d -> d.Kind = "completeness" && not d.Counterexample.IsEmpty)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``enum, struct and match remain possible names`` () =
+    proved "fn f(enum: int, struct: int, match: int) -> int\n  ensures result == enum + struct + match\n{\n  enum + struct + match\n}\n"
+
+[<Fact>]
+let ``a generic is copied for its types, and proved for each`` () =
+    proved "import option\n\nfn first<T>(xs: seq<T>) -> option.Option<T>\n  ensures len(xs) > 0 ==> result == option.Some(xs[0])\n  ensures len(xs) == 0 ==> result == option.None\n{\n  if len(xs) == 0 { option.None } else { option.Some(xs[0]) }\n}\n\nfn a(xs: seq<int>) -> option.Option<int>\n  ensures result == first(xs)\n{\n  first(xs)\n}\n\nfn b(xs: seq<string>) -> option.Option<string>\n  ensures result == first(xs)\n{\n  first(xs)\n}\n"
+    withFiles [ "main", "fn id<T>(x: T) -> T\n  ensures result == x\n{\n  x\n}\n\nfn a(n: int) -> int\n  ensures result == n\n{\n  id(n)\n}\n" ] (fun _ outcome ->
+        match outcome with
+        | Checked(typed, _) -> Assert.Contains(typed.Fns, fun f -> f.Name = "id__int")
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``nothing says what the type parameter is`` () =
+    typeError "import option\n\nfn f() -> int {\n  let x = option.None;\n  1\n}\n" "nothing here says"
+
+[<Fact>]
+let ``types go across modules`` () =
+    withFiles
+        [ "lib", "struct P { x: int }\n\nenum E { A, B(P) }\n\nfn mk(n: int) -> E\n  ensures result == B(P(n))\n{\n  B(P(n))\n}\n"
+          "main", "import lib\n\nfn f(n: int) -> int\n  ensures result == n\n{\n  match lib.mk(n) { A => 0, B(p) => p.x }\n}\n\nfn g() -> lib.E\n  ensures result == lib.A\n{\n  lib.A\n}\n" ]
+        (fun _ outcome ->
+            match outcome with
+            | Checked(_, r) -> Assert.Empty(errorsOf r)
+            | other -> failwithf "%A" other)
+

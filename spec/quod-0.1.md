@@ -105,6 +105,46 @@ return e;              // or a final expression at the end of the body
 - In contracts and assertions: `result`, and bounded quantifiers
   `forall i in a..b: P`, `exists i in a..b: P` (`a` included, `b` excluded).
 
+### Structs, enums and generics
+
+Since 0.3, a program can name its data.
+
+```rust
+enum Decision {
+  Accepted(int),
+  Rejected(string),
+  ToReview,
+}
+
+struct Field {
+  name: string,
+  confidence: i32,
+}
+
+fn decide(f: Field, threshold: i32) -> Decision
+  ensures match result {
+    Accepted(c) => c == f.confidence && c >= threshold && c >= 0,
+    Rejected(_) => f.confidence < 0,
+    ToReview => 0 <= f.confidence && f.confidence < threshold,
+  }
+{
+  if f.confidence < 0 {
+    Rejected("invalid: " + f.name)
+  } else {
+    if f.confidence >= threshold { Accepted(f.confidence) } else { ToReview }
+  }
+}
+```
+
+- A value is built like a call, in the order of its fields: `Field("total", 80)`, `Accepted(3)`. A case without fields is its name: `ToReview`. A struct's fields are read with `f.name`; an enum's with `match`.
+- **`match` is an expression, and covers every case:** a case forgotten is a compile error that names it. `_` covers those not named before it, and comes last. A new case then falls into it silently, so prefer naming them in a contract.
+- `==` compares by value. A type cannot hold itself: recursive types are not in 0.3.
+- **Generics:** `enum Option<T>`, `fn first<T>(xs: seq<T>) -> option.Option<T>`. Each use makes a copy for its types, which is checked and proved like any function: **a generic function is proved only for the types it is used with.** Types come from the arguments or from what is expected; if neither says, give a variable its type. There are no constraints on `T`.
+- `import option` gives `Option<T>` (`None`, `Some`) and `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
+- **Across modules:** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. In a `match`, the type is known, so a case is written by its short name: `Some(x)`.
+- **In Python,** frozen dataclasses, which check what their fields' types promise when they are built; a copy of a generic has names of its own, such as `Option_int_Some`.
+- **In C#,** immutable classes equal by value, nested in the class of the module: `Rules.Field`, and for an enum an abstract class with a sealed class per case: `Rules.Decision.Accepted`, whose fields are `F0`, `F1`. A copy of a generic is a class of its own, `Option.Option_int`, and not a C# generic. A function whose name would be that of a type gets `Of`: `level` next to `Level` is `LevelOf`.
+
 ### Bounded integers
 
 Since 0.3, `i32` and `i64` hold what fits in 32 and 64 bits. `int` stays the default: it is a mathematical integer, and nothing can overflow.
@@ -417,7 +457,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 | Version | Planned content |
 |---|---|
 | 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
-| 0.3 | algebraic types (enums, `Option`), generics, general refinement types |
+| 0.4 | general refinement types |
 | 0.4 | capabilities and input/output, sealed contracts, maps and sets |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 

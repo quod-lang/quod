@@ -34,9 +34,12 @@ let private csName (n: string) =
 
 /// `binary_search` -> `BinarySearch`: the public name of a function, or the class of a file.
 let pascal (n: string) =
-    let parts = Regex.Split(n, "[^A-Za-z0-9]+") |> Array.filter (fun p -> p <> "")
-    let joined = parts |> Array.map (fun p -> string (Char.ToUpperInvariant p.[0]) + p.Substring 1) |> String.concat ""
-    if joined = "" then "_" elif Char.IsDigit joined.[0] then "_" + joined else joined
+    // `first__int`, a copy of a generic, must stay apart from a function named `first_int`
+    let one (part: string) =
+        let parts = Regex.Split(part, "[^A-Za-z0-9]+") |> Array.filter (fun p -> p <> "")
+        parts |> Array.map (fun p -> string (Char.ToUpperInvariant p.[0]) + p.Substring 1) |> String.concat ""
+    let joined = n.Split([| "__" |], StringSplitOptions.None) |> Array.map one |> String.concat "_"
+    if joined.Trim('_') = "" then "_" elif Char.IsDigit joined.[0] then "_" + joined else joined
 
 /// The class that a file generates; its functions are its methods, which C# cannot name like it.
 let private classNameOf (file: string) (publicNames: string list) =
@@ -56,7 +59,11 @@ let rec csType (t: Ty) =
     // inside, a scalar value: C#'s char is a UTF-16 unit, and half an emoji is not a character
     | TyChar | TyI32 -> "int"
     | TyI64 -> "long"
-    | TyData d -> d.DataName
+    | TyData d ->
+        // through its module's class, which holds it. A class named otherwise (see classNameOf) is refused.
+        match Quod.Modules.split d.DataName with
+        | Some m, n -> pascal m + "." + n
+        | None, n -> n
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
 
@@ -117,7 +124,7 @@ let rec private shape (t: Ty) =
 
 /// The class of a case: the struct itself, or nested in its enum.
 let private caseClass (d: DataDecl) (k: int) =
-    if d.IsStruct then d.DataName else d.DataName + "." + d.DataCases.[k].CaseName
+    if d.IsStruct then csType (TyData d) else csType (TyData d) + "." + shortName d.DataCases.[k].CaseName
 
 let private literal (text: string) = "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""
 
@@ -328,6 +335,12 @@ type private Gen(checks: Set<string>) =
         | EBool b -> if b then "true" else "false"
         | EVar n -> g.Name n
         | EResult -> "_quod_result"
+        // a string literal stays one in the generated code
+        | ESeq xs when e.Ty = TySeq TyChar && not xs.IsEmpty
+                       && xs |> List.forall (fun x -> match x.Kind with EInt n -> n >= bigint 32 && n <> bigint 127 | _ -> false) ->
+            g.Help "text" |> ignore
+            let text = xs |> List.map (fun x -> match x.Kind with EInt n -> Char.ConvertFromUtf32(int n) | _ -> "") |> String.concat ""
+            "_quod_str(" + literal text + ")"
         | ESeq xs ->
             let elem = xs |> List.fold (fun acc x -> merge acc (shape x.Ty)) elem
             g.Help "seq" + "<" + csType elem + ">(" + (xs |> List.map (fun x -> g.Expr(x, elem)) |> String.concat ", ") + ")"
@@ -436,6 +449,9 @@ type private Gen(checks: Set<string>) =
     /// The class of each imported module, for a call to its public method.
     member val ModuleClasses: Map<string, string> = Map.empty with get, set
 
+    /// The public method of a function of another module.
+    member val ModuleMethod: string -> string -> string = (fun _ h -> pascal h) with get, set
+
     member g.Call(f: string, args: TExpr list) : string =
         let ps = g.Signatures.[f].Params
         let callee =
@@ -444,7 +460,7 @@ type private Gen(checks: Set<string>) =
                 // a module's own values go through: a string is converted once, at the outer boundary
                 let target = g.Signatures.[f]
                 let raw = hasChar target.Ret || target.Params |> List.exists (fun p -> hasChar p.Ty)
-                g.ModuleClasses.[m] + "." + (if raw then "_quod_pub_" + h else pascal h)
+                g.ModuleClasses.[m] + "." + (if raw then "_quod_pub_" + h else g.ModuleMethod m h)
             | None, _ -> implName f
         callee + "(" + (List.map2 (fun (a: TExpr) (p: TParam) -> g.Expr(a, p.Ty)) args ps |> String.concat ", ") + ")"
 
@@ -589,8 +605,13 @@ let rec generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (op
 /// The same, for one module (`prog`) of a flattened program (`whole`), whose other modules it calls.
 and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
-    let publicNames = fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> pascal f.Name)
-    let clash = fns |> List.groupBy (fun f -> pascal f.Name) |> List.tryFind (fun (_, g) -> g.Length > 1)
+    // a function `level` and a type `Level` are natural in Quod, and C# cannot hold both in a class
+    let methodIn (types: DataDecl list) (name: string) =
+        let m = pascal name
+        if types |> List.exists (fun d -> shortName d.DataName = m) then m + "Of" else m
+    let methodOf = methodIn prog.Types
+    let publicNames = fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> methodOf f.Name)
+    let clash = fns |> List.groupBy (fun f -> methodOf f.Name) |> List.tryFind (fun (_, g) -> g.Length > 1)
     match clash with
     | Some(p, g) ->
         Result.Error("not built: " + (g |> List.map (fun f -> "'" + f.Name + "'") |> String.concat " and ")
@@ -601,6 +622,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let g = Gen(checks)
         // names as this module calls them: its own short, the others in full
         g.Signatures <- (whole.Fns |> List.map (fun f -> f.Name, f)) @ (prog.Fns |> List.map (fun f -> f.Name, f)) |> Map.ofList
+        g.ModuleMethod <- (fun m h -> methodIn (whole.Types |> List.filter (fun d -> fst (Quod.Modules.split d.DataName) = Some m)) h)
         g.ModuleClasses <-
             Codegen.importedModules whole
             |> List.map (fun m ->
@@ -650,11 +672,11 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 if viewed f.Ret || f.Params |> List.exists (fun p -> viewed p.Ty) then g.Help "view" |> ignore
                 let outer = f.Params |> List.map (fun p -> publicType p.Ty + " " + csName p.Name) |> String.concat ", "
                 let call = "_quod_pub_" + f.Name + "(" + (f.Params |> List.map (fun p -> fromCaller p.Ty (csName p.Name) 0) |> String.concat ", ") + ")"
-                sb.Append(indent).Append("public static ").Append(publicType f.Ret).Append(' ').Append(pascal f.Name).Append('(').Append(outer).Append(")\n")
+                sb.Append(indent).Append("public static ").Append(publicType f.Ret).Append(' ').Append(methodOf f.Name).Append('(').Append(outer).Append(")\n")
                   .Append(indent).Append("{\n")
                   .Append(body).Append("return ").Append(toCaller f.Ret call 0).Append(";\n")
                   .Append(indent).Append("}\n\n") |> ignore
-            let publicName = if text' then "_quod_pub_" + f.Name else pascal f.Name
+            let publicName = if text' then "_quod_pub_" + f.Name else methodOf f.Name
             sb.Append(indent).Append(if text' then "internal static " else "public static ").Append(csType f.Ret).Append(' ').Append(publicName).Append('(').Append(ps).Append(")\n")
               .Append(indent).Append("{\n") |> ignore
             g.Reset()
@@ -695,9 +717,9 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                     let narrowed = f.Params |> List.map (fun p -> narrowType narrow p.Ty + " " + csName p.Name) |> String.concat ", "
                     g.Help "view" |> ignore
                     sb.Append(indent).Append("/// <summary>The same for a list of ").Append(narrow).Append(": it is not copied. See the method above.</summary>\n")
-                      .Append(indent).Append("public static ").Append(csType f.Ret).Append(' ').Append(pascal f.Name).Append('(').Append(narrowed).Append(")\n")
+                      .Append(indent).Append("public static ").Append(csType f.Ret).Append(' ').Append(methodOf f.Name).Append('(').Append(narrowed).Append(")\n")
                       .Append(indent).Append("{\n")
-                      .Append(body).Append("return ").Append(pascal f.Name).Append('(')
+                      .Append(body).Append("return ").Append(methodOf f.Name).Append('(')
                       .Append(f.Params |> List.map (fun p -> widen narrow p.Ty (csName p.Name) 0) |> String.concat ", ").Append(");\n")
                       .Append(indent).Append("}\n\n") |> ignore
             // the implementation, which Quod code calls
@@ -723,11 +745,12 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let dataText = StringBuilder()
         for d in prog.Types do
             let inner = if d.IsStruct then indent else indent + "    "
+            let dataName = shortName d.DataName
             if not d.IsStruct then
-                dataText.Append(indent).Append("public abstract class ").Append(d.DataName).Append("\n").Append(indent).Append("{\n")
-                        .Append(inner).Append("private ").Append(d.DataName).Append("() { }\n\n") |> ignore
+                dataText.Append(indent).Append("public abstract class ").Append(dataName).Append("\n").Append(indent).Append("{\n")
+                        .Append(inner).Append("private ").Append(dataName).Append("() { }\n\n") |> ignore
             for c in d.DataCases do
-                let name = c.CaseName
+                let name = shortName c.CaseName
                 let i2 = inner + "    "
                 let i3 = i2 + "    "
                 let fields = c.Fields |> List.indexed
@@ -735,14 +758,14 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 let args = fields |> List.map (fun (i, _) -> "f" + string i)
                 let member' (field: string) = (let p = pascal field in if p = name then p + "Value" else p)
                 let param' (field: string) = (let n = csName field in if n = "_quod_raw" then n + "_" else n)
-                dataText.Append(inner).Append("public sealed class ").Append(name).Append(if d.IsStruct then "" else " : " + d.DataName).Append("\n").Append(inner).Append("{\n") |> ignore
+                dataText.Append(inner).Append("public sealed class ").Append(name).Append(if d.IsStruct then "" else " : " + dataName).Append("\n").Append(inner).Append("{\n") |> ignore
                 for i, (_, t) in fields do
                     dataText.Append(i2).Append("internal readonly ").Append(csType t).Append(" _f").Append(i).Append(";\n") |> ignore
                 dataText.Append(i2).Append("private ").Append(name).Append("(").Append(String.Join(", ", raw @ [ "bool _quod_raw" ])).Append(")\n").Append(i2).Append("{\n") |> ignore
                 for i, _ in fields do
                     dataText.Append(i3).Append("_f").Append(i).Append(" = f").Append(i).Append(";\n") |> ignore
                 dataText.Append(i2).Append("}\n\n") |> ignore
-                dataText.Append(i2).Append("internal static ").Append(d.DataName).Append(" _quod_make(").Append(String.Join(", ", raw)).Append(") { return new ").Append(name).Append("(").Append(String.Join(", ", args @ [ "true" ])).Append("); }\n\n") |> ignore
+                dataText.Append(i2).Append("internal static ").Append(dataName).Append(" _quod_make(").Append(String.Join(", ", raw)).Append(") { return new ").Append(name).Append("(").Append(String.Join(", ", args @ [ "true" ])).Append("); }\n\n") |> ignore
                 // what the caller sees
                 let publicParams = fields |> List.map (fun (_, (f, t)) -> publicType t + " " + param' f)
                 let converted = fields |> List.map (fun (_, (f, t)) -> fromCaller t (param' f) 0)

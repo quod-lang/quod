@@ -56,12 +56,12 @@ let rec private expr (rename: Span -> string -> string) (e: Expr) : Expr =
         | Quant(q, v, a, b, c) -> Quant(q, v, go a, go b, go c)
     { e with Kind = kind }
 
-let rec private stmt (rename: Span -> string -> string) (s: Stmt) : Stmt =
+let rec private stmt (rename: Span -> string -> string) (ty: TypeExpr -> TypeExpr) (s: Stmt) : Stmt =
     let e = expr rename
-    let block = List.map (stmt rename)
+    let block = List.map (stmt rename ty)
     let kind =
         match s.Kind with
-        | Let(m, n, t, v) -> Let(m, n, t, e v)
+        | Let(m, n, t, v) -> Let(m, n, Option.map ty t, e v)
         | Assign(n, v) -> Assign(n, e v)
         | IfStmt(c, a, b) -> IfStmt(e c, block a, Option.map block b)
         | While(c, invs, d, b) -> While(e c, List.map e invs, Option.map e d, block b)
@@ -119,11 +119,34 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
         if errors.Count > 0 then Result.Error(List.ofSeq errors)
         else
             let byName = modules |> Seq.map (fun (n, _, p) -> n, p) |> Map.ofSeq
+            let flattenTypes (name: string option) (program: Program) =
+                let flat (f: string) = match name with Some m -> m + "." + f | None -> f
+                let typeNames = program.Types |> List.map (fun t -> t.TypeName) |> Set.ofList
+                let rec ty (t: TypeExpr) =
+                    match t with
+                    | TSeq e -> TSeq(ty e)
+                    | TTuple ts -> TTuple(List.map ty ts)
+                    | TNamed(n, args) when typeNames.Contains n -> TNamed(flat n, List.map ty args)
+                    | TNamed(n, args) -> TNamed(n, List.map ty args)
+                    | other -> other
+                program.Types
+                |> List.map (fun t ->
+                    { t with
+                        TypeName = flat t.TypeName
+                        TypeCases = t.TypeCases |> List.map (fun (c, fields) -> flat c, fields |> List.map (fun (f, ft) -> f, ty ft)) })
             let flatten (name: string option) (path: string) (program: Program) =
                 let locals = program.Fns |> List.map (fun f -> f.Name) |> Set.ofList
                 let imports = program.Imports |> List.map fst |> Set.ofList
-                let constructors = program.Types |> List.collect (fun t -> t.TypeCases |> List.map fst) |> Set.ofList
                 let flat (f: string) = match name with Some m -> m + "." + f | None -> f
+                let constructors = program.Types |> List.collect (fun t -> t.TypeCases |> List.map fst) |> Set.ofList
+                let typeNames = program.Types |> List.map (fun t -> t.TypeName) |> Set.ofList
+                let rec ty (t: TypeExpr) =
+                    match t with
+                    | TSeq e -> TSeq(ty e)
+                    | TTuple ts -> TTuple(List.map ty ts)
+                    | TNamed(n, args) when typeNames.Contains n -> TNamed(flat n, List.map ty args)
+                    | TNamed(n, args) -> TNamed(n, List.map ty args)
+                    | other -> other
                 program.Fns
                 |> List.map (fun f ->
                     let rename (span: Span) (callee: string) =
@@ -137,11 +160,12 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                             refuse ("'" + callee + "': add 'import " + m + "' at the top of this file")
                         | Some m, g ->
                             match byName.[m].Fns |> List.tryFind (fun x -> x.Name = g) with
+                            | None when byName.[m].Types |> List.exists (fun t -> t.TypeCases |> List.exists (fun (c, _) -> c = g)) -> callee
                             | None -> refuse ("module '" + m + "' has no function '" + g + "'")
                             | Some x when x.IsPrivate -> refuse ("'" + g + "' is private to module '" + m + "'")
                             | Some _ -> callee
                         | None, g when locals.Contains g -> flat g
-                        | None, g when constructors.Contains g -> callee
+                        | None, g when constructors.Contains g -> flat g
                         | None, ("code" | "char_of" | "to_i32" | "to_i64") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
@@ -151,6 +175,8 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                     let e = expr rename
                     { f with
                         Name = flat f.Name
+                        Params = f.Params |> List.map (fun p -> { p with Type = ty p.Type })
+                        Ret = ty f.Ret
                         Requires = List.map e f.Requires
                         Ensures = List.map e f.Ensures
                         Loose = f.Loose |> Option.map (fun l -> { l with Relation = e l.Relation })
@@ -158,12 +184,13 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                         Body =
                             match f.Body with
                             | ExprBody x -> ExprBody(e x)
-                            | StmtBody items -> StmtBody(List.map (stmt rename) items) })
+                            | StmtBody items -> StmtBody(List.map (stmt rename ty) items) })
             let imported = modules |> Seq.collect (fun (n, path, p) -> flatten (Some n) path p) |> List.ofSeq
             let own = flatten None file root
             if errors.Count > 0 then Result.Error(List.ofSeq errors)
             else
-                Ok { Program = { Imports = []; Types = root.Types; Fns = imported @ own }
+                let types = (modules |> Seq.collect (fun (n, _, p) -> flattenTypes (Some n) p) |> List.ofSeq) @ flattenTypes None root
+                Ok { Program = { Imports = []; Types = types; Fns = imported @ own }
                      Files = modules |> Seq.map (fun (n, path, _) -> n, path) |> Map.ofSeq
                      Warnings = List.ofSeq warnings }
 

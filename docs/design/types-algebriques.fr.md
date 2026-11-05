@@ -1,6 +1,6 @@
 # Types algébriques et génériques (0.3) : note de conception
 
-État : proposition, rien n'est implémenté. C'est le dernier morceau de la 0.3, après les modules, les chaînes et les entiers bornés. Le but : écrire une règle métier sans coder ses cas dans des entiers et des tuples.
+État : implémenté, décisions approuvées. C'est le dernier morceau de la 0.3, après les modules, les chaînes et les entiers bornés. Le but : écrire une règle métier sans coder ses cas dans des entiers et des tuples.
 
 ## Ce que ça donne
 
@@ -68,9 +68,9 @@ Un programme sans `enum`, `struct`, `match` ni type générique se compile et se
 | `struct Field` | `dataclass(frozen=True)` | classe `sealed` immuable, égalité structurelle | `struct` par valeur |
 | `enum Decision` | une `dataclass` par cas, plus un alias de type | classe `abstract` et classes `sealed` imbriquées, égalité structurelle | `struct` avec une étiquette et une `union` |
 | `match` | cascade de `if` | cascade de `if` sur le type, sans `switch` d'expression (C# 8) | `switch` |
-| `Option<int>` | `Option_int` et ses cas | `Option<BigInteger>`, générique | un `struct` par instance |
+| `Option<int>` | `Option_int` et ses cas | la classe `Option_int` et ses cas | un `struct` par instance |
 
-**Le C# :** une instance générique s'y écrit mieux avec un vrai générique, ce qui rend l'API lisible. Une `struct` publique a un constructeur qui contrôle les champs bornés.
+**Le C# :** une instance générique est une classe à part, `Option_int`, et non un générique C#, contrairement à ce que proposait la première version de cette note : c'est ce que donne la monomorphisation, et cela évite de traduire une seconde fois les règles de types. Le coût est une API moins lisible pour l'appelant, à juger sur du vrai code. Une classe publique a un constructeur qui contrôle ses champs.
 
 ## Ce qu'on teste
 

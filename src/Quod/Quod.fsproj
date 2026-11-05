@@ -20,6 +20,7 @@
     <!-- the language reference served by quod mcp -->
     <EmbeddedResource Include="..\..\spec\quod-0.1.md" LogicalName="quod-0.1.md" />
     <EmbeddedResource Include="..\..\stdlib\strings.quod" LogicalName="stdlib/strings.quod" />
+    <EmbeddedResource Include="..\..\stdlib\option.quod" LogicalName="stdlib/option.quod" />
   </ItemGroup>
 
   <ItemGroup>
