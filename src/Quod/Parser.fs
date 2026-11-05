@@ -101,6 +101,9 @@ type private Parser(file: string, toks: Token[]) =
         | TkIdent "char" -> p.Next() |> ignore; TChar
         | TkIdent "i32" -> p.Next() |> ignore; TI32
         | TkIdent "i64" -> p.Next() |> ignore; TI64
+        | TkIdent name when name <> "string" ->
+            p.Next() |> ignore
+            TNamed(name, [])
         | TkIdent "string" -> p.Next() |> ignore; TSeq TChar
         | TkKeyword "seq" ->
             p.Next() |> ignore
@@ -267,7 +270,10 @@ type private Parser(file: string, toks: Token[]) =
                 | TkInt k when k < bigint 1000 ->
                     p.Next() |> ignore
                     e <- p.Mk(Proj(e, int k), start)
-                | _ -> p.FailHere "a tuple component number after '.' (as in 't.0')"
+                | TkIdent field ->
+                    p.Next() |> ignore
+                    e <- p.Mk(Field(e, field), start)
+                | _ -> p.FailHere "a tuple component number or a field name after '.' (as in 't.0', 'f.name')"
             else
                 go <- false
         e
@@ -297,6 +303,10 @@ type private Parser(file: string, toks: Token[]) =
         | TkKeyword "result" -> p.Next() |> ignore; p.Mk(Result, start)
         | TkIdent name ->
             p.Next() |> ignore
+            // `match` is a word only here: an existing variable or function may have this name
+            if name = "match" && (match p.Peek.Kind with TkIdent _ | TkKeyword "result" -> true | _ -> false) then
+                p.MatchExpression start
+            else
             // `module.function(...)`: a projection is `.` and a number, so this cannot be one
             match p.Peek.Kind, (p.PeekAt 1).Kind, (p.PeekAt 2).Kind with
             | TkSymbol ".", TkIdent g, TkSymbol "(" ->
@@ -342,6 +352,32 @@ type private Parser(file: string, toks: Token[]) =
         | _ -> p.FailHere "an expression"
 
     /// `if c { a } else { b }` in expression position: both branches are single expressions.
+    /// `match e { Case(a, _) => x, Other => y, _ => z }`, after the word `match`.
+    member p.MatchExpression(start: Pos) : Expr =
+        let scrutinee = p.Expr()
+        p.Sym "{"
+        let arms = ResizeArray<MatchArm>()
+        while not (p.IsSym "}") do
+            let at = p.Peek.Span
+            let name = p.Ident "a case of the enum, or '_' for the others"
+            let binders =
+                if p.IsSym "(" then
+                    p.Next() |> ignore
+                    let names = ResizeArray<string>()
+                    while not (p.IsSym ")") do
+                        names.Add(p.Ident "a name for this field of the case, or '_'")
+                        if p.IsSym "," then p.Next() |> ignore
+                    p.Sym ")"
+                    List.ofSeq names
+                else []
+            p.Sym "=>"
+            let body = p.Expr()
+            arms.Add { Case = (if name = "_" then None else Some name); Binders = binders; Body = body; ArmSpan = at }
+            if p.IsSym "," then p.Next() |> ignore
+            elif not (p.IsSym "}") then p.FailHere "',' or '}' after a case of 'match'"
+        p.Sym "}"
+        p.Mk(Match(scrutinee, List.ofSeq arms), start)
+
     member p.IfExpression() : Expr =
         let start = p.Peek.Span.Start
         p.Kw "if"
@@ -544,9 +580,44 @@ type private Parser(file: string, toks: Token[]) =
           IsPrivate = false
           Span = spanOf start p.LastEnd }
 
+    /// `struct Name { a: int, b: string }`, or `enum Name { A, B(int, string) }`.
+    member p.TypeDeclaration() : TypeDecl =
+        let start = p.Peek.Span.Start
+        let isStruct = p.Peek.Kind = TkIdent "struct"
+        p.Next() |> ignore
+        let name = p.Ident(if isStruct then "a name after 'struct'" else "a name after 'enum'")
+        p.Sym "{"
+        let items = ResizeArray<string * (string * TypeExpr) list>()
+        let fields = ResizeArray<string * TypeExpr>()
+        while not (p.IsSym "}") do
+            let n = p.Ident(if isStruct then "a field name" else "a case name")
+            if isStruct then
+                p.Sym ":"
+                fields.Add((n, p.Type()))
+            else
+                let parts =
+                    if p.IsSym "(" then
+                        p.Next() |> ignore
+                        let ts = ResizeArray<string * TypeExpr>()
+                        while not (p.IsSym ")") do
+                            ts.Add(("f" + string ts.Count, p.Type()))
+                            if p.IsSym "," then p.Next() |> ignore
+                        p.Sym ")"
+                        List.ofSeq ts
+                    else []
+                items.Add((n, parts))
+            if p.IsSym "," then p.Next() |> ignore
+            elif not (p.IsSym "}") then p.FailHere "',' or '}'"
+        p.Sym "}"
+        { TypeName = name
+          IsStruct = isStruct
+          TypeCases = (if isStruct then [ name, List.ofSeq fields ] else List.ofSeq items)
+          TypeSpan = spanOf start p.LastEnd }
+
     member p.Program() : Program =
         let imports = ResizeArray<string * Span>()
         let fns = ResizeArray<FnDecl>()
+        let types = ResizeArray<TypeDecl>()
         // `import` and `private` are words only here: an existing variable may have these names
         while p.Peek.Kind = TkIdent "import" do
             let at = p.Next().Span
@@ -556,10 +627,12 @@ type private Parser(file: string, toks: Token[]) =
             if p.Peek.Kind = TkIdent "private" && (match (p.PeekAt 1).Kind with TkKeyword "fn" | TkKeyword "lemma" -> true | _ -> false) then
                 p.Next() |> ignore
                 fns.Add({ p.Function() with IsPrivate = true })
+            elif (p.Peek.Kind = TkIdent "struct" || p.Peek.Kind = TkIdent "enum") && (match (p.PeekAt 1).Kind with TkIdent _ -> true | _ -> false) then
+                types.Add(p.TypeDeclaration())
             elif p.IsKw "fn" || p.IsKw "lemma" then fns.Add(p.Function())
             elif p.Peek.Kind = TkIdent "import" then p.Fail(p.Peek.Span, "an 'import' goes at the top of the file, before any function")
             else p.FailHere "'fn' or 'lemma'"
-        { Imports = List.ofSeq imports; Fns = List.ofSeq fns }
+        { Imports = List.ofSeq imports; Types = List.ofSeq types; Fns = List.ofSeq fns }
 
 /// Parse a whole file. Raises QuodError on the first syntax error.
 let parseProgram (file: string) (src: string) : Program =

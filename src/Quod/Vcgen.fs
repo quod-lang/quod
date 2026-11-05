@@ -25,6 +25,7 @@ let rec private tySig (t: Ty) =
     | TyChar -> "c"
     | TyI32 -> "w"
     | TyI64 -> "W"
+    | TyData d -> "D" + d.DataName + "E"
     | TySeq e -> "S" + tySig e + "E"
     | TyTuple ts -> "T" + (ts |> List.map tySig |> String.concat "") + "E"
 
@@ -36,6 +37,12 @@ let rec sortOf (t: Ty) =
     | TyBool -> "Bool"
     | TySeq e -> "Seq_" + tySig e
     | TyTuple ts -> tupleName ts
+    | TyData d -> "D_" + d.DataName
+
+/// A case of a data type, for the solver: its constructor, its test and its fields.
+let private consName (d: DataDecl) (k: int) = "mk_D_" + d.DataName + "_" + d.DataCases.[k].CaseName
+let private selName (d: DataDecl) (k: int) (i: int) = "D_" + d.DataName + "_" + d.DataCases.[k].CaseName + "_" + string i
+let private isCase (d: DataDecl) (k: int) (term: string) = "((_ is " + consName d k + ") " + term + ")"
 
 let private fnSym (name: string) = "f_" + name
 
@@ -136,6 +143,13 @@ let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : strin
         | fs -> [ "(forall ((" + q + " Int)) (=> (and (<= 0 " + q + ") (< " + q + " (" + seqOp "len" t + " " + term + "))) " + conj fs + "))" ]
     | TyTuple ts ->
         ts |> List.mapi (fun k ct -> typeFacts fresh ct ("(" + tupleName ts + "_" + string k + " " + term + ")")) |> List.concat
+    | TyData d ->
+        d.DataCases
+        |> List.indexed
+        |> List.collect (fun (k, c) ->
+            match c.Fields |> List.mapi (fun i (_, ft) -> typeFacts fresh ft ("(" + selName d k i + " " + term + ")")) |> List.concat with
+            | [] -> []
+            | fs -> [ "(=> " + isCase d k term + " " + conj fs + ")" ])
     | _ -> []
 
 // --- obligations ----------------------------------------------------------------------
@@ -239,6 +253,14 @@ let rec private smallValues (t: Ty) : Eval.Value list =
     | TyNat -> [ 0; 1; 2; 3 ] |> List.map (fun n -> Eval.VInt(bigint (n: int)))
     | TyBool -> [ Eval.VBool false; Eval.VBool true ]
     | TyChar -> [ 'a'; 'b'; 'A'; '0'; ' ' ] |> List.map (fun c -> Eval.VChar(int c))
+    // each case, with a few small values of its fields
+    | TyData d ->
+        d.DataCases
+        |> List.collect (fun c ->
+            c.Fields
+            |> List.fold (fun acc (_, ft) -> [ for prefix in acc do for v in smallValues ft |> List.truncate 3 -> prefix @ [ v ] ]) [ [] ]
+            |> List.truncate 6
+            |> List.map (fun xs -> Eval.VData(c.CaseName, xs)))
     | TyTuple ts ->
         ts
         |> List.fold (fun acc ct -> [ for prefix in acc do for v in smallValues ct -> prefix @ [ v ] ]) [ [] ]
@@ -254,6 +276,7 @@ let rec private zeroValue (t: Ty) : Eval.Value =
     | TyInt | TyNat | TyI32 | TyI64 | TyError -> Eval.VInt(bigint 0)
     | TyBool -> Eval.VBool false
     | TyChar -> Eval.VChar(int 'a')
+    | TyData d -> Eval.VData(d.DataCases.[0].CaseName, d.DataCases.[0].Fields |> List.map (fun (_, t) -> zeroValue t))
     | TySeq _ -> Eval.VSeq []
     | TyTuple ts -> Eval.VTuple(ts |> List.map zeroValue)
 
@@ -271,6 +294,9 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
         | _ -> Eval.VInt(bigint (rnd.Next(-6, 7)))
     | TyBool -> Eval.VBool(rnd.Next 2 = 0)
     // ASCII, a space, a digit, and beyond: an accent, Greek, an emoji
+    | TyData d ->
+        let c = d.DataCases.[rnd.Next d.DataCases.Length]
+        Eval.VData(c.CaseName, c.Fields |> List.map (fun (_, t) -> randomValue rnd t))
     | TyChar -> Eval.VChar [| int 'a'; int 'b'; int 'A'; int '0'; int '9'; int ' '; int ','; 0xE9; 0x3B1; 0x1F600 |].[rnd.Next 10]
     | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
@@ -283,7 +309,9 @@ let private programConstants (prog: TProgram) : bigint list =
     let rec expr (e: TExpr) =
         match e.Kind with
         | EInt n -> found.Add n |> ignore
-        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter expr xs
+        | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
+        | EField(a, _, _) -> expr a
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
@@ -325,6 +353,9 @@ let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Valu
         Eval.VSeq [ for _ in 1 .. n -> inputValue rnd pool e ]
     | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
     | TyBool | TyChar | TyI32 | TyI64 -> randomValue rnd t
+    | TyData d ->
+        let c = d.DataCases.[rnd.Next d.DataCases.Length]
+        Eval.VData(c.CaseName, c.Fields |> List.map (fun (_, ft) -> inputValue rnd pool ft))
 
 /// Does e mention the variable `name`? (By the text of e: a whole word.)
 let private mentions (name: string) (e: TExpr) =
@@ -495,6 +526,8 @@ let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
         | Syntax.Forall -> conjB parts
         | Syntax.Exists -> disjB parts
     | EToNat x | EConvert x -> go x
+    // data has no form in the search for inputs
+    | ECons _ | EField _ | EMatch _ -> raise Unbounded
 
 /// The `if`s of a function's body (statements and expressions), by their span, in order.
 let private ifSpans (f: TFn) : Span list =
@@ -502,7 +535,9 @@ let private ifSpans (f: TFn) : Span list =
     let rec expr (e: TExpr) =
         match e.Kind with
         | EIf(c, a, b) -> found.Add e.Span; expr c; expr a; expr b
-        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter expr xs
+        | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
+        | EField(a, _, _) -> expr a
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
@@ -754,6 +789,32 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | OOr -> "(or " + ta + " " + v.Expr(b, env, ("(not " + ta + ")") :: guards, out) + ")"
             | OImplies -> "(=> " + ta + " " + v.Expr(b, env, ta :: guards, out) + ")"
             | OIff -> "(= " + ta + " " + go b + ")"
+        | ECons(k, xs) ->
+            match e.Ty with
+            | TyData d -> app (consName d k) (xs |> List.map go)
+            | _ -> failwith "a value of no data type"
+        | EField(a, k, i) ->
+            match a.Ty with
+            | TyData d -> "(" + selName d k i + " " + go a + ")"
+            | _ -> failwith "a field of no data type"
+        | EMatch(s, arms) ->
+            match s.Ty with
+            | TyData d ->
+                let ts = go s
+                let terms =
+                    arms |> List.map (fun (k, names, body) ->
+                        let env' =
+                            names
+                            |> List.indexed
+                            |> List.fold (fun (m: Map<string, string>) (i, n) -> if n = "_" then m else m.Add(n, "(" + selName d k i + " " + ts + ")")) env
+                        isCase d k ts, v.Expr(body, env', isCase d k ts :: guards, out))
+                let rec chain (xs: (string * string) list) =
+                    match xs with
+                    | [ (_, t) ] -> t
+                    | (test, t) :: rest -> "(ite " + test + " " + t + " " + chain rest + ")"
+                    | [] -> failwith "a match without a case"
+                chain terms
+            | _ -> failwith "a match on no data type"
         | EIf(c, a, b) ->
             let tc = go c
             let ta = v.Expr(a, env, tc :: guards, out)
@@ -1062,6 +1123,17 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 let items = [ for i in 0 .. int n - 1 -> v.ModelValue("(" + seqOp "nth" t + " " + term + " " + string i + ")", e) ]
                 if items |> List.forall Option.isSome then Some(Eval.VSeq(items |> List.map Option.get)) else None
             | _ -> None
+        | TyData d ->
+            let k =
+                d.DataCases
+                |> List.indexed
+                |> List.tryFindIndex (fun (k, _) -> match z3.Values [ isCase d k term ] with [ Atom "true" ] -> true | _ -> false)
+            match k with
+            | None -> None
+            | Some k ->
+                let c = d.DataCases.[k]
+                let parts = c.Fields |> List.mapi (fun i (_, ft) -> v.ModelValue("(" + selName d k i + " " + term + ")", ft))
+                if parts |> List.forall Option.isSome then Some(Eval.VData(c.CaseName, parts |> List.map Option.get)) else None
         | TyTuple ts ->
             let parts = ts |> List.mapi (fun k ct -> v.ModelValue("(" + tupleName ts + "_" + string k + " " + term + ")", ct))
             if parts |> List.forall Option.isSome then Some(Eval.VTuple(parts |> List.map Option.get)) else None
@@ -1302,6 +1374,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let tuples = ResizeArray<Ty list>()
         let elems = ResizeArray<Ty>()
         let mutable usesBounded = false
+        let datas = ResizeArray<DataDecl>()
+        // tuples and data types can hold each other: each is declared after what it holds
+        let ordered = ResizeArray<Choice<Ty list, DataDecl>>()
         let rec visit (t: Ty) =
             if isBounded t then usesBounded <- true
             match t with
@@ -1311,12 +1386,22 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | TyTuple ts ->
                 List.iter visit ts
                 let key = ts |> List.map tySig
-                if not (tuples |> Seq.exists (fun x -> (x |> List.map tySig) = key)) then tuples.Add ts
+                if not (tuples |> Seq.exists (fun x -> (x |> List.map tySig) = key)) then
+                    tuples.Add ts
+                    ordered.Add(Choice1Of2 ts)
+            | TyData d ->
+                for c in d.DataCases do
+                    for _, ft in c.Fields do visit ft
+                if not (datas |> Seq.exists (fun x -> x.DataName = d.DataName)) then
+                    datas.Add d
+                    ordered.Add(Choice2Of2 d)
             | _ -> ()
         let rec visitE (e: TExpr) =
             visit e.Ty
             match e.Kind with
-            | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter visitE xs
+            | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter visitE xs
+            | EMatch(a, arms) -> visitE a; arms |> List.iter (fun (_, _, b) -> visitE b)
+            | EField(a, _, _) -> visitE a
             | EIndex(a, b) | EArith(_, a, b) | EConcat(a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> visitE a; visitE b
             | ESlice(a, b, c) -> visitE a; Option.iter visitE b; Option.iter visitE c
             | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> visitE a
@@ -1338,10 +1423,20 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         // before the tuples: a field of a tuple can be a sequence, and an element a tuple
         for e in elems do
             z3.Send("(declare-sort " + sortOf (TySeq e) + " 0)")
-        for ts in tuples do
-            let n = tupleName ts
-            let fields = ts |> List.mapi (fun k t -> "(" + n + "_" + string k + " " + sortOf t + ")") |> String.concat " "
-            z3.Send("(declare-datatypes ((" + n + " 0)) (((mk_" + n + " " + fields + "))))")
+        for item in ordered do
+            match item with
+            | Choice1Of2 ts ->
+                let n = tupleName ts
+                let fields = ts |> List.mapi (fun k t -> "(" + n + "_" + string k + " " + sortOf t + ")") |> String.concat " "
+                z3.Send("(declare-datatypes ((" + n + " 0)) (((mk_" + n + " " + fields + "))))")
+            | Choice2Of2 d ->
+                let cases =
+                    d.DataCases
+                    |> List.indexed
+                    |> List.map (fun (k, c) ->
+                        let fields = c.Fields |> List.mapi (fun i (_, ft) -> "(" + selName d k i + " " + sortOf ft + ")") |> String.concat " "
+                        "(" + consName d k + (if fields = "" then "" else " " + fields) + ")")
+                z3.Send("(declare-datatypes ((" + sortOf (TyData d) + " 0)) ((" + String.Join(" ", cases) + ")))")
         for e in elems do
             for line in seqAxioms e do z3.Send line
             // a program that speaks of bounded integers may index and convert with a length: it fits.
@@ -1499,7 +1594,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 | ESlice(a, b, c) -> indexed a || Option.exists indexed b || Option.exists indexed c
                 | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> indexed a
                 | EIf(a, b, c) | EQuant(_, _, a, b, c) -> indexed a || indexed b || indexed c
-                | ESeq xs | ETuple xs | ECall(_, xs) -> List.exists indexed xs
+                | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.exists indexed xs
+                | EMatch(a, arms) -> indexed a || arms |> List.exists (fun (_, _, b) -> indexed b)
+                | EField(a, _, _) -> indexed a
                 | EInt _ | EBool _ | EVar _ | EResult -> false
             let isResult (e: TExpr) = match e.Kind with EResult | EToNat { Kind = EResult } -> true | _ -> false
             let rec foralls (e: TExpr) =

@@ -74,6 +74,11 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
     | Eval.VInt n -> if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then w.WriteNumberValue(int64 n) else w.WriteStringValue(n.ToString())
     | Eval.VBool b -> w.WriteBooleanValue b
     | Eval.VChar c -> w.WriteStringValue(Char.ConvertFromUtf32 c)
+    | Eval.VData(name, xs) ->
+        w.WriteStartArray()
+        w.WriteStringValue name
+        for x in xs do writeValue w x
+        w.WriteEndArray()
     | Eval.VSeq xs when not xs.IsEmpty && xs |> List.forall (function Eval.VChar _ -> true | _ -> false) ->
         w.WriteStringValue(String.Join("", xs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))
     | Eval.VSeq xs | Eval.VTuple xs ->

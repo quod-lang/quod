@@ -75,7 +75,9 @@ let valueUses (prog: TProgram) : Set<string> =
     let rec expr (e: TExpr) =
         match e.Kind with
         | ECall(g, xs) -> used.Add g |> ignore; List.iter expr xs
-        | ESeq xs | ETuple xs -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECons(_, xs) -> List.iter expr xs
+        | EField(a, _, _) -> expr a
+        | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
@@ -85,7 +87,9 @@ let valueUses (prog: TProgram) : Set<string> =
     let rec reads (n: string) (e: TExpr) =
         match e.Kind with
         | EVar m -> m = n
-        | ECall(_, xs) | ESeq xs | ETuple xs -> List.exists (reads n) xs
+        | ECall(_, xs) | ESeq xs | ETuple xs | ECons(_, xs) -> List.exists (reads n) xs
+        | EField(a, _, _) -> reads n a
+        | EMatch(a, arms) -> reads n a || arms |> List.exists (fun (_, _, b) -> reads n b)
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> reads n a || reads n b
         | ESlice(a, b, c) -> reads n a || Option.exists (reads n) b || Option.exists (reads n) c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> reads n a
@@ -129,6 +133,9 @@ let rec private unfold (values: Map<string, TExpr>) (g: string) (f: string) (e: 
         | EIndex(a, b) -> EIndex(go a, go b)
         | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
         | EProj(a, k) -> EProj(go a, k)
+        | ECons(k, xs) -> ECons(k, List.map go xs)
+        | EField(a, k, i) -> EField(go a, k, i)
+        | EMatch(a, arms) -> EMatch(go a, arms |> List.map (fun (k, n, b) -> k, n, go b))
         | ELen a -> ELen(go a)
         | EConvert a -> EConvert(go a)
         | ECall(h, xs) -> ECall((if h = g then f else h), List.map go xs)
@@ -205,7 +212,9 @@ let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
 let rec private calls (e: TExpr) : string list =
     match e.Kind with
     | ECall(g, args) -> g :: List.collect calls args
-    | ESeq xs | ETuple xs -> List.collect calls xs
+    | ESeq xs | ETuple xs | ECons(_, xs) -> List.collect calls xs
+    | EField(a, _, _) -> calls a
+    | EMatch(a, arms) -> calls a @ (arms |> List.collect (fun (_, _, b) -> calls b))
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> calls a @ calls b
     | ESlice(a, b, c) -> calls a @ (Option.toList b |> List.collect calls) @ (Option.toList c |> List.collect calls)
     | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> calls a

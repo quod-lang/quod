@@ -46,6 +46,8 @@ let rec private expr (rename: Span -> string -> string) (e: Expr) : Expr =
         | Index(a, b) -> Index(go a, go b)
         | Slice(a, b, c) -> Slice(go a, Option.map go b, Option.map go c)
         | Proj(a, k) -> Proj(go a, k)
+        | Field(a, n) -> Field(go a, n)
+        | Match(a, arms) -> Match(go a, arms |> List.map (fun x -> { x with Body = go x.Body }))
         | Call("len", args) -> Call("len", List.map go args)
         | Call(f, args) -> Call(rename e.Span f, List.map go args)
         | Unary(op, a) -> Unary(op, go a)
@@ -120,6 +122,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
             let flatten (name: string option) (path: string) (program: Program) =
                 let locals = program.Fns |> List.map (fun f -> f.Name) |> Set.ofList
                 let imports = program.Imports |> List.map fst |> Set.ofList
+                let constructors = program.Types |> List.collect (fun t -> t.TypeCases |> List.map fst) |> Set.ofList
                 let flat (f: string) = match name with Some m -> m + "." + f | None -> f
                 program.Fns
                 |> List.map (fun f ->
@@ -138,6 +141,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                             | Some x when x.IsPrivate -> refuse ("'" + g + "' is private to module '" + m + "'")
                             | Some _ -> callee
                         | None, g when locals.Contains g -> flat g
+                        | None, g when constructors.Contains g -> callee
                         | None, ("code" | "char_of" | "to_i32" | "to_i64") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
@@ -159,7 +163,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
             let own = flatten None file root
             if errors.Count > 0 then Result.Error(List.ofSeq errors)
             else
-                Ok { Program = { Imports = []; Fns = imported @ own }
+                Ok { Program = { Imports = []; Types = root.Types; Fns = imported @ own }
                      Files = modules |> Seq.map (fun (n, path, _) -> n, path) |> Map.ofSeq
                      Warnings = List.ofSeq warnings }
 

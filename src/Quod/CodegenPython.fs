@@ -22,6 +22,7 @@ let rec private pyType (t: Ty) =
     | TyInt | TyNat | TyI32 | TyI64 | TyError -> "int"
     | TyBool -> "bool"
     | TyChar | TySeq TyChar -> "str"
+    | TyData d -> pyName d.DataName
     | TySeq e -> "list[" + pyType e + "]"
     | TyTuple ts -> "tuple[" + (ts |> List.map pyType |> String.concat ", ") + "]"
 
@@ -150,6 +151,29 @@ type private Gen(checks: Set<string>) =
         | ESlice(s, lo, hi) ->
             go s + "[" + (lo |> Option.map go |> Option.defaultValue "") + ":" + (hi |> Option.map go |> Option.defaultValue "") + "]"
         | EProj(t, k) -> go t + "[" + string k + "]"
+        | ECons(k, xs) ->
+            match e.Ty with
+            | TyData d -> pyName d.DataCases.[k].CaseName + "(" + (xs |> List.map go |> String.concat ", ") + ")"
+            | _ -> failwith "a value of no data type"
+        | EField(a, k, i) ->
+            match a.Ty with
+            | TyData d -> go a + "." + pyName (fst d.DataCases.[k].Fields.[i])
+            | _ -> failwith "a field of no data type"
+        | EMatch(s, arms) ->
+            match s.Ty with
+            | TyData d ->
+                let m = g.Fresh "m"
+                // a Python expression has no `let`: a lambda holds the value, and each name of a case
+                let arm (k: int, names: string list, body: TExpr) =
+                    List.foldBack2 (fun (n: string) (field: string, _) inner ->
+                        if n = "_" then inner else "(lambda " + pyName n + ": " + inner + ")(" + m + "." + pyName field + ")") names d.DataCases.[k].Fields (go body)
+                let rec chain (xs: (int * string list * TExpr) list) =
+                    match xs with
+                    | [ x ] -> arm x
+                    | ((k, _, _) as x) :: rest -> "(" + arm x + " if type(" + m + ") is " + pyName d.DataCases.[k].CaseName + " else " + chain rest + ")"
+                    | [] -> failwith "a match without a case"
+                "(lambda " + m + ": " + chain arms + ")(" + go s + ")"
+            | _ -> failwith "a match on no data type"
         | ELen s -> "_quod_len(" + go s + ")"
         | ECall(f, args) -> implName f + "(" + (args |> List.map go |> String.concat ", ") + ")"
         | ENeg x -> "(-" + go x + ")"
@@ -343,11 +367,40 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
         | TyChar -> true
         | TySeq x -> hasChar x
         | TyTuple ts -> List.exists hasChar ts
+        | TyData d -> d.DataCases |> List.exists (fun c -> c.Fields |> List.exists (fun (_, ft) -> hasChar ft))
         | _ -> false
-    if prog.Fns |> List.exists (fun f -> not f.IsLemma && f.Params |> List.exists (fun p -> hasChar p.Ty)) then
+    if prog.Fns |> List.exists (fun f -> not f.IsLemma && f.Params |> List.exists (fun p -> hasChar p.Ty))
+       || prog.Types |> List.exists (fun d -> hasChar (TyData d)) then
         sb.Append(textPrelude) |> ignore
+    if not prog.Types.IsEmpty then
+        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n") |> ignore
+        let dataGen = Gen(checks)
+        for d in prog.Types do
+            if not d.IsStruct then
+                sb.Append("\n\nclass ").Append(pyName d.DataName).Append(":\n    pass\n") |> ignore
+            for c in d.DataCases do
+                sb.Append("\n\n@_quod_dataclass(frozen=True)\nclass ").Append(pyName c.CaseName)
+                  .Append(if d.IsStruct then "" else "(" + pyName d.DataName + ")").Append(":\n") |> ignore
+                if c.Fields.IsEmpty then sb.Append("    pass\n") |> ignore
+                for name, t in c.Fields do
+                    sb.Append("    ").Append(pyName name).Append(": ").Append(pyType t).Append("\n") |> ignore
+                // a Python caller proves nothing: what a field's type promises is checked when it is built
+                let checks' =
+                    [ for name, t in c.Fields do
+                          let term = "self." + pyName name
+                          match dataGen.NatTest(t, term, false, 0) with
+                          | Some test -> yield "        if not " + test + ":\n            raise ValueError(\"" + c.CaseName + ": field " + name + " is out of the bounds of its type\")\n"
+                          | None -> ()
+                          match t with
+                          | TyChar | TySeq _ | TyTuple _ ->
+                              yield "        object.__setattr__(self, \"" + pyName name + "\", " + dataGen.Normalize(t, term) + ")\n"
+                          | _ -> () ]
+                if not checks'.IsEmpty then
+                    sb.Append("\n    def __post_init__(self):\n") |> ignore
+                    for line in checks' do sb.Append(line) |> ignore
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
-    sb.Append("\n\n__all__ = [").Append(fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> "\"" + pyName f.Name + "\"") |> String.concat ", ").Append("]\n") |> ignore
+    let dataNames = prog.Types |> List.collect (fun d -> (if d.IsStruct then [] else [ d.DataName ]) @ (d.DataCases |> List.map (fun c -> c.CaseName)))
+    sb.Append("\n\n__all__ = [").Append((fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> "\"" + pyName f.Name + "\"")) @ (dataNames |> List.map (fun n -> "\"" + pyName n + "\"")) |> String.concat ", ").Append("]\n") |> ignore
     let g = Gen(checks)
     for f in fns do
         sb.Append("\n\n") |> ignore

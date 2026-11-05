@@ -12,6 +12,8 @@ type Value =
     | VInt of BigInteger
     | VBool of bool
     | VChar of int
+    /// A value of a struct or a case of an enum: its name, and its fields.
+    | VData of string * Value list
     | VSeq of Value list
     | VTuple of Value list
 
@@ -70,6 +72,8 @@ let rec valueText (v: Value) =
     | VInt n -> n.ToString()
     | VBool b -> if b then "true" else "false"
     | VChar c -> "'" + charText c + "'"
+    | VData(name, []) -> name
+    | VData(name, xs) -> name + "(" + (xs |> List.map valueText |> String.concat ", ") + ")"
     | VSeq xs when not xs.IsEmpty && xs |> List.forall (function VChar _ -> true | _ -> false) ->
         "\"" + (xs |> List.map (function VChar c -> charText c | _ -> "") |> String.concat "") + "\""
     | VSeq xs -> "[" + (xs |> List.map valueText |> String.concat ", ") + "]"
@@ -107,6 +111,21 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         let asSeq x = match go x with VSeq s -> s | _ -> raise (CannotEvaluate "not a sequence")
         match e.Kind with
         | EInt n when e.Ty = TyChar -> VChar(int n)
+        | ECons(k, xs) ->
+            match e.Ty with
+            | TyData d -> VData(d.DataCases.[k].CaseName, List.map go xs)
+            | _ -> raise (CannotEvaluate "a value of no data type")
+        | EField(a, _, i) ->
+            match go a with
+            | VData(_, xs) -> xs.[i]
+            | _ -> raise (CannotEvaluate "not a struct")
+        | EMatch(s, arms) ->
+            match go s, s.Ty with
+            | VData(name, xs), TyData d ->
+                let k = d.DataCases |> List.findIndex (fun c -> c.CaseName = name)
+                let _, names, body = arms |> List.find (fun (i, _, _) -> i = k)
+                ev.Expr(body, List.fold2 (fun (m: Map<string, Value>) n x -> if n = "_" then m else m.Add(n, x)) env names xs)
+            | _ -> raise (CannotEvaluate "not an enum")
         | EInt n -> VInt n
         | EBool b -> VBool b
         | EVar n ->
@@ -231,6 +250,8 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         match t, v with
         | TyNat, VInt n -> n.Sign >= 0
         | TyChar, VChar c -> isScalar (BigInteger c)
+        | TyData d, VData(name, xs) ->
+            d.DataCases |> List.exists (fun c -> c.CaseName = name && c.Fields.Length = xs.Length && List.forall2 (fun (_, t) x -> ev.Fits(t, x)) c.Fields xs)
         | TyInt, VInt _ -> true
         | (TyI32 | TyI64), VInt n -> (let lo, hi = (boundsOf t).Value in lo <= n && n <= hi)
         | TyBool, VBool _ -> true

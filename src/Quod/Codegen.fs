@@ -29,8 +29,9 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
         | EConvert a -> inner a
         | EIndex(s, i) -> reads s; inner i
         | ESlice(s, lo, hi) -> reads s; Option.iter inner lo; Option.iter inner hi
-        | ESeq xs | ETuple xs | ECall(_, xs) -> List.iter inner xs
-        | EProj(x, _) | ENeg x | ENot x | EToNat x -> inner x
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter inner xs
+        | EProj(x, _) | EField(x, _, _) | ENeg x | ENot x | EToNat x -> inner x
+        | EMatch(x, arms) -> inner x; arms |> List.iter (fun (_, _, b) -> inner b)
         | EArith(_, a, b) | ECmp(_, a, b) | ELogic(_, a, b) -> inner a; inner b
         | EIf(c, a, b) -> inner c; inner a; inner b
         | EQuant(_, _, lo, hi, b) -> inner lo; inner hi; inner b
@@ -74,7 +75,9 @@ let rec natInList (t: Ty) =
 /// could hide one.
 let rec cheap (e: TExpr) =
     match e.Kind with
-    | EQuant _ | ECall _ -> false
+    | EQuant _ | ECall _ | EMatch _ -> false
+    | ECons(_, xs) -> List.forall cheap xs
+    | EField(a, _, _) -> cheap a
     | EInt _ | EBool _ | EVar _ | EResult -> true
     | ESeq xs | ETuple xs -> List.forall cheap xs
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> cheap a && cheap b
@@ -94,6 +97,9 @@ let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
         | EIndex(a, b) -> EIndex(go a, go b)
         | ESlice(a, b, c) -> ESlice(go a, Option.map go b, Option.map go c)
         | EProj(a, k) -> EProj(go a, k)
+        | ECons(k, xs) -> ECons(k, List.map go xs)
+        | EField(a, k, i) -> EField(go a, k, i)
+        | EMatch(a, arms) -> EMatch(go a, arms |> List.map (fun (k, n, b) -> k, n, go b))
         | ELen a -> ELen(go a)
         | ECall(f, args) -> ECall(rename f, List.map go args)
         | ENeg a -> ENeg(go a)
@@ -133,7 +139,8 @@ let moduleView (name: string option) (prog: TProgram) : TProgram =
     let mine (f: string) = fst (Quod.Modules.split f) = name
     let short (f: string) = if mine f then f.Substring prefix.Length else f
     let e = mapCalls short
-    { Fns =
+    { Types = prog.Types
+      Fns =
         prog.Fns
         |> List.filter (fun f -> mine f.Name)
         |> List.map (fun f ->

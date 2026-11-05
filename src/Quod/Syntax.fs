@@ -17,6 +17,8 @@ type TypeExpr =
     | TChar
     | TI32
     | TI64
+    /// A struct or an enum, by name.
+    | TNamed of string * TypeExpr list
     | TTuple of TypeExpr list
 
 type UnOp =
@@ -51,6 +53,10 @@ and ExprKind =
     | Slice of Expr * Expr option * Expr option
     /// `t.0`
     | Proj of Expr * int
+    /// `f.name`
+    | Field of Expr * string
+    /// `match e { Case(a, _) => x, Other => y, _ => z }`
+    | Match of Expr * MatchArm list
     /// `f(args)`; `len` is a built-in function called the same way
     | Call of string * Expr list
     | Unary of UnOp * Expr
@@ -58,6 +64,9 @@ and ExprKind =
     | IfExpr of Expr * Expr * Expr
     /// `forall i in lo..hi: body` (lo included, hi excluded)
     | Quant of Quantifier * string * Expr * Expr * Expr
+
+/// `Case` is None for `_`, which covers every case not named before it.
+and MatchArm = { Case: string option; Binders: string list; Body: Expr; ArmSpan: Span }
 
 type Stmt = { Kind: StmtKind; Span: Span }
 
@@ -100,7 +109,14 @@ type FnDecl =
       IsPrivate: bool
       Span: Span }
 
+/// `struct Name { a: int }` is one case named Name; an enum case's fields have no names.
+type TypeDecl =
+    { TypeName: string
+      IsStruct: bool
+      TypeCases: (string * (string * TypeExpr) list) list
+      TypeSpan: Span }
+
 /// `Imports` is empty once the modules are flattened (see Modules.fs).
-type Program = { Imports: (string * Span) list; Fns: FnDecl list }
+type Program = { Imports: (string * Span) list; Types: TypeDecl list; Fns: FnDecl list }
 
 let spanOf (a: Pos) (b: Pos) = { Start = a; End = b }

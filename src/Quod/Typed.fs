@@ -6,6 +6,7 @@ module Quod.Typed
 
 open Quod.Syntax
 
+[<CustomEquality; NoComparison>]
 type Ty =
     | TyInt
     | TyNat
@@ -18,9 +19,38 @@ type Ty =
     | TyI32
     | TyI64
     | TyTuple of Ty list
+    /// A struct or an enum, with its declaration: never recursive, so a value can be copied, and is finite.
+    | TyData of DataDecl
     /// The type of an expression that already produced an error: absorbs further checks,
     /// so that one mistake does not cascade into many messages.
     | TyError
+
+    /// Two data types are the same if their names are.
+    override t.Equals(o: obj) =
+        match o with
+        | :? Ty as u ->
+            match t, u with
+            | TyInt, TyInt | TyNat, TyNat | TyBool, TyBool | TyChar, TyChar | TyI32, TyI32 | TyI64, TyI64 | TyError, TyError -> true
+            | TySeq a, TySeq b -> a.Equals b
+            | TyTuple a, TyTuple b -> a.Length = b.Length && List.forall2 (fun (x: Ty) y -> x.Equals y) a b
+            | TyData a, TyData b -> a.DataName = b.DataName
+            | _ -> false
+        | _ -> false
+
+    override t.GetHashCode() =
+        match t with
+        | TyInt -> 1 | TyNat -> 2 | TyBool -> 3 | TyChar -> 4 | TyI32 -> 5 | TyI64 -> 6 | TyError -> 7
+        | TySeq a -> 31 * a.GetHashCode() + 8
+        | TyTuple a -> a |> List.fold (fun h (x: Ty) -> 31 * h + x.GetHashCode()) 9
+        | TyData d -> d.DataName.GetHashCode()
+
+and DataDecl =
+    { DataName: string
+      IsStruct: bool
+      /// Each case with its fields; a struct has one case, named like it.
+      DataCases: DataCase list }
+
+and DataCase = { CaseName: string; Fields: (string * Ty) list }
 
 type ArithOp =
     | OAdd | OSub | OMul | ODiv | OMod
@@ -44,6 +74,12 @@ and TExprKind =
     | EIndex of TExpr * TExpr
     | ESlice of TExpr * TExpr option * TExpr option
     | EProj of TExpr * int
+    /// A value of a struct or of a case of an enum (e.Ty says which), with its fields.
+    | ECons of int * TExpr list
+    /// A field of a struct: the value, the case and the field.
+    | EField of TExpr * int * int
+    /// Every case of the enum, each once: its index, a name per field ("_" for none) and the value.
+    | EMatch of TExpr * (int * string list * TExpr) list
     | ELen of TExpr
     /// A call to a user function.
     | ECall of string * TExpr list
@@ -117,7 +153,8 @@ let isBounded (t: Ty) = (boundsOf t).IsSome
 let lemmaBinding (k: int) = "lemma." + string k
 let isLemmaBinding (name: string) = name.StartsWith "lemma."
 
-type TProgram = { Fns: TFn list }
+/// `Types`: every struct and enum, each after those it holds.
+type TProgram = { Types: DataDecl list; Fns: TFn list }
 
 let rec tyText (t: Ty) =
     match t with
@@ -127,6 +164,7 @@ let rec tyText (t: Ty) =
     | TyChar -> "char"
     | TyI32 -> "i32"
     | TyI64 -> "i64"
+    | TyData d -> d.DataName
     | TySeq TyChar -> "string"
     | TySeq e -> "seq<" + tyText e + ">"
     | TyTuple ts -> "(" + (ts |> List.map tyText |> String.concat ", ") + ")"
@@ -141,6 +179,7 @@ let rec ofSyntax (t: TypeExpr) =
     | TypeExpr.TChar -> TyChar
     | TypeExpr.TI32 -> TyI32
     | TypeExpr.TI64 -> TyI64
+    | TypeExpr.TNamed(n, _) -> failwith ("the type checker resolves the name " + n)
     | TypeExpr.TTuple ts -> TyTuple(List.map ofSyntax ts)
 
 /// A typed expression back as a syntax tree: to print it (docstrings), or to compare two
@@ -162,6 +201,16 @@ let rec toSyntax (e: TExpr) : Syntax.Expr =
     | EIndex(s, i) -> mk (Syntax.Index(u s, u i))
     | ESlice(s, a, b) -> mk (Syntax.Slice(u s, Option.map u a, Option.map u b))
     | EProj(t, k) -> mk (Syntax.Proj(u t, k))
+    | ECons(k, xs) ->
+        let name = (match e.Ty with TyData d -> d.DataCases.[k].CaseName | _ -> "?")
+        if xs.IsEmpty then mk (Syntax.Var name) else mk (Syntax.Call(name, List.map u xs))
+    | EField(a, k, i) ->
+        let name = (match a.Ty with TyData d -> fst d.DataCases.[k].Fields.[i] | _ -> "?")
+        mk (Syntax.Field(u a, name))
+    | EMatch(s, arms) ->
+        let cases = (match s.Ty with TyData d -> d.DataCases | _ -> [])
+        mk (Syntax.Match(u s, arms |> List.map (fun (k, names, body) ->
+            ({ Case = Some cases.[k].CaseName; Binders = names; Body = u body; ArmSpan = e.Span }: Syntax.MatchArm))))
     | ELen s -> mk (Syntax.Call("len", [ u s ]))
     | ECall(f, args) -> mk (Syntax.Call(f, List.map u args))
     | ENeg x -> mk (Syntax.Unary(Syntax.Neg, u x))

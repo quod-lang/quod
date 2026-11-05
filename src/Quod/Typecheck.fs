@@ -3,6 +3,7 @@
 /// expression that failed gets type TyError, which silences checks that depend on it.
 module Quod.Typecheck
 
+open System
 open System.Collections.Generic
 open Quod.Syntax
 open Quod.Typed
@@ -35,13 +36,63 @@ let rec private alwaysReturns (stmts: TStmt list) : bool =
         | SIf(_, t, e) -> alwaysReturns t && alwaysReturns e
         | _ -> false)
 
-type private Checker(file: string, fns: Map<string, FnDecl>) =
+type private Checker(file: string, fns: Map<string, FnDecl>, types: TypeDecl list) =
     let errors = ResizeArray<Diagnostic>()
+    let declared = types |> List.map (fun t -> t.TypeName, t) |> Map.ofList
+    let resolved = Dictionary<string, DataDecl>()
+    let order = ResizeArray<DataDecl>()
+    /// The type and the case of each constructor.
+    let constructors =
+        types
+        |> List.collect (fun t -> t.TypeCases |> List.mapi (fun k (c, _) -> c, (t.TypeName, k)))
+        |> Map.ofList
     let scopes = Stack<Dictionary<string, Binding>>()
     /// Lemma calls seen so far in the current function (to name their bindings).
     let mutable lemmaCalls = 0
 
     member _.Errors = List.ofSeq errors
+
+    /// The structs and enums, each after those it holds.
+    member _.DataTypes = List.ofSeq order
+
+    /// A type of the syntax. A struct or an enum is resolved once. It cannot hold itself.
+    member c.Ty(t: TypeExpr) : Ty = c.TyWithin(t, [])
+
+    member private c.TyWithin(t: TypeExpr, within: string list) : Ty =
+        match t with
+        | TSeq e -> TySeq(c.TyWithin(e, within))
+        | TTuple ts -> TyTuple(ts |> List.map (fun x -> c.TyWithin(x, within)))
+        | TNamed(n, _) ->
+            match resolved.TryGetValue n with
+            | true, d -> TyData d
+            | _ ->
+                match declared.TryFind n with
+                | None ->
+                    c.Error({ Start = { Line = 1; Col = 1 }; End = { Line = 1; Col = 1 } }, "", "unknown type '" + n + "'")
+                    TyError
+                | Some d when List.contains n within ->
+                    c.Error(d.TypeSpan, "", "the type '" + n + "' holds itself: recursive types are not in Quod 0.3, since a value must be copied as it is")
+                    TyError
+                | Some d ->
+                    let cases =
+                        d.TypeCases |> List.map (fun (name, fields) ->
+                            { CaseName = name; Fields = fields |> List.map (fun (f, ft) -> f, c.TyWithin(ft, n :: within)) })
+                    let data = { DataName = n; IsStruct = d.IsStruct; DataCases = cases }
+                    resolved.[n] <- data
+                    order.Add data
+                    TyData data
+        | other -> ofSyntax other
+
+    member private c.Build(e: Expr, data: DataDecl, k: int, args: Expr list, ctx: Ctx) : TExpr =
+        let case = data.DataCases.[k]
+        if args.Length <> case.Fields.Length then
+            c.Error(e.Span, ctx.FnName, "'" + case.CaseName + "' takes " + string case.Fields.Length + " value(s), " + string args.Length + " given")
+            { Kind = EBool false; Ty = TyError; Span = e.Span }
+        else
+            let parts =
+                List.map2 (fun (a: Expr) (name: string, t: Ty) ->
+                    c.Coerce(c.Expr(a, ctx, Some t), t, ctx.FnName, "the field '" + name + "' of '" + case.CaseName + "'")) args case.Fields
+            { Kind = ECons(k, parts); Ty = TyData data; Span = e.Span }
 
     member _.Error(span: Span, fn: string, message: string) =
         errors.Add
@@ -154,6 +205,84 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         | BoolLit b -> mk (EBool b) TyBool
         | CharLit v -> mk (EInt(bigint v)) TyChar
         | StrLit vs -> mk (ESeq(vs |> List.map (fun v -> mk (EInt(bigint v)) TyChar))) (TySeq TyChar)
+        | Field(a, name) ->
+            let ta = c.Expr(a, ctx, None)
+            match ta.Ty with
+            | TyData d when d.IsStruct ->
+                match d.DataCases.[0].Fields |> List.tryFindIndex (fun (f, _) -> f = name) with
+                | Some i -> mk (EField(ta, 0, i)) (snd d.DataCases.[0].Fields.[i])
+                | None ->
+                    c.Error(e.Span, ctx.FnName, "'" + d.DataName + "' has no field '" + name + "'")
+                    fail ()
+            | TyError -> fail ()
+            | t ->
+                c.Error(e.Span, ctx.FnName, "'." + name + "' needs a struct, this is " + tyText t + (match t with TyData _ -> ": an enum is read with 'match'" | _ -> ""))
+                fail ()
+        | Match(scrutinee, arms) ->
+            let ts = c.Expr(scrutinee, ctx, None)
+            match ts.Ty with
+            | TyData d ->
+                let seen = Dictionary<int, string list * TExpr>()
+                let mutable others: Expr option = None
+                let mutable joined: Ty option = expected
+                let typedArm (case: DataCase) (binders: string list) (body: Expr) =
+                    c.Push()
+                    List.iter2 (fun (n: string) (_, t: Ty) ->
+                        if n <> "_" then c.Declare(n, { Ty = t; IsMutable = false; What = "pattern variable" }, body.Span, ctx.FnName)) binders case.Fields
+                    let tb = c.Expr(body, ctx, expected)
+                    c.Pop()
+                    joined <-
+                        match joined with
+                        | None -> Some tb.Ty
+                        | Some j ->
+                            match c.Join(j, tb.Ty) with
+                            | Some t -> Some t
+                            | None ->
+                                c.Error(body.Span, ctx.FnName, "the cases of this 'match' have different types, " + tyText j + " and " + tyText tb.Ty)
+                                Some j
+                    tb
+                for arm in arms do
+                    match arm.Case with
+                    | None ->
+                        if others.IsSome then c.Error(arm.ArmSpan, ctx.FnName, "'_' can appear once in a 'match'")
+                        others <- Some arm.Body
+                    | Some name ->
+                        if others.IsSome then c.Error(arm.ArmSpan, ctx.FnName, "'_' comes last: it covers every case not named before it")
+                        match d.DataCases |> List.tryFindIndex (fun x -> x.CaseName = name) with
+                        | None -> c.Error(arm.ArmSpan, ctx.FnName, "'" + d.DataName + "' has no case '" + name + "'")
+                        | Some k when seen.ContainsKey k -> c.Error(arm.ArmSpan, ctx.FnName, "the case '" + name + "' appears twice in this 'match'")
+                        | Some k ->
+                            let case = d.DataCases.[k]
+                            if arm.Binders.Length <> case.Fields.Length then
+                                c.Error(arm.ArmSpan, ctx.FnName, "the case '" + name + "' has " + string case.Fields.Length + " field(s), " + string arm.Binders.Length + " named")
+                            else
+                                seen.[k] <- (arm.Binders, typedArm case arm.Binders arm.Body)
+                let missing = d.DataCases |> List.indexed |> List.filter (fun (k, _) -> not (seen.ContainsKey k))
+                match others with
+                | Some body ->
+                    for k, case in missing do
+                        seen.[k] <- (case.Fields |> List.map (fun _ -> "_"), typedArm case (case.Fields |> List.map (fun _ -> "_")) body)
+                | None ->
+                    if not missing.IsEmpty then
+                        c.Error(e.Span, ctx.FnName, "this 'match' forgets the case(s) " + String.Join(", ", missing |> List.map (fun (_, x) -> "'" + x.CaseName + "'")))
+                if seen.Count <> d.DataCases.Length then fail ()
+                else
+                    let ty = defaultArg joined TyError
+                    mk (EMatch(ts, [ for k in 0 .. d.DataCases.Length - 1 -> (let names, b = seen.[k] in k, names, c.Coerce(b, ty, ctx.FnName, "this case of 'match'")) ])) ty
+            | TyError -> fail ()
+            | t ->
+                c.Error(scrutinee.Span, ctx.FnName, "'match' needs an enum, this is " + tyText t)
+                fail ()
+        | Var name when (c.Lookup name).IsNone && constructors.ContainsKey name ->
+            let tn, k = constructors.[name]
+            match c.Ty(TNamed(tn, [])) with
+            | TyData d -> c.Build(e, d, k, [], ctx)
+            | _ -> fail ()
+        | Call(name, args) when not (fns.ContainsKey name) && constructors.ContainsKey name ->
+            let tn, k = constructors.[name]
+            match c.Ty(TNamed(tn, [])) with
+            | TyData d -> c.Build(e, d, k, args, ctx)
+            | _ -> fail ()
         | Var name ->
             match c.Lookup name with
             | Some b -> mk (EVar name) b.Ty
@@ -271,7 +400,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
                 if ctx.InSpec && not isExprFn then
                     c.Error(e.Span, ctx.FnName, "'" + name + "' has a statement body, so it cannot be used in a contract; only functions whose body is a single expression can")
                 match c.Args(e, f, args, ctx) with
-                | Some targs -> mk (ECall(name, targs)) (ofSyntax f.Ret)
+                | Some targs -> mk (ECall(name, targs)) (c.Ty f.Ret)
                 | None -> fail ()
         | Unary(Neg, x) ->
             let tx = c.Expr(x, ctx, None)
@@ -314,7 +443,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
         else
             Some(
                 List.map2 (fun (a: Expr) (p: Param) ->
-                    let pt = ofSyntax p.Type
+                    let pt = c.Ty p.Type
                     c.Coerce(c.Expr(a, ctx, Some pt), pt, ctx.FnName, "argument '" + p.Name + "'")) args f.Params)
 
     member c.Binary(e: Expr, op: BinOp, l: Expr, r: Expr, ctx: Ctx, expected: Ty option) : TExpr =
@@ -402,7 +531,7 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
             let mk k : TStmt = { Kind = k; Span = s.Span }
             match s.Kind with
             | Let(isMut, name, ty, value) ->
-                let declared = ty |> Option.map ofSyntax
+                let declared = ty |> Option.map c.Ty
                 let tv = c.Expr(value, code, declared)
                 let vty, tv =
                     match declared with
@@ -477,12 +606,12 @@ type private Checker(file: string, fns: Map<string, FnDecl>) =
 
     member c.Function(f: FnDecl, cycle: int option) : TFn =
         let recursive = cycle.IsSome
-        let ret = ofSyntax f.Ret
+        let ret = c.Ty f.Ret
         lemmaCalls <- 0
         c.Push()
         let ps =
             f.Params |> List.map (fun p ->
-                let t = ofSyntax p.Type
+                let t = c.Ty p.Type
                 c.Declare(p.Name, { Ty = t; IsMutable = false; What = "parameter" }, p.Span, f.Name)
                 { Name = p.Name; Ty = t; Span = p.Span })
         let req = f.Requires |> List.map (fun r -> c.Spec(r, f.Name, None, "a 'requires' clause"))
@@ -534,6 +663,8 @@ let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
     | IfExpr(a, b, c) -> go a; go b; go c
     | Quant(_, _, a, b, c) -> go a; go b; go c
     | IntLit _ | BoolLit _ | CharLit _ | StrLit _ | Var _ | Result -> ()
+    | Field(a, _) -> go a
+    | Match(a, arms) -> go a; arms |> List.iter (fun x -> go x.Body)
 
 let rec private callsStmts (acc: HashSet<string>) (ss: Stmt list) =
     for s in ss do
@@ -614,6 +745,22 @@ let check (file: string) (program: Program) : TProgram * Diagnostic list =
         else
             fns <- fns.Add(f.Name, f)
     let recursive = recursiveFns program.Fns
-    let checker = Checker(file, fns)
+    let checker = Checker(file, fns, program.Types)
+    // a name means one thing: the two cases of two enums, or a case and a function, would need a qualifier
+    let names = Dictionary<string, string>()
+    for t in program.Types do
+        let what = if t.IsStruct then "struct" else "enum"
+        for name, fields in t.TypeCases do
+            if names.ContainsKey name || fns.ContainsKey name then
+                dups.Add
+                    { File = file; Span = t.TypeSpan; Kind = "type"; Status = "error"; Severity = Error; Fn = None
+                      Property = None; Counterexample = []; Reason = None; Evidence = None
+                      Message = "'" + name + "' of this " + what + " is already the name of " + (match names.TryGetValue name with | true, w -> w | _ -> "a function") }
+            names.[name] <- "a case or a struct"
+            if (fields |> List.map fst |> List.distinct).Length <> fields.Length then
+                dups.Add
+                    { File = file; Span = t.TypeSpan; Kind = "type"; Status = "error"; Severity = Error; Fn = None
+                      Property = None; Counterexample = []; Reason = None; Evidence = None; Message = "'" + name + "' has two fields of the same name" }
+    for t in program.Types do checker.Ty(TNamed(t.TypeName, [])) |> ignore
     let typed = program.Fns |> List.map (fun f -> checker.Function(f, recursive.TryFind f.Name))
-    { Fns = typed }, List.ofSeq dups @ checker.Errors
+    { Types = checker.DataTypes; Fns = typed }, List.ofSeq dups @ checker.Errors

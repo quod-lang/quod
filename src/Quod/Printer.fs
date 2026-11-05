@@ -14,6 +14,7 @@ let rec typeText (t: TypeExpr) =
     | TChar -> "char"
     | TI32 -> "i32"
     | TI64 -> "i64"
+    | TNamed(n, _) -> n
     | TSeq e -> "seq<" + typeText e + ">"
     | TTuple ts -> "(" + (ts |> List.map typeText |> String.concat ", ") + ")"
 
@@ -45,7 +46,7 @@ let rec private exprPrec (e: Expr) =
     match e.Kind with
     | Binary(op, _, _) -> prec op
     | Unary _ -> 8
-    | Quant _ | IfExpr _ -> 0
+    | Quant _ | IfExpr _ | Match _ -> 0
     | IntLit v when v.Sign < 0 -> 8 // printed as -v: behaves like a unary minus
     | _ -> 10
 
@@ -56,6 +57,13 @@ let rec exprText (e: Expr) : string =
     match e.Kind with
     | IntLit v -> v.ToString()
     | BoolLit b -> if b then "true" else "false"
+    | Field(a, n) -> wrap 10 a + "." + n
+    | Match(s, arms) ->
+        let arm (a: MatchArm) =
+            (match a.Case with Some c -> c | None -> "_")
+            + (if a.Binders.IsEmpty then "" else "(" + String.Join(", ", a.Binders) + ")")
+            + " => " + exprText a.Body
+        "match " + exprText s + " { " + String.Join(", ", arms |> List.map arm) + " }"
     | CharLit v -> "'" + scalarText '\'' v + "'"
     | StrLit vs -> "\"" + String.Join("", vs |> List.map (scalarText '"')) + "\""
     | Var n -> n

@@ -56,6 +56,7 @@ let rec csType (t: Ty) =
     // inside, a scalar value: C#'s char is a UTF-16 unit, and half an emoji is not a character
     | TyChar | TyI32 -> "int"
     | TyI64 -> "long"
+    | TyData d -> d.DataName
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
 
@@ -114,6 +115,10 @@ let rec private shape (t: Ty) =
     | TyTuple ts -> TyTuple(List.map shape ts)
     | t -> t
 
+/// The class of a case: the struct itself, or nested in its enum.
+let private caseClass (d: DataDecl) (k: int) =
+    if d.IsStruct then d.DataName else d.DataName + "." + d.DataCases.[k].CaseName
+
 let private literal (text: string) = "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""
 
 let private xml (text: string) = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
@@ -145,8 +150,8 @@ let private helpers =
             for (int i = 0; i < xs.Count; i++) b.Append(char.ConvertFromUtf32(xs[i]));
             return b.ToString();
         }
-
-        private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
+"
+      "with", "private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
       "seq", "private static IReadOnlyList<T> _quod_seq<T>(params T[] xs) { return xs; }"
       "concat",
       "private static IReadOnlyList<T> _quod_concat<T>(IReadOnlyList<T> a, IReadOnlyList<T> b)
@@ -295,6 +300,7 @@ type private Gen(checks: Set<string>) =
     member g.Eq(t: Ty, a: string, b: string) =
         match shape t with
         | TyInt | TyBool | TyI32 | TyI64 | TyChar -> "(" + a + " == " + b + ")"
+        | TyData _ -> a + ".Equals(" + b + ")"
         | s -> g.EqName s + "(" + a + ", " + b + ")"
 
     member g.EqFunctions() : string list =
@@ -307,6 +313,7 @@ type private Gen(checks: Set<string>) =
                       + g.Eq(e, "a[i]", "b[i]") + ") return false;\n            return true;"
                   | TyTuple ts ->
                       "return " + (ts |> List.mapi (fun k x -> g.Eq(x, "a.Item" + string (k + 1), "b.Item" + string (k + 1))) |> String.concat " && ") + ";"
+                  | TyData _ -> "return a.Equals(b);"
                   | _ -> "return a == b;"
               "private static bool " + eqs.[t] + "(" + ct + " a, " + ct + " b)\n        {\n            " + body + "\n        }" ]
 
@@ -334,6 +341,41 @@ type private Gen(checks: Set<string>) =
             + (lo |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue "BigInteger.Zero") + ", "
             + (hi |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue ("new BigInteger(" + sv + ".Count)")) + ")"
         | EProj(t, k) -> g.Expr(t, t.Ty) + ".Item" + string (k + 1)
+        | ECons(k, xs) ->
+            match e.Ty with
+            | TyData d ->
+                let case = d.DataCases.[k]
+                caseClass d k + "._quod_make(" + (List.map2 (fun (x: TExpr) (_, t: Ty) -> g.Expr(x, t)) xs case.Fields |> String.concat ", ") + ")"
+            | _ -> failwith "a value of no data type"
+        | EField(a, _, i) -> g.Expr(a, a.Ty) + "._f" + string i
+        | EMatch(s, arms) ->
+            match s.Ty with
+            | TyData d ->
+                let mutable text = ""
+                g.Scoped(fun () ->
+                    let m = g.Bind("_quod_m", s.Ty)
+                    let arm (k: int, names: string list, body: TExpr) =
+                        let rec bind (i: int) (rest: string list) : string =
+                            match rest with
+                            | [] -> g.Expr(body, ty)
+                            | "_" :: tail -> bind (i + 1) tail
+                            | n :: tail ->
+                                let ft = snd d.DataCases.[k].Fields.[i]
+                                let mutable inner = ""
+                                let field = "((" + caseClass d k + ")" + m + ")._f" + string i
+                                g.Scoped(fun () ->
+                                    let local = g.Bind(n, ft)
+                                    inner <- g.Help "with" + "(" + field + ", " + local + " => " + bind (i + 1) tail + ")")
+                                inner
+                        bind 0 names
+                    let rec chain (xs: (int * string list * TExpr) list) =
+                        match xs with
+                        | [ x ] -> arm x
+                        | ((k, _, _) as x) :: rest -> "(" + m + " is " + caseClass d k + " ? " + arm x + " : " + chain rest + ")"
+                        | [] -> failwith "a match without a case"
+                    text <- g.Help "with" + "(" + g.Expr(s, s.Ty) + ", " + m + " => " + chain arms + ")")
+                text
+            | _ -> failwith "a match on no data type"
         | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
         | ECall(f, args) -> g.Call(f, args)
         | ENeg x when isBounded x.Ty && not (isBounded e.Ty) -> "(-new BigInteger(" + g.Expr(x, x.Ty) + "))"
@@ -523,7 +565,7 @@ let rec private hasIntegerList (t: Ty) =
 let rec private narrowType (narrow: string) (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> narrow
-    | TyBool | TyChar | TyI32 | TyI64 -> csType t
+    | TyBool | TyChar | TyI32 | TyI64 | TyData _ -> csType t
     | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
     | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
 
@@ -532,7 +574,7 @@ let rec private narrowType (narrow: string) (t: Ty) =
 let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
     match t with
     | TyInt | TyNat | TyError -> "new BigInteger(" + term + ")"
-    | TyBool | TyChar | TyI32 | TyI64 -> term
+    | TyBool | TyChar | TyI32 | TyI64 | TyData _ -> term
     | TySeq e ->
         let x = "_quod_x" + string depth
         "new _QuodView<" + narrowType narrow e + ", " + csType e + ">(" + term + ", " + x + " => " + widen narrow e x (depth + 1) + ")"
@@ -598,6 +640,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
             let body = indent + "    "
             if text' then
                 g.Help "text" |> ignore
+                g.Help "with" |> ignore
                 let rec viewed (t: Ty) =
                     match t with
                     | TySeq TyChar -> false
@@ -618,7 +661,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
             for p in f.Params do g.Bind(p.Name, p.Ty) |> ignore
             for p in f.Params do
                 match p.Ty with
-                | TySeq _ ->
+                | TySeq _ | TyData _ ->
                     let n = csName p.Name
                     sb.Append(body).Append("if (").Append(n).Append(" == null) throw new ArgumentNullException(\"").Append(p.Name).Append("\");\n") |> ignore
                 | _ -> ()
@@ -675,6 +718,62 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 if not (returns items) then
                     sb.Append(body).Append("throw new InvalidOperationException(\"unreachable: the function was proved to return\");\n") |> ignore
             sb.Append(indent).Append("}\n\n") |> ignore
+        // the structs and enums: immutable classes, equal by their values. Quod holds its own
+        // representation in `_f0`; a C# caller builds and reads through what checks and converts.
+        let dataText = StringBuilder()
+        for d in prog.Types do
+            let inner = if d.IsStruct then indent else indent + "    "
+            if not d.IsStruct then
+                dataText.Append(indent).Append("public abstract class ").Append(d.DataName).Append("\n").Append(indent).Append("{\n")
+                        .Append(inner).Append("private ").Append(d.DataName).Append("() { }\n\n") |> ignore
+            for c in d.DataCases do
+                let name = c.CaseName
+                let i2 = inner + "    "
+                let i3 = i2 + "    "
+                let fields = c.Fields |> List.indexed
+                let raw = fields |> List.map (fun (i, (_, t)) -> csType t + " f" + string i)
+                let args = fields |> List.map (fun (i, _) -> "f" + string i)
+                let member' (field: string) = (let p = pascal field in if p = name then p + "Value" else p)
+                let param' (field: string) = (let n = csName field in if n = "_quod_raw" then n + "_" else n)
+                dataText.Append(inner).Append("public sealed class ").Append(name).Append(if d.IsStruct then "" else " : " + d.DataName).Append("\n").Append(inner).Append("{\n") |> ignore
+                for i, (_, t) in fields do
+                    dataText.Append(i2).Append("internal readonly ").Append(csType t).Append(" _f").Append(i).Append(";\n") |> ignore
+                dataText.Append(i2).Append("private ").Append(name).Append("(").Append(String.Join(", ", raw @ [ "bool _quod_raw" ])).Append(")\n").Append(i2).Append("{\n") |> ignore
+                for i, _ in fields do
+                    dataText.Append(i3).Append("_f").Append(i).Append(" = f").Append(i).Append(";\n") |> ignore
+                dataText.Append(i2).Append("}\n\n") |> ignore
+                dataText.Append(i2).Append("internal static ").Append(d.DataName).Append(" _quod_make(").Append(String.Join(", ", raw)).Append(") { return new ").Append(name).Append("(").Append(String.Join(", ", args @ [ "true" ])).Append("); }\n\n") |> ignore
+                // what the caller sees
+                let publicParams = fields |> List.map (fun (_, (f, t)) -> publicType t + " " + param' f)
+                let converted = fields |> List.map (fun (_, (f, t)) -> fromCaller t (param' f) 0)
+                if fields |> List.exists (fun (_, (_, t)) -> hasChar t) then
+                    g.Help "text" |> ignore
+                    g.Help "with" |> ignore
+                    g.Help "view" |> ignore
+                dataText.Append(i2).Append("public ").Append(name).Append("(").Append(String.Join(", ", publicParams)).Append(") : this(").Append(String.Join(", ", converted @ [ "true" ])).Append(")\n").Append(i2).Append("{\n") |> ignore
+                for _, (f, t) in fields do
+                    match t with
+                    | TySeq _ | TyData _ -> dataText.Append(i3).Append("if (").Append(param' f).Append(" == null) throw new ArgumentNullException(\"").Append(f).Append("\");\n") |> ignore
+                    | _ -> ()
+                    match g.NatTest(t, param' f, options.CheckAllRequires, 0) with
+                    | Some test -> dataText.Append(i3).Append("if (!").Append(test).Append(") throw new ArgumentException(").Append(literal (name + ": field " + f + " must be >= 0")).Append(");\n") |> ignore
+                    | None -> ()
+                dataText.Append(i2).Append("}\n\n") |> ignore
+                for i, (f, t) in fields do
+                    dataText.Append(i2).Append("public ").Append(publicType t).Append(' ').Append(member' f).Append(" { get { return ").Append(toCaller t ("_f" + string i) 0).Append("; } }\n") |> ignore
+                let tests = fields |> List.map (fun (i, (_, t)) -> g.Eq(t, "_f" + string i, "x._f" + string i))
+                dataText.Append(if fields.IsEmpty then "" else "\n")
+                        .Append(i2).Append("public override bool Equals(object o) { var x = o as ").Append(name).Append("; return x != null").Append(String.Join("", tests |> List.map (fun t -> " && " + t))).Append("; }\n") |> ignore
+                let hashed =
+                    fields |> List.choose (fun (i, (_, t)) ->
+                        match t with
+                        | TyInt | TyNat | TyBool | TyChar | TyI32 | TyI64 -> Some("_f" + string i + ".GetHashCode()")
+                        | _ -> None)
+                dataText.Append(i2).Append("public override int GetHashCode() { return ").Append(List.fold (fun acc h -> "(" + acc + " * 31 + " + h + ")") (string (name.Length + 17)) hashed).Append("; }\n") |> ignore
+                dataText.Append(inner).Append("}\n\n") |> ignore
+            if not d.IsStruct then
+                dataText.Length <- dataText.Length - 1
+                dataText.Append(indent).Append("}\n\n") |> ignore
         let eqFunctions = g.EqFunctions()
         let helperText =
             helpers
@@ -698,7 +797,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let constantFields = g.ConstantFields()
         if not constantFields.IsEmpty then
             out.Append(indent).Append(String.Join("\n" + indent, constantFields)).Append("\n\n") |> ignore
-        out.Append(sb) |> ignore
+        out.Append(dataText).Append(sb) |> ignore
         for h in helperText @ eqFunctions do
             out.Append(indent).Append(h).Append("\n\n") |> ignore
         out.Length <- out.Length - 1
