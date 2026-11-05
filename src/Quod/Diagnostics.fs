@@ -8,7 +8,7 @@ open System.Text.Json
 open Quod.Syntax
 
 /// The version of quod, in --version and in the header of generated code.
-let quodVersion = "0.1.7"
+let quodVersion = "0.1.8"
 
 type Severity =
     | Error

@@ -103,6 +103,8 @@ After the runs (rule 4), recorded in [the report](runs/t7-heldout/report.md); `r
 - 2026-11-05: the hidden tests took the helper `Gcd` for the method `gcd` (normalized name): the exact name now comes first. One recorded escaped bug is false.
 - 2026-11-05: a build that hangs counts as an escaped bug in the score, though no test ran. One more false escape. An escape now needs a test that ran and failed.
 - 2026-11-05: the pool of wrong results lacks 4 of the 11 known wrong solutions. A post hoc measure with them is reported apart.
+- 2026-11-05, after a review: `adequacy.py` counted an unknown on an allowed result against soundness, and cut the pool at 8 wrong results per input. Its defaults keep the cut; the corrected count is now the only one. The measure recomputed outside the protocol is in the report, with the original figures kept.
+- 2026-11-05: the table above says that `next_permutation` cannot be expressed by properties in Quod 0.1. That analysis is wrong: two runs state it by the pivot, with lengths and counts, and they are exact.
 
 All the others before any run; the first version of this suite is in commit 64c4872.
 

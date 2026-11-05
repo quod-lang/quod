@@ -213,7 +213,7 @@ exact are the shell's binary_search: they fix one index, where the task allows a
 
 ### The held-out tasks
 
-On six tasks that did not shape the compiler, with [a protocol fixed before the runs](../heldout.md), [72 runs](../runs/t7-heldout/report.md) found no unsound contract in any arm, so soundness cannot tell the arms apart:
+On six tasks that did not shape the compiler, with [a protocol fixed before the runs](../heldout.md), [72 runs](../runs/t7-heldout/report.md) found no unsound accepted contract in any arm. With a base rate of zero, **the measure could not separate the arms**, which says nothing either way on the check:
 
 | Haiku, 18 runs per arm | quod | quod-mcp | dafny | dafny-loop |
 |---|---|---|---|---|
@@ -223,7 +223,7 @@ On six tasks that did not shape the compiler, with [a protocol fixed before the 
 | Unsound | 0 | 0 | 0 | 0 |
 | Determined by the tool | 15 | 11 | 4 | 8 |
 
-**Giving Dafny the check during writing made no difference to soundness (13 against 12), only to what the tool determines (8 against 4).** The runs also found a bug of 0.1.6: `quod` hangs at random on the same file, which cost the Quod arms two acceptances, and they showed that both escaped bugs recorded were false.
+Giving Dafny the check during writing changes what the tool determines (8 against 4), and the sound count stays under the threshold (13 against 12; [recomputed](../runs/t7-heldout/report.md), 14 against 12). The check did refuse one really unsound contract, in `quod-mcp`, which does not appear among the accepted ones. The runs also found a bug of 0.1.6: `quod` hangs at random on the same file, which cost the Quod arms two acceptances, and they showed that both escaped bugs recorded were false.
 
 ## What writing them changed in the verifier
 

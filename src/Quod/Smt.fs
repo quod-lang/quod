@@ -115,7 +115,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
             try proc.Kill true with _ -> ())
 
     /// Read one complete answer: an atom line, or a parenthesised block spanning lines.
-    let readAnswerFrom (first: string option) : string =
+    let readAnswerOn (reader: StreamReader) (z3: Process) (first: string option) : string =
         let sb = StringBuilder()
         let mutable depth = 0
         let mutable started = false
@@ -127,10 +127,10 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
                 | Some l ->
                     given <- None
                     l
-                | None -> output.ReadLine()
+                | None -> reader.ReadLine()
             if isNull line then
                 if cancelled then raise (SmtFailure "cancelled")
-                raise (SmtFailure("z3 stopped unexpectedly: " + proc.StandardError.ReadToEnd()))
+                raise (SmtFailure("z3 stopped unexpectedly: " + z3.StandardError.ReadToEnd()))
             let t = line.Trim()
             if t <> "" then
                 sb.AppendLine(line) |> ignore
@@ -144,6 +144,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
         if answer.StartsWith "(error" then raise (SmtFailure("z3 rejected a command: " + answer))
         answer
 
+    let readAnswerFrom (first: string option) = readAnswerOn output proc first
     let readAnswer () = readAnswerFrom None
 
     /// The commands of the current context, one list per push level, kept to replay it. A check
@@ -196,34 +197,53 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
             replaceProcess t
             None
 
-    /// (get-value) has no time limit in z3. On the partial model left by a check that timed out,
-    /// it can run for minutes and take gigabytes, depending on where that check stopped: the same
-    /// file answered in 3 s or hung. Past the limit, the process is replaced, as for a check.
+    /// (get-value) has no time limit in z3, so it is never asked of a check that timed out (see
+    /// Values). On another "unknown", which the settings make common and whose candidate model is
+    /// wanted, it could still run on: past the limit, the process is replaced, as for a check.
+    /// The stream and the process are the ones of now: the read must not move on to a new z3.
     let readValuesWithin (ms: int) : string option =
-        let t = Threading.Tasks.Task.Run(fun () -> readAnswer ())
+        let reader, z3 = output, proc
+        let t = Threading.Tasks.Task.Run(fun () -> readAnswerOn reader z3 None)
         let finished = try t.Wait ms with :? AggregateException -> true
         if finished then
-            if t.IsFaulted then raise t.Exception.InnerException
+            if t.IsFaulted then
+                match t.Exception.InnerException with
+                | :? SmtFailure as e -> raise e
+                | e -> raise (SmtFailure(e.GetType().Name + ": " + e.Message))
             Some t.Result
         elif cancelled then raise (SmtFailure "cancelled")
         else
             replaceProcess t
             None
 
+    /// Did the last check time out? Its partial model is not read: that read is what hung, on the
+    /// same file or not depending on where the check stopped, up to 23 GB.
+    let mutable timedOut = false
+
     let readResult () =
         input.Flush()
-        match readFirstLine () with
-        | None -> Unknown "timeout"
-        | Some first ->
-        match readAnswerFrom (Some first) with
-        | "sat" -> Sat
-        | "unsat" -> Unsat
-        | "unknown" ->
-            raw "(get-info :reason-unknown)"
-            input.Flush()
-            let r = readAnswer ()
-            Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
-        | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+        let mutable restarted = false
+        let result =
+            match readFirstLine () with
+            | None ->
+                restarted <- true // by the watchdog
+                Unknown "timeout"
+            | Some first ->
+            match readAnswerFrom (Some first) with
+            | "sat" -> Sat
+            | "unsat" -> Unsat
+            | "unknown" ->
+                raw "(get-info :reason-unknown)"
+                input.Flush()
+                let r = readAnswer ()
+                Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
+            | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+        timedOut <- (result = Unknown "timeout")
+        // A z3 interrupted by its time limit is not asked anything again: on the same file, about
+        // 1 build in 200 got "unsat" for a satisfiable question a few checks after such a stop, in
+        // 1 to 2 s, and no fresh z3 repeats that answer. An "unsat" is what a proof rests on.
+        if timedOut && not cancelled && not restarted then replaceProcess Threading.Tasks.Task.CompletedTask
+        result
 
     new(z3Path: string, timeoutMs: int, log: TextWriter option) = new Session(z3Path, timeoutMs, log, Threading.CancellationToken.None)
 
@@ -305,7 +325,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
 
     /// Values of terms in the current model, as S-expressions.
     member s.Values(terms: string list) : SExpr list =
-        if terms.IsEmpty then []
+        if terms.IsEmpty || timedOut then []
         else
             s.Raw("(get-value (" + String.Join(" ", terms) + "))")
             input.Flush()

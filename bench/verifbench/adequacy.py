@@ -2,14 +2,16 @@
 the code of the solution and without a judge: the main measure of bench/heldout.md.
 
     python -m verifbench.adequacy runs/<run>           # every accepted Quod or Dafny solution of a run
+    python -m verifbench.adequacy runs/<run> --max-wrong 0 --time-limit 60 --all-submitted --out adequacy-v2.jsonl
 
 For each input: its `requires` must accept it, its `ensures` must reject every wrong result, and accept every
 result the task allows. A contract is *sound* if nothing fails on the first two, *exact* if nothing fails at all.
 A finite test: it can show that a contract is not sound, with a witness, not that it is.
 
 Quod contracts are evaluated (`quod contract`). A Dafny contract is compiled and run if it can be; otherwise each
-question is proved, in both directions. What no tool answers is *unknown*, and a contract with unknown questions is
-*undecided* (`sound` is null), neither sound nor unsound: that goes to the judge, and is reported.
+question is proved, in both directions. What no tool answers is *unknown*. A contract with an unknown `requires` or wrong
+result is *undecided* (`sound` is null), neither sound nor unsound: that goes to the judge, and is reported. An unknown
+on an allowed result says nothing of soundness: it leaves `exact` null.
 """
 from __future__ import annotations
 
@@ -29,7 +31,8 @@ from verifbench.witness import lit, parse_type
 QUOD_EXE = os.environ.get("QUOD_EXE", "quod")
 SEED = 20261104
 MAX_INPUTS = 14
-MAX_WRONG = 8
+MAX_WRONG = 8  # 0: all of them
+TIME_LIMIT = 10  # seconds per proof of a Dafny question
 
 
 def mutations(v: Any, r_budget: int = 2) -> list[Any]:
@@ -93,7 +96,7 @@ def results_of(task, args: tuple) -> tuple[list[Any], list[Any]]:
                 wrong.append(c)
         except Exception:  # noqa: BLE001 - the oracle cannot judge this shape: it is not a candidate
             continue
-    return allowed, wrong[:MAX_WRONG]
+    return allowed, wrong[:MAX_WRONG] if MAX_WRONG else wrong
 
 
 def _split_top(text: str) -> list[str]:
@@ -147,10 +150,11 @@ def plan(task) -> list[dict]:
 
 def verdict(cases: list[dict]) -> dict:
     """cases: each with `requires` and `allowed`, `wrong`: lists of true, false or null."""
-    rejected_inputs, accepted_wrong, rejected_allowed, unknown, total = [], [], [], 0, 0
+    rejected_inputs, accepted_wrong, rejected_allowed, unknown_sound, unknown_allowed, total = [], [], [], 0, 0, 0
     for c in cases:
         total += 1 + len(c["allowed_v"]) + len(c["wrong_v"])
-        unknown += sum(v is None for v in [c["requires"], *c["allowed_v"], *c["wrong_v"]])
+        unknown_sound += sum(v is None for v in [c["requires"], *c["wrong_v"]])
+        unknown_allowed += sum(v is None for v in c["allowed_v"])
         if c["requires"] is False:
             rejected_inputs.append(c["args"])
             continue
@@ -158,8 +162,10 @@ def verdict(cases: list[dict]) -> dict:
         rejected_allowed += [(c["args"], r) for r, v in zip(c["allowed"], c["allowed_v"]) if v is False]
     unsound = bool(rejected_inputs or accepted_wrong)
     # a contract with unknown questions is not called sound: no tool answered
-    sound = False if unsound else (True if unknown == 0 else None)
-    return {"sound": sound, "exact": False if unsound or rejected_allowed else sound, "unknown": unknown, "pairs": total,
+    sound = False if unsound else (True if unknown_sound == 0 else None)
+    exact = False if unsound or rejected_allowed else (True if sound and unknown_allowed == 0 else None)
+    return {"sound": sound, "exact": exact, "unknown": unknown_sound + unknown_allowed, "unknown_sound": unknown_sound,
+            "unknown_allowed": unknown_allowed, "pairs": total,
             "rejected_input": rejected_inputs[:2], "accepted_wrong": accepted_wrong[:2], "rejected_allowed": rejected_allowed[:2]}
 
 
@@ -245,8 +251,8 @@ def _prove(src: str, contract: dict, questions: list, d: Path, only: set[int]) -
     text = src[:end] + "\n" + "\n".join(gen) + "\n" + src[end:]
     f = d / "check.dfy"
     f.write_text(text, encoding="utf-8")
-    r = subprocess.run(["dafny", "verify", "check.dfy", "--allow-warnings", "--verification-time-limit", "10",
-                        "--filter-symbol", "__"], cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+    r = subprocess.run(["dafny", "verify", "check.dfy", "--allow-warnings", "--verification-time-limit", str(TIME_LIMIT),
+                        "--filter-symbol", "__"], cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=7200)
     lines = text.splitlines()
     failed = set()
     for m in re.finditer(r"\((\d+),\d+\): Error", r.stdout):
@@ -283,11 +289,11 @@ def dafny_cases(task, solution: Path) -> list[dict]:
     return cases
 
 
-def measure(run: Path) -> list[dict]:
+def measure(run: Path, all_submitted: bool = False) -> list[dict]:
     rows = []
     for line in (run / "results.jsonl").read_text(encoding="utf-8").splitlines():
         r = json.loads(line)
-        if not r.get("accepted") or r["arm"] == "python":
+        if r["arm"] == "python" or not (r.get("accepted") or (all_submitted and r["eval"].get("submitted"))):
             continue
         task = TASKS[r["task"]]
         wd = run / "work" / Path(r["workdir"]).name
@@ -299,14 +305,23 @@ def measure(run: Path) -> list[dict]:
             row = verdict(cases)
         except Exception as e:  # noqa: BLE001 - reported: a contract we could not measure is not a sound one
             row = {"error": f"{type(e).__name__}: {e}"[:300], "sound": None, "exact": None}
-        row.update({"task": r["task"], "arm": r["arm"], "trial": r["trial"], "all_pass": r.get("all_pass")})
+        row.update({"task": r["task"], "arm": r["arm"], "trial": r["trial"], "accepted": r.get("accepted"), "all_pass": r.get("all_pass")})
         rows.append(row)
         print(json.dumps(row), flush=True)
     return rows
 
 
 if __name__ == "__main__":
-    for a in sys.argv[1:]:
-        run = Path(a)
-        rows = measure(run)
-        (run / "adequacy.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n")
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("runs", nargs="+", type=Path)
+    ap.add_argument("--max-wrong", type=int, default=MAX_WRONG, help="wrong results per input, 0 for all of them")
+    ap.add_argument("--time-limit", type=int, default=TIME_LIMIT, help="seconds per proof of a Dafny question")
+    ap.add_argument("--all-submitted", action="store_true", help="also the solutions that were not accepted")
+    ap.add_argument("--out", default="adequacy.jsonl")
+    a = ap.parse_args()
+    MAX_WRONG, TIME_LIMIT = a.max_wrong, a.time_limit
+    for run in a.runs:
+        rows = measure(run, a.all_submitted)
+        (run / a.out).write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n")

@@ -52,6 +52,8 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
     with
     | QuodError d -> Rejected(Parser.syntaxDiagnostics file src d)
     | Smt.SmtFailure message -> Failure("internal error while talking to z3: " + message, 3)
+    | :? IOException as e -> Failure("internal error while talking to z3: " + e.Message, 3)
+    | :? ObjectDisposedException as e -> Failure("internal error while talking to z3: " + e.Message, 3)
 
 let errorsOf (r: Vcgen.VerifyResult) = r.Diagnostics |> List.filter (fun d -> d.Severity = Error)
 

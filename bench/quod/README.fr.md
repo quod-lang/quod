@@ -214,7 +214,7 @@ Elle trouve les deux bugs échappés. Les trois non décidés sont des merge_int
 
 ### Les tâches tenues à l'écart
 
-Sur six tâches qui n'ont pas façonné le compilateur, avec [un protocole fixé avant les essais](../heldout.md), [72 essais](../runs/t7-heldout/report.md) n'ont trouvé aucun contrat non sain dans aucun bras : la solidité ne peut donc pas départager les bras.
+Sur six tâches qui n'ont pas façonné le compilateur, avec [un protocole fixé avant les essais](../heldout.md), [72 essais](../runs/t7-heldout/report.md) n'ont trouvé aucun contrat accepté non sain dans aucun bras. Avec un taux de base nul, **la mesure n'a pas pu départager les bras**, ce qui ne dit rien sur le contrôle, ni dans un sens ni dans l'autre :
 
 | Haiku, 18 essais par bras | quod | quod-mcp | dafny | dafny-loop |
 |---|---|---|---|---|
@@ -224,7 +224,7 @@ Sur six tâches qui n'ont pas façonné le compilateur, avec [un protocole fixé
 | Non sains | 0 | 0 | 0 | 0 |
 | Déterminés par l'outil | 15 | 11 | 4 | 8 |
 
-**Donner à Dafny le contrôle pendant l'écriture n'a rien changé à la solidité (13 contre 12), seulement à ce que l'outil détermine (8 contre 4).** Les essais ont aussi trouvé un bug de la 0.1.6 : `quod` se bloque au hasard sur un même fichier, ce qui a coûté deux acceptations aux bras Quod, et ils ont montré que les deux bugs échappés enregistrés étaient faux.
+Donner à Dafny le contrôle pendant l'écriture change ce que l'outil détermine (8 contre 4), et le nombre de contrats sains reste sous le seuil (13 contre 12 ; [recalculé](../runs/t7-heldout/report.md), 14 contre 12). Le contrôle a bien refusé un contrat réellement non sain, dans `quod-mcp`, qui n'apparaît pas parmi les acceptés. Les essais ont aussi trouvé un bug de la 0.1.6 : `quod` se bloque au hasard sur un même fichier, ce qui a coûté deux acceptations aux bras Quod, et ils ont montré que les deux bugs échappés enregistrés étaient faux.
 
 ## Ce que leur écriture a changé dans le vérificateur
 
