@@ -79,7 +79,7 @@ fn skip_right(s: string, lo: nat, j: nat) -> nat
   if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 1) } else { j }
 }
 
-// s without the ASCII white space at its two ends.
+// s without what is_space calls a space at its two ends: not \u{B} and \u{C}, nor any Unicode space.
 fn trim(s: string) -> string
   ensures result == s[skip_left(s, 0)..skip_right(s, skip_left(s, 0), len(s))]
 {

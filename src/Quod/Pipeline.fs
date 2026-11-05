@@ -152,7 +152,7 @@ let outputOf (target: Target) (file: string) =
 /// contracts are checked at run time (--runtime-checks), or why it is not built.
 let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.VerifyResult) (runtimeChecks: bool) : Result<Generated, string> =
     let errors = errorsOf r
-    let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList
+    let unproved = errors |> List.filter (fun d -> d.Kind = "proof") |> List.choose (fun d -> d.Fn) |> Set.ofList |> ContractStyle.dependents typed
     if errors |> List.exists (fun d -> d.Kind = "contract") then
         Result.Error "not built: --require-contracts refuses a contract, as said above"
     elif errors |> List.exists (fun d -> d.Kind = "completeness") then
@@ -167,6 +167,11 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
             match target with
             | Python allRequires -> Ok(CodegenPython.generateWith source view (shortNames m) allRequires)
             | CSharp options -> CodegenCSharp.generateIn source view typed (shortNames m) options
+        // a copy of a generic of another module may hold a type of this file (review of 0.3)
+        (match target with
+         | CSharp _ -> CodegenCSharp.setRootClass file (Codegen.moduleView None typed)
+         | _ -> ())
+        use _reset = { new IDisposable with member _.Dispose() = CodegenCSharp.clearRootClass () }
         one None file
         |> Result.bind (fun code ->
             let imported =

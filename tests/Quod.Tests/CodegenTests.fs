@@ -184,7 +184,7 @@ let ``Quod names that are Python keywords or builtins are renamed or protected``
         + "fn list(range: int) -> seq<int> { [range] }\n"
         + "fn all(x: int) -> bool { x == 0 }\n"
     let _, modul = compile src
-    Assert.Contains("def len2(lambda_: list[int], pass_: int) -> int:", modul)
+    Assert.Contains("def len2(lambda__q: list[int], pass__q: int) -> int:", modul)
     let out = runPython modul "print(len2([1, 2], 3), list(4), all(0), all(1))"
     Assert.Equal("5 [4] True False\n", out)
 
@@ -205,7 +205,7 @@ let ``proved contracts produce no checks; unproved ones are checked with --runti
     // the message names the function, the property and the values (first-user test of 0.1.0)
     Assert.Equal("caught: dec: postcondition `result > x` does not hold (not proved by quod: checked at run time); x = 3, result = 2\n", out)
     let _, provedCode = compile "fn inc(x: int) -> int ensures result == x + 1 { x + 1 }"
-    Assert.DoesNotContain("AssertionError", provedCode)
+    Assert.DoesNotContain("raise _quod_AssertionError", provedCode)
 
 [<Fact>]
 let ``a Python caller is held to the requires that are cheap to check`` () =

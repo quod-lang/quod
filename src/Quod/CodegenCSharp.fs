@@ -52,6 +52,14 @@ let outputFile (file: string) = pascal (IO.Path.GetFileNameWithoutExtension file
 /// What Quod code calls: never equal to a public name, a parameter or a local.
 let private implName (f: string) = "_quod_f_" + f
 
+/// The class of the file being generated, for a copy of a generic of another module that holds one of
+/// its types: `Option<Pt>` lives in `Option`, and `Pt` in the file (review of 0.3).
+let private rootClass = new System.Threading.ThreadLocal<string>(fun () -> "")
+
+/// A copy has `__` in its name, for the compiler: `Option__int` is `Option_int` to a C# reader. Should two
+/// fall on one name, the C# compiler says so.
+let private dataShort (name: string) = (shortName name).Replace("__", "_")
+
 let rec csType (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> "BigInteger"
@@ -62,8 +70,8 @@ let rec csType (t: Ty) =
     | TyData d ->
         // through its module's class, which holds it. A class named otherwise (see classNameOf) is refused.
         match Quod.Modules.split d.DataName with
-        | Some m, n -> pascal m + "." + n
-        | None, n -> n
+        | Some m, n -> pascal m + "." + n.Replace("__", "_")
+        | None, n -> (if rootClass.Value = "" then "" else rootClass.Value + ".") + n.Replace("__", "_")
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
 
@@ -679,6 +687,16 @@ let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : str
     | TyTuple ts ->
         "(" + (ts |> List.mapi (fun k c -> widen narrow c (term + ".Item" + string (k + 1)) depth) |> String.concat ", ") + ")"
 
+/// Set while the modules of a file are generated.
+let setRootClass (file: string) (view: TProgram) =
+    let methods =
+        view.Fns
+        |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate)
+        |> List.map (fun f -> let m = pascal f.Name in if view.Types |> List.exists (fun d -> dataShort d.DataName = m) then m + "Of" else m)
+    rootClass.Value <- classNameOf file methods
+
+let clearRootClass () = rootClass.Value <- ""
+
 /// The C# of a verified program, or why it cannot be generated. `checks` lists the functions whose
 /// proofs did not all pass (built only with --runtime-checks): their contracts run at run time.
 let rec generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
@@ -690,7 +708,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
     // a function `level` and a type `Level` are natural in Quod, and C# cannot hold both in a class
     let methodIn (types: DataDecl list) (name: string) =
         let m = pascal name
-        if types |> List.exists (fun d -> shortName d.DataName = m) then m + "Of" else m
+        if types |> List.exists (fun d -> dataShort d.DataName = m) then m + "Of" else m
     let methodOf = methodIn prog.Types
     let publicNames = fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> methodOf f.Name)
     let clash = fns |> List.groupBy (fun f -> methodOf f.Name) |> List.tryFind (fun (_, g) -> g.Length > 1)
@@ -714,7 +732,8 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let sb = StringBuilder()
         let indent = "        "
         for f in fns do
-            let f = if checks.Contains f.Name then f else Codegen.tailToLoop f
+            // a function checked at run time runs as written; and a run_by whose loop is checked would call itself
+            let f = if checks.Contains f.Name || (match f.RunBy with Some g -> checks.Contains g | None -> false) then f else Codegen.tailToLoop f
             let ps = f.Params |> List.map (fun p -> csType p.Ty + " " + csName p.Name) |> String.concat ", "
             let isChecked = checks.Contains f.Name
             let boundary = f.Requires |> List.filter (fun r -> match r.Kind with EBool true -> false | _ -> true)
@@ -839,7 +858,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         let dataText = StringBuilder()
         for d in prog.Types do
             let inner = if d.IsStruct then indent else indent + "    "
-            let dataName = shortName d.DataName
+            let dataName = dataShort d.DataName
             if not d.IsStruct then
                 dataText.Append(indent).Append("public abstract class ").Append(dataName).Append("\n").Append(indent).Append("{\n")
                         .Append(inner).Append("private ").Append(dataName).Append("() { }\n\n") |> ignore
@@ -875,7 +894,8 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                     match t with
                     | TySeq _ | TyData _ -> dataText.Append(i3).Append("if (").Append(param' f).Append(" == null) throw new ArgumentNullException(\"").Append(f).Append("\");\n") |> ignore
                     | _ -> ()
-                    match g.NatTest(t, param' f, options.CheckAllRequires, 0) with
+                    // what a value holds outlives the call: checked in depth, the copy goes through it anyway
+                    match g.NatTest(t, param' f, true, 0) with
                     | Some test -> dataText.Append(i3).Append("if (!").Append(test).Append(") throw new ArgumentException(").Append(literal (name + ": field " + f + " must be >= 0")).Append(");\n") |> ignore
                     | None -> ()
                 dataText.Append(i2).Append("}\n\n") |> ignore

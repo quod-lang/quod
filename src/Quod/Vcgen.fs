@@ -246,26 +246,6 @@ let private reasonText (answer: string) =
 
 // --- concrete witness search ------------------------------------------------------------
 
-/// The lengths of the lists in a value received fit in an i32.
-let rec private lengthFacts (fresh: unit -> string) (t: Ty) (term: string) : string list =
-    match t with
-    | TySeq e ->
-        let bound = "(<= (" + seqOp "len" t + " " + term + ") 2147483647)"
-        let q = fresh ()
-        match lengthFacts fresh e ("(" + seqOp "nth" t + " " + term + " " + q + ")") with
-        | [] -> [ bound ]
-        | fs -> [ bound; "(forall ((" + q + " Int)) (=> (and (<= 0 " + q + ") (< " + q + " (" + seqOp "len" t + " " + term + "))) " + conj fs + "))" ]
-    | TyTuple ts ->
-        ts |> List.mapi (fun k ct -> lengthFacts fresh ct ("(" + tupleName ts + "_" + string k + " " + term + ")")) |> List.concat
-    | TyData d ->
-        d.DataCases
-        |> List.indexed
-        |> List.collect (fun (k, c) ->
-            match c.Fields |> List.mapi (fun i (_, ft) -> lengthFacts fresh ft ("(" + selName d k i + " " + term + ")")) |> List.concat with
-            | [] -> []
-            | fs -> [ "(=> " + isCase d k term + " " + conj fs + ")" ])
-    | _ -> []
-
 /// Small values of a type, for candidate results: [], singletons, pairs of small elements.
 let rec private smallValues (t: Ty) : Eval.Value list =
     match t with
@@ -576,7 +556,6 @@ let private ifSpans (f: TFn) : Span list =
 // --- the verifier ---------------------------------------------------------------------
 
 type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) =
-    let mutable usesBounded = false
     let fns = prog.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
     let diags = ResizeArray<Diagnostic>()
     let mutable counter = 0
@@ -1346,11 +1325,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             let c = v.Const(p.Name, p.Ty)
             types.[p.Name] <- p.Ty
             ps.Add(c, p.Ty)
-            // a list received has a length that fits, in a program that speaks of bounded integers: it may
-            // convert it with to_i32. Only what is received: `xs + xs` in an assertion exists nowhere, and
-            // a fact on every term of the sort proved len(xs) <= 2^30 (review of 0.3)
-            let received = if usesBounded then lengthFacts v.FreshQ p.Ty c else []
-            st <- { st with Env = st.Env.Add(p.Name, c); Assume = ((typeFacts v.FreshQ p.Ty c @ received) |> List.rev) @ st.Assume }
+            st <- { st with Env = st.Env.Add(p.Name, c); Assume = (typeFacts v.FreshQ p.Ty c |> List.rev) @ st.Assume }
         paramsOf.[f.Name] <- List.ofSeq ps
         let checkDec = not (f.IsExprFn && f.IsRecursive) // expression functions: checked by Termination
         current <- Some { Fn = f; InitialMeasure = None; CheckDecreases = checkDec }
@@ -1402,7 +1377,6 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         // tuples and data types can hold each other: each is declared after what it holds
         let ordered = ResizeArray<Choice<Ty list, DataDecl>>()
         let rec visit (t: Ty) =
-            if isBounded t then usesBounded <- true
             match t with
             | TySeq e ->
                 visit e

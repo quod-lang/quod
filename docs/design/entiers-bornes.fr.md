@@ -39,7 +39,7 @@ fn midpoint(lo: i32, hi: i32) -> i32
 | `len(xs)` | Reste un `nat`, avec un fait nouveau : `len(xs) <= 2^31 - 1` | Il permet `to_i32(len(xs))` et un indice en `i32` |
 | Indices | Tout type entier | L'obligation d'être dans les bornes existe déjà |
 
-**Le fait sur `len` est une nouvelle hypothèse du vérificateur.** Un `list` Python peut le dépasser en théorie : la fonction publique doit alors le refuser, sinon la preuve ne vaut plus.
+**Ce fait a été abandonné.** Il a donné deux fausses preuves, posé sur tous les termes puis sur les seuls paramètres, et il est faux pour un `str` Python. `to_i32(len(xs))` demande maintenant un `requires len(xs) <= 2147483647`, écrit par qui en a besoin et contrôlé à la frontière.
 
 ## Dans le vérificateur
 

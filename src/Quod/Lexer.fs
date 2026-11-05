@@ -123,6 +123,8 @@ let tokenize (file: string) (src: string) : Token list =
             while i < src.Length && isIdentChar src.[i] do
                 advance 1
             let word = src.Substring(first, i - first)
+            if word.Contains "__" then
+                raise (syntaxError file (spanOf start (pos ())) ("'" + word + "': two underscores in a row are reserved for the compiler"))
             let kind = if keywords.Contains word then TkKeyword word else TkIdent word
             tokens.Add { Kind = kind; Span = spanOf start (pos ()) }
         else

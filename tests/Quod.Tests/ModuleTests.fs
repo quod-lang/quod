@@ -268,8 +268,8 @@ let ``a sequence does not convert`` () =
     typeError "fn f(xs: seq<i32>, ys: seq<int>) -> bool {\n  xs == ys\n}\n" "different types"
 
 [<Fact>]
-let ``a length converts, in a program with bounded integers`` () =
-    proved "fn last(xs: seq<i32>) -> i32\n  requires len(xs) >= 1\n  ensures result == xs[len(xs) - 1]\n{\n  xs[to_i32(len(xs)) - 1]\n}\n"
+let ``a length converts, with a requires that says it fits`` () =
+    proved "fn last(xs: seq<i32>) -> i32\n  requires len(xs) >= 1 && len(xs) <= 2147483647\n  ensures result == xs[len(xs) - 1]\n{\n  xs[to_i32(len(xs)) - 1]\n}\n"
 
 [<Fact>]
 let ``i32 and i64 remain possible names of variables`` () =
@@ -400,9 +400,11 @@ let private notVerified (src: string) =
 [<Fact>]
 let ``the length of a term that does not exist has no bound`` () =
     notVerified "fn wrong(xs: seq<bool>) -> bool\n  ensures !result\n{\n  let k: i32 = 0;\n  assert len(xs + xs) >= k;\n  len(xs) > 1073741823\n}\n"
-    // what it is for remains: a list received
-    proved "fn f(xs: seq<i32>) -> i32\n  ensures result == len(xs)\n{\n  to_i32(len(xs))\n}\n"
-    proved "struct B { xs: seq<i32> }\n\nfn f(b: B) -> i32\n  ensures result == len(b.xs)\n{\n  to_i32(len(b.xs))\n}\n"
+    // through a lemma, a parameter or a string: nothing is assumed of a length any more
+    notVerified "lemma fits(s: seq<bool>)\n  ensures len(s) <= 2147483647\n{\n}\n\nfn wrong(xs: seq<bool>) -> bool\n  ensures !result\n{\n  let k: i32 = 0;\n  fits(xs + xs);\n  len(xs) > 1073741824\n}\n"
+    notVerified "fn wrong(s: string) -> bool\n  ensures !result\n{\n  let k: i32 = 0;\n  len(s) > 2147483647\n}\n"
+    notVerified "fn f(xs: seq<i32>) -> i32\n  ensures result == len(xs)\n{\n  to_i32(len(xs))\n}\n"
+    proved "fn f(xs: seq<i32>) -> i32\n  requires len(xs) <= 2147483647\n  ensures result == len(xs)\n{\n  to_i32(len(xs))\n}\n"
 
 [<Fact>]
 let ``run_by cannot require more, nor call back`` () =
@@ -441,6 +443,77 @@ let ``C#: division by -1 is guarded, and a class is equal by value`` () =
                 Assert.Contains("_quod_hash(_f0", g.Code)
                 Assert.Contains("public R Match<R>(Func<R> onA, Func<int, R> onC)", g.Code)
                 Assert.Contains("new _QuodView<int, int>(_f0", g.Code)
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+
+// --- what the second review of 0.3 found ---------------------------------------------------------------
+
+let private pythonOf (src: string) (run: string) (runtimeChecks: bool) : string =
+    let mutable out = ""
+    withFiles [ "main", src ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r runtimeChecks with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                File.WriteAllText(Path.Combine(dir, "main.py"), g.Code)
+                for m, text in g.Imported do File.WriteAllText(Path.Combine(dir, m + ".py"), text)
+                let psi = Diagnostics.ProcessStartInfo("python", "-c \"" + run + "\"")
+                psi.WorkingDirectory <- dir
+                psi.RedirectStandardOutput <- true
+                psi.RedirectStandardError <- true
+                psi.UseShellExecute <- false
+                use p = Diagnostics.Process.Start psi
+                out <- p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd()
+                p.WaitForExit()
+        | other -> failwithf "%A" other)
+    out.Replace("\r\n", "\n").Trim()
+
+[<Fact>]
+let ``two underscores are reserved, so a function cannot capture a copy`` () =
+    rejectedWith "reserved for the compiler" "main.quod" [ "main", "fn id__int(x: int) -> int\n  ensures result == x + 1\n{\n  x + 1\n}\n" ]
+
+[<Fact>]
+let ``two copies of a generic never share a name`` () =
+    proved "enum R<T, E> { Good(T), Bad(E) }\n\nstruct int_int { x: int }\n\nfn a() -> R<int, int_int>\n  ensures result == Good(5)\n{\n  Good(5)\n}\n\nfn b() -> R<int_int, int>\n  ensures result == Bad(5)\n{\n  Bad(5)\n}\n"
+    typeError "enum R<T, E> { Good(T), Bad(E) }\n\nstruct int_int { x: int }\n\nfn b() -> R<int_int, int> {\n  Good(5)\n}\n" "expected"
+
+[<Fact>]
+let ``a function named like a builtin does not change the generated Python`` () =
+    let src = "fn divmod(a: int, b: int) -> (int, int)\n  ensures result == (0, 0)\n{\n  (0, 0)\n}\n\nfn ord(c: char) -> int\n  ensures result == 0\n{\n  0\n}\n\nfn chr(c: int) -> int\n  ensures result == 0\n{\n  0\n}\n\nfn half(n: int) -> int\n  ensures result == n / 2\n{\n  n / 2\n}\n\nfn code_of(c: char) -> int\n  ensures result == code(c)\n{\n  code(c)\n}\n"
+    Assert.Equal("3 97", pythonOf src "import main; print(main.half(7), main.code_of('a'))" false)
+
+[<Fact>]
+let ``a reserved word in Python cannot meet another name`` () =
+    Assert.Equal("1", pythonOf "fn f() -> int\n  ensures result == 1\n{\n  let class = 3;\n  let class_ = 2;\n  class - class_\n}\n" "import main; print(main.f())" false)
+
+[<Fact>]
+let ``a struct checks what it holds, in depth`` () =
+    let src = "struct Bag { xs: seq<nat>, ys: seq<i32> }\n\nfn f(b: Bag) -> int\n  ensures result == len(b.xs)\n{\n  len(b.xs)\n}\n"
+    Assert.Contains("out of the bounds", pythonOf src "import main\ntry:\n  main.Bag([-5], [])\nexcept ValueError as e: print(e)" false)
+    Assert.Contains("out of the bounds", pythonOf src "import main\ntry:\n  main.Bag([], [2**40])\nexcept ValueError as e: print(e)" false)
+
+[<Fact>]
+let ``with runtime checks, what relies on an unproved function is checked too`` () =
+    let src = "fn dec(n: nat) -> nat {\n  n - 1\n}\n\nfn wrong(x: int) -> int\n  ensures result == x + 1\n{\n  assert dec(0) == 0;\n  x\n}\n"
+    Assert.Contains("Error", pythonOf src "import main; print(main.wrong(5))" true)
+
+[<Fact>]
+let ``run_by with runtime checks does not loop`` () =
+    let src = "fn f(x: int) -> int\n  run_by g\n{\n  x\n}\n\nfn g(x: int) -> int\n  ensures result == f(x)\n{\n  x + 1\n}\n"
+    let out = pythonOf src "import main; print(main.f(1))" true
+    Assert.DoesNotContain("RecursionError", out)
+
+[<Fact>]
+let ``csharp: a copy of a generic can hold a type of the file`` () =
+    withFiles [ "main", "import option\n\nstruct Pt { x: i32 }\n\nfn f(p: Pt) -> option.Option<Pt>\n  ensures result == option.Some(p)\n{\n  option.Some(p)\n}\n" ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Ok g ->
+                let text = g.Imported |> List.find (fun (m, _) -> m = "option") |> snd
+                Assert.Contains("Main.Pt", text)
+                Assert.Contains("public abstract class Option_Pt", text)
             | Result.Error why -> failwith why
         | other -> failwithf "%A" other)
 

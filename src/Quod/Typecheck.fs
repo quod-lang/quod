@@ -36,13 +36,14 @@ let rec private alwaysReturns (stmts: TStmt list) : bool =
         | SIf(_, t, e) -> alwaysReturns t && alwaysReturns e
         | _ -> false)
 
-/// The name of a copy of a generic, from the types it is for: `Option_int`, `first__seq_int`.
+/// The name of a copy of a generic, from the types it is for: `Option__int`, `first__seq__int`. No Quod
+/// name holds `__`, and the number of arguments of each generic is fixed, so two types never share one.
 let rec private tySuffix (t: Ty) =
     match t with
     | TySeq TyChar -> "string"
-    | TySeq e -> "seq_" + tySuffix e
-    | TyTuple ts -> "tuple_" + (ts |> List.map tySuffix |> String.concat "_")
-    | TyData d -> d.DataName.Replace('.', '_')
+    | TySeq e -> "seq__" + tySuffix e
+    | TyTuple ts -> "tuple" + string ts.Length + "__" + (ts |> List.map tySuffix |> String.concat "__")
+    | TyData d -> d.DataName.Replace(".", "__")
     | t -> tyText t
 
 /// A resolved type back as syntax, to put it where a type parameter was.
@@ -203,7 +204,7 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
                 TyError
             else
                 let tys = args |> List.map (fun a -> c.TyWithin(a, within))
-                let name = n + "_" + (tys |> List.map tySuffix |> String.concat "_")
+                let name = n + "__" + (tys |> List.map tySuffix |> String.concat "__")
                 if not (declared.ContainsKey name) then
                     let env = List.zip d.Generics (tys |> List.map typeExprOf) |> Map.ofList
                     declared <-

@@ -15,7 +15,8 @@ let private reserved =
           "if"; "import"; "in"; "is"; "lambda"; "nonlocal"; "not"; "or"; "pass"; "raise"
           "return"; "try"; "while"; "with"; "yield"; "match"; "case"; "type"; "_" ]
 
-let pyName (n: string) = if reserved.Contains n || n.StartsWith "_quod_" then n + "_" else n
+/// `__` is not in a Quod name, so this cannot be the name of something else: `class_` can be (review of 0.3).
+let pyName (n: string) = if reserved.Contains n || n.StartsWith "_quod_" then n + "__q" else n
 
 let rec private pyType (t: Ty) =
     match t with
@@ -30,6 +31,17 @@ let rec private pyType (t: Ty) =
 /// variable named `len`, `all`, `range`... can never shadow what the generated code relies on.
 let private prelude =
     """_quod_len = len
+_quod_type = type
+_quod_string = str
+_quod_repr = repr
+_quod_object = object
+_quod_chr = chr
+_quod_ord = ord
+_quod_builtin_divmod = divmod
+_quod_ValueError = ValueError
+_quod_IndexError = IndexError
+_quod_TypeError = TypeError
+_quod_AssertionError = AssertionError
 _quod_all = all
 _quod_any = any
 _quod_range = range
@@ -40,13 +52,13 @@ _quod_tuple = tuple
 def _quod_seq(xs):
     # A sequence argument as a list: as it is when it already is one (generated code never
     # mutates an argument, so no copy is needed), converted when it is a tuple or a range.
-    return xs if type(xs) is list else _quod_list(xs)
+    return xs if _quod_type(xs) is _quod_list else _quod_list(xs)
 
 
 def _quod_divmod(a: int, b: int) -> tuple[int, int]:
     # Euclidean division (as in Quod and SMT-LIB): the remainder is always >= 0.
     # Python's divmod floors, which differs when the divisor is negative.
-    q, r = divmod(a, b)
+    q, r = _quod_builtin_divmod(a, b)
     if r < 0:
         q, r = q + 1, r - b
     return q, r
@@ -64,13 +76,13 @@ def _quod_mod(a: int, b: int) -> int:
 # clamp a slice, where Quod (whose proofs did not all pass) requires the bounds.
 def _quod_at(xs, i: int):
     if not 0 <= i < _quod_len(xs):
-        raise IndexError("index " + str(i) + " out of bounds (not proved: checked at run time)")
+        raise _quod_IndexError("index " + _quod_string(i) + " out of bounds (not proved: checked at run time)")
     return xs[i]
 
 
 def _quod_slice(xs, lo: int, hi: int):
     if not 0 <= lo <= hi <= _quod_len(xs):
-        raise IndexError("slice " + str(lo) + ".." + str(hi) + " out of bounds (not proved: checked at run time)")
+        raise _quod_IndexError("slice " + _quod_string(lo) + ".." + _quod_string(hi) + " out of bounds (not proved: checked at run time)")
     return xs[lo:hi]
 """
 
@@ -80,17 +92,17 @@ let private textPrelude =
     """
 
 def _quod_str(s):
-    if type(s) is not str:
-        raise TypeError("a string is expected, not " + type(s).__name__)
+    if _quod_type(s) is not _quod_string:
+        raise _quod_TypeError("a string is expected, not " + _quod_type(s).__name__)
     for c in s:
         if "\ud800" <= c <= "\udfff":
-            raise ValueError("a lone surrogate is not a character")
+            raise _quod_ValueError("a lone surrogate is not a character")
     return s
 
 
 def _quod_char(c):
-    if type(c) is not str or _quod_len(c) != 1:
-        raise TypeError("one character is expected")
+    if _quod_type(c) is not _quod_string or _quod_len(c) != 1:
+        raise _quod_TypeError("one character is expected")
     return _quod_str(c)
 """
 
@@ -180,7 +192,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
                 let rec chain (xs: (int * string list * TExpr) list) =
                     match xs with
                     | [ x ] -> arm x
-                    | ((k, _, _) as x) :: rest -> "(" + arm x + " if type(" + m + ") is " + qualified d (caseClass d k) + " else " + chain rest + ")"
+                    | ((k, _, _) as x) :: rest -> "(" + arm x + " if _quod_type(" + m + ") is " + qualified d (caseClass d k) + " else " + chain rest + ")"
                     | [] -> failwith "a match without a case"
                 "(lambda " + m + ": " + chain arms + ")(" + go s + ")"
             | _ -> failwith "a match on no data type"
@@ -212,7 +224,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
             f + "(" + go body + " for " + pyName v + " in _quod_range(" + go lo + ", " + go hi + "))"
         | EToNat x -> go x
         | EConvert x when isBounded e.Ty -> go x
-        | EConvert x -> (if e.Ty = TyChar then "chr(" else "ord(") + go x + ")"
+        | EConvert x -> (if e.Ty = TyChar then "_quod_chr(" else "_quod_ord(") + go x + ")"
 
     /// An argument from Python as the generated code expects it: sequences as lists, tuples as
     /// tuples. A list of numbers or booleans is taken as it is (O(1)); a sequence of tuples or of
@@ -263,12 +275,12 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         let values =
             (f.Params |> List.map (fun p -> p.Name, pyName p.Name))
             @ (if what = "postcondition" then [ "result", "_quod_result" ] else [])
-            |> List.mapi (fun k (n, py) -> literal ((if k = 0 then "; " else ", ") + n + " = ") + " + repr(" + py + ")")
+            |> List.mapi (fun k (n, py) -> literal ((if k = 0 then "; " else ", ") + n + " = ") + " + _quod_repr(" + py + ")")
         let message =
             literal (f.Name + ": " + what + " `" + Printer.exprText (toSyntax e) + "` does not hold (not proved by quod: checked at run time)")
             :: values
         sb.Append(indent).Append("if not ").Append(g.Expr e).Append(":\n")
-          .Append(indent).Append("    raise AssertionError(").Append(String.Join(" + ", message)).Append(")\n") |> ignore
+          .Append(indent).Append("    raise _quod_AssertionError(").Append(String.Join(" + ", message)).Append(")\n") |> ignore
 
     member g.Stmt(sb: StringBuilder, indent: string, s: TStmt, f: TFn) =
         let line (text: string) = sb.Append(indent).Append(text).Append('\n') |> ignore
@@ -303,7 +315,8 @@ type private Gen(checks: Set<string>, local: Set<string>) =
     /// Two definitions: the public `def name`, which normalizes its arguments once and calls the
     /// implementation `_quod_f_name`, the one Quod code calls (recursion included).
     member g.Function(sb: StringBuilder, f: TFn, allRequires: bool) =
-        let f = if checks.Contains f.Name then f else Codegen.tailToLoop f
+        // a function checked at run time runs as written; and a run_by whose loop is checked would call itself
+        let f = if checks.Contains f.Name || (match f.RunBy with Some g -> checks.Contains g | None -> false) then f else Codegen.tailToLoop f
         checking <- checks.Contains f.Name
         let ps = f.Params |> List.map (fun p -> pyName p.Name + ": " + pyType p.Ty) |> String.concat ", "
         // a private function has only its implementation: code of its own module calls that
@@ -317,6 +330,8 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         for r in enforced do doc.Add("requires " + Printer.exprText (toSyntax r) + " (checked)")
         for r in left do doc.Add("NOT CHECKED, the caller's duty: requires " + Printer.exprText (toSyntax r))
         if not allRequires then
+            for p in f.Params |> List.filter (fun p -> Codegen.boundInList p.Ty) do
+                doc.Add("NOT CHECKED, the caller's duty: every integer of " + p.Name + " fits its type")
             for p in f.Params |> List.filter (fun p -> Codegen.natInList p.Ty) do
                 doc.Add("NOT CHECKED, the caller's duty: every integer of " + p.Name + " is >= 0")
         for e in f.Ensures do doc.Add("ensures " + Printer.exprText (toSyntax e))
@@ -330,12 +345,12 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         for p in f.Params do
             match g.NatTest(p.Ty, pyName p.Name, allRequires, 0) with
             | Some test ->
-                sb.Append("    if not ").Append(test).Append(":\n        raise ValueError(\"")
-                  .Append(f.Name + ": argument " + p.Name + (if isBounded p.Ty then " must fit in " + tyText p.Ty else " must be >= 0")).Append("\")\n") |> ignore
+                sb.Append("    if not ").Append(test).Append(":\n        raise _quod_ValueError(\"")
+                  .Append(f.Name + ": argument " + p.Name + (if isBounded p.Ty then " must fit in " + tyText p.Ty elif Codegen.boundInList p.Ty then " is out of the bounds of its type" else " must be >= 0")).Append("\")\n") |> ignore
             | None -> ()
         for r in enforced do
             let negated = match r.Kind with ENot x -> g.Expr x | _ -> "not " + g.Expr r
-            sb.Append("    if ").Append(negated).Append(":\n        raise ValueError(")
+            sb.Append("    if ").Append(negated).Append(":\n        raise _quod_ValueError(")
               .Append("\"" + (f.Name + ": requires " + Printer.exprText (toSyntax r)).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"").Append(")\n") |> ignore
         let args = f.Params |> List.map (fun p -> g.Normalize(p.Ty, pyName p.Name)) |> String.concat ", "
         sb.Append("    return ").Append(implName f.Name).Append("(").Append(args).Append(")\n\n\n") |> ignore
@@ -385,7 +400,7 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
        || prog.Types |> List.exists (fun d -> hasChar (TyData d)) then
         sb.Append(textPrelude) |> ignore
     if not prog.Types.IsEmpty then
-        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n\n\ndef _quod_frozen(x):\n    if type(x) is list:\n        return [_quod_frozen(y) for y in x]\n    if type(x) is tuple:\n        return _quod_tuple(_quod_frozen(y) for y in x)\n    return x\n") |> ignore
+        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n\n\ndef _quod_frozen(x):\n    if _quod_type(x) is _quod_list:\n        return [_quod_frozen(y) for y in x]\n    if _quod_type(x) is _quod_tuple:\n        return _quod_tuple(_quod_frozen(y) for y in x)\n    return x\n") |> ignore
         let dataGen = Gen(checks, local)
         for d in prog.Types do
             if not d.IsStruct then
@@ -400,14 +415,15 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
                 let checks' =
                     [ for name, t in c.Fields do
                           let term = "self." + pyName name
-                          match dataGen.NatTest(t, term, false, 0) with
-                          | Some test -> yield "        if not " + test + ":\n            raise ValueError(\"" + c.CaseName + ": field " + name + " is out of the bounds of its type\")\n"
+                          // what a value holds outlives the call, and it is read through anyway: checked in depth
+                          match dataGen.NatTest(t, term, true, 0) with
+                          | Some test -> yield "        if not " + test + ":\n            raise _quod_ValueError(\"" + c.CaseName + ": field " + name + " is out of the bounds of its type\")\n"
                           | None -> ()
                           match t with
                           | TyChar | TySeq _ | TyTuple _ ->
                               // a copy: the caller's list must not change this value afterwards
                               let held = match t with TySeq TyChar | TyChar -> dataGen.Normalize(t, term) | _ -> "_quod_frozen(" + dataGen.Normalize(t, term) + ")"
-                              yield "        object.__setattr__(self, \"" + pyName name + "\", " + held + ")\n"
+                              yield "        _quod_object.__setattr__(self, \"" + pyName name + "\", " + held + ")\n"
                           | _ -> () ]
                 if not checks'.IsEmpty then
                     sb.Append("\n    def __post_init__(self):\n") |> ignore

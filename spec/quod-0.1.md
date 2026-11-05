@@ -142,8 +142,8 @@ fn decide(f: Field, threshold: i32) -> Decision
 - **Generics:** `enum Option<T>`, `fn first<T>(xs: seq<T>) -> option.Option<T>`. Each use makes a copy for its types, which is checked and proved like any function: **a generic function is proved only for the types it is used with.** Types come from the arguments or from what is expected; if neither says, give a variable its type. There are no constraints on `T`.
 - `import option` gives `Option<T>` (`None`, `Some`) and `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
 - **Across modules:** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. In a `match`, the type is known, so a case is written by its short name: `Some(x)`.
-- **In Python,** frozen dataclasses, which check what their fields' types promise when they are built; a copy of a generic has names of its own, such as `Option_int_Some`.
-- **In C#,** immutable classes equal by value (`IEquatable<T>`, `==`, and a hash on what they hold), which copy the lists they are given and hand out views that cannot be cast back. An enum has a `Match` method with one function per case, which gives the caller the exhaustiveness of `match`. Nested in the class of the module: `Rules.Field`, and for an enum an abstract class with a sealed class per case: `Rules.Decision.Accepted`, whose fields are `Value`, or `F0`, `F1` if they have no name. A copy of a generic is a class of its own, `Option.Option_int`, and not a C# generic. A function whose name would be that of a type gets `Of`: `level` next to `Level` is `LevelOf`.
+- **In Python,** frozen dataclasses, which check what their fields' types promise when they are built; a copy of a generic has names of its own, such as `Option__int_Some`.
+- **In C#,** immutable classes equal by value (`IEquatable<T>`, `==`, and a hash on what they hold), which copy the lists they are given and hand out views that cannot be cast back. An enum has a `Match` method with one function per case, which gives the caller the exhaustiveness of `match`. Nested in the class of the module: `Rules.Field`, and for an enum an abstract class with a sealed class per case: `Rules.Decision.Accepted`, whose fields are `Value`, or `F0`, `F1` if they have no name. Two underscores in a row are reserved for the compiler. A copy of a generic is a class of its own, `Option.Option_int`, and not a C# generic. A function whose name would be that of a type gets `Of`: `level` next to `Level` is `LevelOf`.
 
 ### Bounded integers
 
@@ -162,10 +162,10 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **In contracts, invariants and assertions, arithmetic is mathematical:** `ensures result == a + b` means what it says, and cannot overflow.
 - **What widens is implicit and exact:** `i32` to `i64`, to `int`. What narrows is written, and must be proved: `to_i32(x)`, `to_i64(x)`. A literal takes the type its context wants, if it fits.
 - Under a sequence or a tuple there is no conversion: a `seq<i32>` is not a `seq<int>`.
-- An operation between a bounded integer and an `int` or a `nat` is in `int`. `len(xs)` stays a `nat`. In a program that uses bounded integers, a list a function **receives** has a length of at most 2^31 - 1, so `to_i32(len(xs))` can be proved on a parameter; a list built in the function has no such fact.
+- An operation between a bounded integer and an `int` or a `nat` is in `int`. `len(xs)` stays a `nat`, with no bound: `to_i32(len(xs))` needs `requires len(xs) <= 2147483647`, which is checked at the public boundary.
 - **For C#, prefer `i32` and `i64`.** Quod's `int` and `nat` are mathematical integers, which C# can only hold in a `BigInteger`: `int` in Quod is not `int` in C#. `i32` is C#'s `int` and `i64` its `long`.
 - `/` and `%` are Euclidean, as for `int`, in every backend.
-- In Python, a parameter is checked against its bounds at the public boundary; the elements of a list only with `--check-requires all`. In C#, they are `int` and `long`.
+- In Python, a parameter is checked against its bounds at the public boundary; the elements of a list only with `--check-requires all`, which the docstring says. In C#, they are `int` and `long`. A struct or a case checks all it holds when it is built, in depth.
 
 ### Characters and strings
 

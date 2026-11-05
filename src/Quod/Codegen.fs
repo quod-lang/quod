@@ -58,6 +58,19 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
     walk body
     candidates |> Seq.filter (fun n -> not (shared.Contains n)) |> Set.ofSeq
 
+/// Does this type hold a bounded integer under a sequence? Python does not check it by default.
+let rec boundInList (t: Ty) =
+    let rec bound t =
+        match t with
+        | TyI32 | TyI64 -> true
+        | TySeq e -> bound e
+        | TyTuple ts -> List.exists bound ts
+        | _ -> false
+    match t with
+    | TySeq e -> bound e
+    | TyTuple ts -> List.exists boundInList ts
+    | _ -> false
+
 /// Does this type hold a `nat` under a sequence, whose check costs a pass over it?
 let rec natInList (t: Ty) =
     let rec hasNat t =

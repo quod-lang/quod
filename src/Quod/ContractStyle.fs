@@ -228,6 +228,20 @@ let rec private callsIn (items: TStmt list) : string list =
         | SIf(c, a, b) -> calls c @ callsIn a @ callsIn b
         | SWhile(c, invs, _, b) -> calls c @ List.collect calls invs @ callsIn b)
 
+/// Every function that uses one of these, directly or not, in its code or in its contract: a proof that
+/// rests on a function not proved is not one, so with --runtime-checks it is checked too.
+let dependents (prog: TProgram) (unproved: Set<string>) : Set<string> =
+    let uses (f: TFn) =
+        (f.Requires @ f.Ensures @ Option.toList f.Decreases |> List.collect calls)
+        @ Option.toList f.RunBy
+        @ (match f.Body with
+           | TExprBody e -> calls e
+           | TStmtBody items -> callsIn items)
+    let rec grow (known: Set<string>) =
+        let more = prog.Fns |> List.filter (fun f -> not (known.Contains f.Name) && uses f |> List.exists known.Contains) |> List.map (fun f -> f.Name)
+        if more.IsEmpty then known else grow (Set.union known (Set.ofList more))
+    grow unproved
+
 /// What must be refused before any proof. A `run_by` function that reaches the function it runs for
 /// would loop for ever, though each is proved. A contract that speaks of its own function says nothing
 /// of it, and the solver's definition of it would loop.

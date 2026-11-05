@@ -145,8 +145,8 @@ fn decide(f: Field, threshold: i32) -> Decision
 - **Génériques :** `enum Option<T>`, `fn first<T>(xs: seq<T>) -> option.Option<T>`. Chaque usage fait une copie pour ses types, vérifiée et prouvée comme toute fonction : **une fonction générique n'est prouvée que pour les types où elle sert.** Les types viennent des arguments ou de ce qui est attendu ; si rien ne les dit, donnez son type à une variable. `T` n'a pas de contrainte.
 - `import option` donne `Option<T>` (`None`, `Some`) et `Result<T, E>` (`Ok`, `Err`), `is_some`, `value_or`, `is_ok`.
 - **Entre modules :** `fields.Candidate`, `fields.Candidate("a", 1)`, `option.None`. Dans un `match`, le type est connu, donc un cas s'écrit par son nom court : `Some(x)`.
-- **En Python,** des `dataclass` figées, qui contrôlent ce que les types de leurs champs promettent à leur construction ; une copie de générique a ses propres noms, comme `Option_int_Some`.
-- **En C#,** des classes immuables égales par valeur (`IEquatable<T>`, `==`, et un hachage sur ce qu'elles contiennent), qui copient les listes reçues et exposent des vues non convertibles. Un `enum` a une méthode `Match` avec une fonction par cas, qui donne à l'appelant l'exhaustivité de `match`. Imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `Value`, ou `F0`, `F1` s'ils n'ont pas de nom. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
+- **En Python,** des `dataclass` figées, qui contrôlent ce que les types de leurs champs promettent à leur construction ; une copie de générique a ses propres noms, comme `Option__int_Some`.
+- **En C#,** des classes immuables égales par valeur (`IEquatable<T>`, `==`, et un hachage sur ce qu'elles contiennent), qui copient les listes reçues et exposent des vues non convertibles. Un `enum` a une méthode `Match` avec une fonction par cas, qui donne à l'appelant l'exhaustivité de `match`. Imbriquées dans la classe du module : `Rules.Field`, et pour un `enum` une classe abstraite avec une classe `sealed` par cas : `Rules.Decision.Accepted`, dont les champs sont `Value`, ou `F0`, `F1` s'ils n'ont pas de nom. Deux soulignés de suite sont réservés au compilateur. Une copie de générique est une classe à part, `Option.Option_int`, et non un générique C#. Une fonction dont le nom serait celui d'un type reçoit `Of` : `level` à côté de `Level` donne `LevelOf`.
 
 ### Entiers bornés
 
@@ -165,10 +165,10 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **Dans les contrats, les invariants et les assertions, le calcul est mathématique :** `ensures result == a + b` dit ce qu'il dit, sans débordement possible.
 - **Ce qui élargit est implicite et exact :** `i32` vers `i64`, vers `int`. Ce qui rétrécit s'écrit, et doit être prouvé : `to_i32(x)`, `to_i64(x)`. Un littéral prend le type que son contexte attend, s'il tient.
 - Sous une séquence ou un tuple, il n'y a pas de conversion : une `seq<i32>` n'est pas une `seq<int>`.
-- Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat`. Dans un programme qui utilise des entiers bornés, une liste qu'une fonction **reçoit** a une longueur d'au plus 2^31 - 1, donc `to_i32(len(xs))` peut se prouver sur un paramètre ; une liste construite dans la fonction n'a pas ce fait.
+- Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat`, sans borne : `to_i32(len(xs))` demande `requires len(xs) <= 2147483647`, contrôlé à la frontière publique.
 - **Pour C#, préférez `i32` et `i64`.** Le `int` et le `nat` de Quod sont des entiers mathématiques, que C# ne peut tenir que dans un `BigInteger` : `int` en Quod n'est pas `int` en C#. `i32` est le `int` de C#, et `i64` son `long`.
 - `/` et `%` sont euclidiens, comme pour `int`, dans tous les backends.
-- En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`. En C#, ce sont des `int` et des `long`.
+- En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`, ce que dit la docstring. En C#, ce sont des `int` et des `long`. Un `struct` ou un cas contrôle tout ce qu'il contient à sa construction, en profondeur.
 
 ### Caractères et chaînes
 
