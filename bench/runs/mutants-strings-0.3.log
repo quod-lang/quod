@@ -1,32 +1,32 @@
 refuted      1.9s  strings: line 196: (len(s) >= 1 && all_digits(s)) || (len(s) >= 2 && s[0] == '-' && all_digits(s[1..]))  ->  (len(s) >= 0 && all_digits(s)) || (len(s) >= 2 && s[0] == '-' && all_digits(s[1..]))
 refuted      1.9s  strings: line 19: ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')  ->  ('a' <= c && c <= 'z') || ('A' <= c && c < 'Z')
 refuted      1.9s  strings: line 25: len(p) <= len(s) && s[..len(p)] == p  ->  len(p) < len(s) && s[..len(p)] == p
-refuted      1.6s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 0] } }
+refuted      1.5s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 0] } }
 refuted      1.9s  strings: line 13: c == ' ' || c == '\t' || c == '\n' || c == '\r'  ->  c == ' ' || c == '\t' || c == '\n' || c != '\r'
 refuted      1.9s  strings: line 190: if n == 0 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }  ->  if n == 0 { 0 } else { 10 * digits_value(s, n - 0) + (code(s[n - 1]) - 48) }
 refuted      1.9s  strings: line 13: c == ' ' || c == '\t' || c == '\n' || c == '\r'  ->  c == ' ' || c != '\t' || c == '\n' || c == '\r'
 refuted      1.9s  strings: line 13: c == ' ' || c == '\t' || c == '\n' || c == '\r'  ->  c == ' ' || c == '\t' || c != '\n' || c == '\r'
 refuted      1.9s  strings: line 190: if n == 0 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }  ->  if n != 0 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }
-refuted      1.9s  strings: line 59: -1  ->  -0
+refuted      2.1s  strings: line 59: -1  ->  -0
 refuted      1.9s  strings: line 79: if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 1) } else { j }  ->  if lo < j && is_space(s[j - 2]) { skip_right(s, lo, j - 1) } else { j }
-refuted     22.0s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n != 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }
+refuted     22.1s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n != 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }
 refuted      1.9s  strings: line 25: len(p) <= len(s) && s[..len(p)] == p  ->  len(p) <= len(s) || s[..len(p)] == p
 refuted      1.9s  strings: line 31: len(p) <= len(s) && s[len(s) - len(p)..] == p  ->  len(p) <= len(s) && s[len(s) - len(p)..] != p
-refuted     22.1s  strings: line 115: i = i + 1;  ->  i = i - 1;
+refuted     22.0s  strings: line 115: i = i + 1;  ->  i = i - 1;
 refuted      1.7s  strings: line 154: let mut i: nat = 0;  ->  let mut i: nat = 1;
 refuted     11.7s  strings: line 128: if i == len(s) || s[i] == sep { i } else { next_sep(s, sep, i + 1) }  ->  if i == len(s) || s[i] == sep { i } else { next_sep(s, sep, i - 1) }
 refuted      1.9s  strings: line 218: if n >= 0 { digits_of(n) } else { "-" + digits_of(-n) }  ->  if n > 0 { digits_of(n) } else { "-" + digits_of(-n) }
 refuted      1.9s  strings: line 31: len(p) <= len(s) && s[len(s) - len(p)..] == p  ->  len(p) < len(s) && s[len(s) - len(p)..] == p
 refuted     12.1s  strings: line 175: i == len(s) || (is_digit(s[i]) && digits_from(s, i + 1))  ->  i == len(s) || (is_digit(s[i]) && digits_from(s, i - 1))
 refuted      1.9s  strings: line 7: '0' <= c && c <= '9'  ->  '0' < c && c <= '9'
-refuted      1.8s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 2] } }
+refuted      1.6s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 2] } }
 refuted      1.9s  strings: line 7: '0' <= c && c <= '9'  ->  '0' <= c || c <= '9'
 refuted      1.9s  strings: line 190: if n == 0 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }  ->  if n == 1 { 0 } else { 10 * digits_value(s, n - 1) + (code(s[n - 1]) - 48) }
 refuted     22.1s  strings: line 94: if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 1) + sep + xs[n - 1] } }  ->  if n == 0 { "" } else { if n == 1 { xs[0] } else { join_upto(xs, sep, n - 0) + sep + xs[n - 1] } }
 refuted      1.9s  strings: line 19: ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')  ->  ('a' <= c && c <= 'z') || ('A' <= c || c <= 'Z')
 refuted      1.5s  strings: line 128: if i == len(s) || s[i] == sep { i } else { next_sep(s, sep, i + 1) }  ->  if i == len(s) || s[i] == sep { i } else { next_sep(s, sep, i + 0) }
 refuted      1.9s  strings: line 181: digits_from(s, 0)  ->  digits_from(s, 1)
-refuted      1.9s  strings: line 48: let mut i: nat = 0;  ->  let mut i: nat = 1;
+refuted      2.0s  strings: line 48: let mut i: nat = 0;  ->  let mut i: nat = 1;
 refuted      1.9s  strings: line 175: i == len(s) || (is_digit(s[i]) && digits_from(s, i + 1))  ->  i != len(s) || (is_digit(s[i]) && digits_from(s, i + 1))
 no hint     12.1s  strings: line 196: (len(s) >= 1 && all_digits(s)) || (len(s) >= 2 && s[0] == '-' && all_digits(s[1..]))  ->  (len(s) >= 1 && all_digits(s)) || (len(s) > 2 && s[0] == '-' && all_digits(s[1..]))
 refuted     12.5s  strings: line 69: if i < len(s) && is_space(s[i]) { skip_left(s, i + 1) } else { i }  ->  if i < len(s) && is_space(s[i]) { skip_left(s, i - 1) } else { i }
@@ -36,8 +36,8 @@ refuted      1.9s  strings: line 86: s[skip_left(s, 0)..skip_right(s, skip_left(
 refuted      3.6s  strings: line 175: i == len(s) || (is_digit(s[i]) && digits_from(s, i + 1))  ->  i == len(s) || (is_digit(s[i]) && digits_from(s, i + 0))
 refuted      1.9s  strings: line 38: i + len(p) <= len(s) && s[i..i + len(p)] == p  ->  i + len(p) < len(s) && s[i..i + len(p)] == p
 refuted      1.9s  strings: line 69: if i < len(s) && is_space(s[i]) { skip_left(s, i + 1) } else { i }  ->  if i < len(s) && is_space(s[i]) { skip_left(s, i + 2) } else { i }
-refuted      2.0s  strings: line 109: while i < len(xs)  ->  while i <= len(xs)
-refuted      2.0s  strings: line 79: if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 1) } else { j }  ->  if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 0) } else { j }
+refuted      1.9s  strings: line 109: while i < len(xs)  ->  while i <= len(xs)
+refuted      1.9s  strings: line 79: if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 1) } else { j }  ->  if lo < j && is_space(s[j - 1]) { skip_right(s, lo, j - 0) } else { j }
 
 40 mutants (0 invalid ones left out): 39 refuted with a counterexample, 0 with an unconfirmed counterexample, 1 rejected without a hint, 0 survived, 0 hung
 time to reject: median 1.9s, max 22.1s
