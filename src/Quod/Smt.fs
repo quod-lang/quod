@@ -157,8 +157,11 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
     /// (lazily, so that the model of the retry can still be read).
     let mutable dirty = false
 
+    /// --smt-log: everything sent to this z3, whichever path it takes. A replay of less is not
+    /// the same session. Answers and replacements are comments, which z3 ignores.
     let raw (command: string) =
         if cancelled then raise (SmtFailure "cancelled")
+        log |> Option.iter (fun w -> w.WriteLine command)
         input.WriteLine command
 
     let replayFrames () =
@@ -179,6 +182,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
     /// for many minutes (a mutant of rle_encode ran over 15). Past twice the limit plus 5 s, the
     /// process is replaced by a fresh one holding the same context, and the answer is a timeout.
     let replaceProcess (pendingRead: Threading.Tasks.Task) =
+        log |> Option.iter (fun w -> w.WriteLine "; z3 replaced: what follows goes to a new process")
         (try proc.Kill true with _ -> ())
         (try pendingRead.Wait 2000 |> ignore with _ -> ())
         proc.Dispose()
@@ -238,6 +242,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
                 let r = readAnswer ()
                 Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
             | other -> raise (SmtFailure("unexpected answer from z3: " + other))
+        log |> Option.iter (fun w -> w.WriteLine("; answer: " + (match result with Sat -> "sat" | Unsat -> "unsat" | Unknown why -> "unknown " + why)))
         timedOut <- (result = Unknown "timeout")
         // A z3 interrupted by its time limit is not asked anything again: on the same file, about
         // 1 build in 200 got "unsat" for a satisfiable question a few checks after such a stop, in
@@ -249,7 +254,6 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
 
     member _.Send(command: string) =
         restore ()
-        log |> Option.iter (fun w -> w.WriteLine command)
         frames.[frames.Count - 1].Add command
         raw command
 
@@ -276,26 +280,24 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
     /// A second z3 process with the same settings and an empty context (Init done): for a query
     /// that must not see the axioms of the program.
     member _.Fork() : Session =
+        log |> Option.iter (fun w -> w.WriteLine "; a second z3 starts here: its commands are not in this log")
         let s = new Session(z3Path, timeoutMs, None, cancel)
         s.Init()
         s
 
     member _.Push() =
         restore ()
-        log |> Option.iter (fun w -> w.WriteLine "(push 1)")
         frames.Add(ResizeArray<string>())
         raw "(push 1)"
 
     member _.Pop() =
         restore ()
-        log |> Option.iter (fun w -> w.WriteLine "(pop 1)")
         if frames.Count > 1 then
             frames.RemoveAt(frames.Count - 1)
             raw "(pop 1)"
 
     member s.Check() : CheckResult =
         restore ()
-        log |> Option.iter (fun w -> w.WriteLine "(check-sat)")
         raw "(check-sat)"
         readResult ()
 

@@ -260,3 +260,29 @@ let ``require-contracts keeps the expression functions a contract is stated with
         + "  return s; }"
     Assert.True(verified (strictCall "quod_check" program))
     Assert.True(verified (strictCall "quod_check" clamp))
+
+/// --smt-log is what z3 received: replayed on a new z3, it gives the answers it records.
+[<Fact>]
+let ``the smt log replays to the answers it records`` () =
+    let src = "fn f(a: int) -> int\n  ensures result >= a\n{\n  a\n}\n"
+    let log = System.IO.Path.GetTempFileName()
+    try
+        Quod.Pipeline.check "p.quod" src { settings with SmtLog = Some log } |> ignore
+        let lines = System.IO.File.ReadAllLines log
+        Assert.Contains(lines, fun l -> l.StartsWith "(get-value")
+        let recorded =
+            lines |> Array.filter (fun l -> l.StartsWith "; answer: ")
+            |> Array.map (fun l -> (l.Substring 10).Split(' ').[0])
+        Assert.NotEmpty recorded
+        let psi = System.Diagnostics.ProcessStartInfo(z3Path, "-smt2 \"" + log + "\"")
+        psi.RedirectStandardOutput <- true
+        psi.UseShellExecute <- false
+        use z3 = System.Diagnostics.Process.Start psi
+        let out = z3.StandardOutput.ReadToEnd()
+        z3.WaitForExit()
+        let replayed =
+            out.Split('\n') |> Array.map (fun l -> l.Trim())
+            |> Array.filter (fun l -> l = "sat" || l = "unsat" || l = "unknown")
+        Assert.Equal<string[]>(recorded, replayed)
+    finally
+        System.IO.File.Delete log

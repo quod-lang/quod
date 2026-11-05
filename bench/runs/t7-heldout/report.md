@@ -61,7 +61,9 @@ A review of these results found faults in the measure itself, so it was run agai
 
 Testing the fix of the hang found another fault, present in these runs' compiler family: after a check stopped by its time limit, z3 can later answer "unsat" to a satisfiable question. On the `transpose` files, 0.1.7 gave 3 false refusals and 1 internal error in 1000 builds, and 0.1.8, which replaces z3 after each timeout, none in 1500 ([notes](../../../docs/releases/v0.1.8.md)). The cause is not isolated inside z3.
 
-These runs used 0.1.6, which was not tested for this. It could have turned a verdict either way, without any sign in `results.jsonl`, though we saw no false proof. **Contracts were measured without z3**, by evaluation or by Dafny, so the soundness figures do not rest on it. Every accepted Quod solution that was built passes its hidden tests. The acceptance and "determined" figures of the Quod arms do rest on it, and were not rerun, since the protocol freezes the compiler.
+These runs used 0.1.6, which was not tested for this. It could have turned a verdict either way, without any sign in `results.jsonl`. Only refusals could be seen: nobody has looked for a false proof. Quod contracts were measured by the evaluator, without z3. Dafny contracts were run when they compile; the others were proved by Dafny, so by z3, in separate processes and with no partial model read. Every accepted Quod solution that was built passes its hidden tests. The acceptance and "determined" figures of the Quod arms do rest on the compiler's z3, and the agents were not rerun, since the protocol freezes the compiler. An agent may also have seen a false refusal during a run and changed its contract because of it: `agent_stdout.txt` keeps only the final message, so this cannot be checked.
+
+The solutions were checked again on 0.1.8, each file three times ([recheck-0.1.8.jsonl](recheck-0.1.8.jsonl)): all 33 accepted solutions and the refused `gcd` give the same verdicts, contract styles and completeness statuses on all three. The two `transpose` files recorded as hung now verify, three times out of three, with a completeness not decided.
 
 ## Predictions, right or wrong
 

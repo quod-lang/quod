@@ -42,7 +42,8 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
             match Smt.findZ3 s.Z3 with
             | None -> Failure("z3 not found; put it next to quod, set QUOD_Z3, or pass --z3 PATH", 2)
             | Some z3Path ->
-                use logWriter = (match s.SmtLog with Some p -> new StreamWriter(p) | None -> null)
+                // flushed at each line: a log is read after a hang or a kill
+                use logWriter = (match s.SmtLog with Some p -> new StreamWriter(p, AutoFlush = true) | None -> null)
                 let log = if isNull logWriter then None else Some(logWriter :> TextWriter)
                 use session = new Smt.Session(z3Path, s.Timeout * 1000, log, s.Cancel)
                 let verified = Vcgen.verifyWith file typed session s.Budget s.RequireContracts s.Progress
