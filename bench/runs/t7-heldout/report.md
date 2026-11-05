@@ -23,7 +23,7 @@ Protocol: [heldout.md](../../heldout.md). Haiku (`claude-haiku-5-5`), 72 runs on
 
 ## Faults found while measuring
 
-**1. The compiler hangs, at random, on the same file.** Three of the six Quod `transpose` runs hit a `timeout` of the bench's 600 s (the check or the build); the same file usually answers in 3 to 6 s. Rerun 8 times on each of the six files (`check` and `build`, limit 45 s), 12 of 48 commands went over the limit, on 5 of the 6 files. In one rerun a z3 left behind had reached 23 GB of memory, after `quod` was killed. The cause is not established. This is a bug of 0.1.6, not of the agent.
+**1. The compiler hangs, at random, on the same file.** Three of the six Quod `transpose` runs hit a `timeout` of the bench's 600 s (the check or the build); the same file usually answers in 3 to 6 s. Rerun 8 times on each of the six files (`check` and `build`, limit 45 s), 12 of 48 commands went over the limit, on 5 of the 6 files. In one rerun a z3 left behind had reached 23 GB of memory, after `quod` was killed. A trace caught the cause afterwards: `(get-value)` on the partial model left by a check that timed out, which has no time limit in z3. Where that check stops depends on timing, hence the randomness. This is a bug of 0.1.6, not of the agent; 0.1.7 limits that read.
 
 - `transpose`, `quod` #1 and `quod-mcp` #1 are recorded **not accepted** because of it. Their `ensures` were not measured.
 - One run took 1348 s, most of it probably in this hang.
@@ -60,4 +60,4 @@ Every wrong solution fails hidden tests (`python -m verifbench.tasks_heldout`, n
 
 ## Limits
 
-A finite test finds wrong results, it does not exclude them. Six small tasks and one model, whose family also supplies the judge, which answered "adequate" 11 times of 11 and may simply miss faults. The suite has now been read: it is spent. The author's reading of 5 contracts per arm ([contracts-to-read.md](contracts-to-read.md)) is still to come.
+A finite test finds wrong results, it does not exclude them. Six small tasks and one model, whose family also supplies the judge, which answered "adequate" 11 times of 11 and may simply miss faults. The suite has now been read: it is spent. The author read 5 contracts per arm ([contracts-to-read.md](contracts-to-read.md)) and reported no disagreement; there was no "unsure" verdict to read.

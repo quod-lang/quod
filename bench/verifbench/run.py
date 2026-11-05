@@ -350,8 +350,10 @@ def score(res: dict[str, Any]) -> dict[str, Any]:
         accepted = (accepted and res["verified"] and not res["cheats"]
                     and res.get("ensures_count", 1) > 0 and not res.get("diagnostics", {}).get("contract/none")
                     and not res.get("diagnostics", {}).get("completeness/loose-accepts-all"))
+    # A bug is known to have escaped only if a test ran and failed: a build that hung tested nothing.
+    tested = bool(h.get("loaded")) and h.get("total") is not None
     return {"accepted": accepted, "all_pass": all_pass,
-            "escaped_bug": accepted and not all_pass}
+            "escaped_bug": accepted and tested and not all_pass}
 
 
 def main() -> None:

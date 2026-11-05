@@ -93,6 +93,10 @@ let findZ3 (explicitPath: string option) : string option =
 /// A running `z3 -in` process. Commands are written as SMT-LIB text; answers are read back
 /// as balanced S-expressions. `log` receives every command, to replay a session by hand.
 /// `cancel` stops it: z3 is killed, and every later command fails (SmtFailure "cancelled").
+/// How long (get-value) may take: an answer is normally immediate.
+[<Literal>]
+let private valuesLimitMs = 5000
+
 type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Threading.CancellationToken) =
     let psi = ProcessStartInfo(z3Path, "-in -smt2")
     do
@@ -173,20 +177,37 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
     /// z3 does not always keep its own time limit: with quantifiers, a check sometimes runs on
     /// for many minutes (a mutant of rle_encode ran over 15). Past twice the limit plus 5 s, the
     /// process is replaced by a fresh one holding the same context, and the answer is a timeout.
+    let replaceProcess (pendingRead: Threading.Tasks.Task) =
+        (try proc.Kill true with _ -> ())
+        (try pendingRead.Wait 2000 |> ignore with _ -> ())
+        proc.Dispose()
+        proc <- Process.Start psi
+        input <- proc.StandardInput
+        output <- proc.StandardOutput
+        input.AutoFlush <- false
+        replayFrames ()
+        dirty <- false
+
     let readFirstLine () : string option =
         let t = output.ReadLineAsync()
         if t.Wait(2 * currentTimeout + 5000) then Some t.Result
         elif cancelled then raise (SmtFailure "cancelled")
         else
-            (try proc.Kill true with _ -> ())
-            (try t.Wait 2000 |> ignore with _ -> ())
-            proc.Dispose()
-            proc <- Process.Start psi
-            input <- proc.StandardInput
-            output <- proc.StandardOutput
-            input.AutoFlush <- false
-            replayFrames ()
-            dirty <- false
+            replaceProcess t
+            None
+
+    /// (get-value) has no time limit in z3. On the partial model left by a check that timed out,
+    /// it can run for minutes and take gigabytes, depending on where that check stopped: the same
+    /// file answered in 3 s or hung. Past the limit, the process is replaced, as for a check.
+    let readValuesWithin (ms: int) : string option =
+        let t = Threading.Tasks.Task.Run(fun () -> readAnswer ())
+        let finished = try t.Wait ms with :? AggregateException -> true
+        if finished then
+            if t.IsFaulted then raise t.Exception.InnerException
+            Some t.Result
+        elif cancelled then raise (SmtFailure "cancelled")
+        else
+            replaceProcess t
             None
 
     let readResult () =
@@ -289,7 +310,10 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
             s.Raw("(get-value (" + String.Join(" ", terms) + "))")
             input.Flush()
             try
-                match parseSExprs (readAnswer ()) with
+                match readValuesWithin valuesLimitMs with
+                | None -> []
+                | Some answer ->
+                match parseSExprs answer with
                 | [ List pairs ] -> pairs |> List.map (function List [ _; v ] -> v | other -> other)
                 | _ -> []
             with SmtFailure _ -> [] // no model available (e.g. after a timeout)
