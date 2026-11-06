@@ -209,7 +209,7 @@ fn free_slot(a: (int, int), b: (int, int)) -> bool
 ```
 
 - A function of another module is always called by its full name, `intervals.disjoint`. A function of the same module is called by its short name. There is no alias and no partial import.
-- `private fn` or `private lemma` is called from its own module only, and has no public name in the generated code. Everything else is public. A public `ensures` may mention a private function of its module.
+- `private fn` or `private lemma` is called from its own module only, and has no public name in the generated code. Everything else is public. A public `ensures` may mention a private function of its module. **Make a helper private** unless another module or a caller needs it: what is public is the API of the generated code, and in C# a helper over `int` shows a `BigInteger` there.
 - A proof sees an imported function as it sees a local one: an expression function by its definition, a statement function by its contract only.
 - `quod check` and `quod build` verify the file and all it imports, every time. An error in an imported module is reported in that file, and refuses the program. A cycle of imports is an error.
 - In the MCP server, a program given as `source` finds its imports in the directory of the server.
