@@ -46,3 +46,8 @@ bench/runs/t9-billing/work/*/agent_stderr.txt
 bench/runs/t9-billing/work/*/.mcp.json
 bench/runs/t9-billing/work/*/_py/
 bench/runs/t9-billing.log
+bench/runs/t10-proportional/work/*/agent_stdout.jsonl
+bench/runs/t10-proportional/work/*/agent_stderr.txt
+bench/runs/t10-proportional/work/*/.mcp.json
+bench/runs/t10-proportional/work/*/_py/
+bench/runs/t10-proportional.log

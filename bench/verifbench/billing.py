@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as futures
 import json
+import os
 import random
 import re
 import shutil
@@ -152,6 +153,16 @@ fn p_positive(o: solution.Order) -> bool
 """
 PROPERTIES = ["p_empty", "p_sums", "p_cap", "p_positive"]
 
+# T10: the same task, with the one rule that T9 kept linear on purpose. A product of variables, the hard case for the solver.
+PROPORTIONAL = os.environ.get("QUOD_BILLING_RULE") == "proportional"
+WATERFALL_RULE = """- The `discount` of the order is taken from the nets of the categories, first from all of `Standard`, what remains of it from `Food`, then `Book`, then `Medicine`. Each takes as much as it can, up to its own net. What is left of each category is its base.
+"""
+PROPORTIONAL_RULE = """- The `discount` of the order is shared among the categories in proportion to their nets: the share of a category is `discount * category_net / subtotal`, and 0 if the subtotal is 0. Its base is `category_net - share`. Rounding can leave a few cents of the discount unshared: that is intended.
+"""
+assert SPEC.count(WATERFALL_RULE) == 1
+if PROPORTIONAL:
+    SPEC = SPEC.replace(WATERFALL_RULE, PROPORTIONAL_RULE)
+
 CATEGORIES = ["Standard", "Food", "Book", "Medicine"]
 RATES = {"Standard": 200, "Food": 55, "Book": 55, "Medicine": 21}
 
@@ -203,7 +214,10 @@ def oracle(o: dict[str, Any]) -> tuple:
     else:
         rest, vat = discount, 0
         for c in CATEGORIES:
-            taken = min(rest, nets[c])
+            if PROPORTIONAL:
+                taken = discount * nets[c] // subtotal if subtotal > 0 else 0
+            else:
+                taken = min(rest, nets[c])
             rest -= taken
             vat += ((nets[c] - taken) * RATES[c] + 500) // 1000
         vat += (ship * 200 + 500) // 1000
