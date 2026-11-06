@@ -1,0 +1,34 @@
+import option
+
+enum State { Draft, Paid(i32), Shipped(string), Cancelled }
+enum Event { Pay(i32), Ship(string), Cancel }
+
+fn step(s: State, e: Event) -> option.Result<State, string>
+  ensures match s {
+    Draft => match e {
+      Pay(a) => if a > 0 { result == option.Ok(Paid(a)) } else { result == option.Err("bad amount") },
+      Cancel => result == option.Ok(Cancelled),
+      _ => result == option.Err("invalid"),
+    },
+    Paid(_) => match e {
+      Ship(t) => if len(t) > 0 { result == option.Ok(Shipped(t)) } else { result == option.Err("no tracking") },
+      Cancel => result == option.Ok(Cancelled),
+      _ => result == option.Err("invalid"),
+    },
+    _ => result == option.Err("invalid"),
+  }
+{
+  match s {
+    Draft => match e {
+      Pay(a) => if a > 0 { option.Ok(Paid(a)) } else { option.Err("bad amount") },
+      Cancel => option.Ok(Cancelled),
+      _ => option.Err("invalid"),
+    },
+    Paid(_) => match e {
+      Ship(t) => if len(t) > 0 { option.Ok(Shipped(t)) } else { option.Err("no tracking") },
+      Cancel => option.Ok(Cancelled),
+      _ => option.Err("invalid"),
+    },
+    _ => option.Err("invalid"),
+  }
+}

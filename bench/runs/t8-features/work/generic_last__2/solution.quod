@@ -1,0 +1,23 @@
+// The last element of xs, or `other` when xs is empty.
+fn last_or<T>(xs: seq<T>, other: T) -> T
+  ensures len(xs) == 0 ==> result == other
+  ensures len(xs) > 0 ==> result == xs[len(xs) - 1]
+{
+  if len(xs) == 0 { other } else { xs[len(xs) - 1] }
+}
+
+// last_or with 0 for an empty sequence.
+fn last_score(xs: seq<i32>) -> i32
+  ensures len(xs) == 0 ==> result == 0
+  ensures len(xs) > 0 ==> result == xs[len(xs) - 1]
+{
+  last_or(xs, 0)
+}
+
+// last_or with false for an empty sequence.
+fn last_flag(xs: seq<bool>) -> bool
+  ensures len(xs) == 0 ==> result == false
+  ensures len(xs) > 0 ==> result == xs[len(xs) - 1]
+{
+  last_or(xs, false)
+}

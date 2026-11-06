@@ -1,0 +1,35 @@
+// The sum of the elements of xs, 0 if it is empty.
+
+// The sum of the first k elements of xs: the definition the contracts read.
+fn total_upto(xs: seq<int>, k: nat) -> int
+  requires k <= len(xs)
+  decreases k
+{
+  if k == 0 { 0 } else { total_upto(xs, k - 1) + xs[k - 1] }
+}
+
+fn total(xs: seq<int>) -> int
+  requires len(xs) <= 1000000
+  ensures result == total_upto(xs, len(xs))
+  run_by total_loop
+{
+  total_upto(xs, len(xs))
+}
+
+// The loop that runs total: same requires, proved equal to total_upto.
+fn total_loop(xs: seq<int>) -> int
+  requires len(xs) <= 1000000
+  ensures result == total(xs)
+{
+  let mut i: nat = 0;
+  let mut acc: int = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant acc == total_upto(xs, i)
+    decreases len(xs) - i
+  {
+    acc = acc + xs[i];
+    i = i + 1;
+  }
+  acc
+}

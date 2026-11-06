@@ -1,0 +1,28 @@
+// The sum of the elements of xs, 0 when xs is empty.
+
+// Sum of the first n elements of xs, as a mathematical integer.
+fn prefix_sum(xs: seq<i32>, n: nat) -> int
+  requires n <= len(xs)
+  decreases n
+{
+  if n == 0 { 0 } else { prefix_sum(xs, n - 1) + xs[n - 1] }
+}
+
+fn total(xs: seq<i32>) -> i64
+  requires len(xs) <= 1000000
+  ensures result == prefix_sum(xs, len(xs))
+{
+  let mut acc: i64 = 0;
+  let mut i: nat = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant i <= 1000000
+    invariant acc == prefix_sum(xs, i)
+    invariant -2147483648 * i <= acc && acc <= 2147483647 * i
+    decreases len(xs) - i
+  {
+    acc = acc + xs[i];
+    i = i + 1;
+  }
+  acc
+}

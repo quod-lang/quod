@@ -1,0 +1,12 @@
+fn clamp_add(a: i32, b: i32, lo: i32, hi: i32) -> i32
+  requires lo <= hi
+  ensures result == if a + b < lo { lo } else { if a + b > hi { hi } else { a + b } }
+{
+  let x: int = a;
+  let s: int = x + b;
+  if s < lo {
+    lo
+  } else {
+    if s > hi { hi } else { to_i32(s) }
+  }
+}

@@ -1,0 +1,36 @@
+// Sum of the first n elements of xs, as a mathematical integer.
+fn sum_upto(xs: seq<i32>, n: int) -> int
+  requires 0 <= n && n <= len(xs)
+  decreases n
+{
+  if n == 0 { 0 } else { sum_upto(xs, n - 1) + xs[n - 1] }
+}
+
+// Each element lies in the i32 range, so the partial sums are bounded.
+lemma sum_bound(xs: seq<i32>, n: int)
+  requires 0 <= n && n <= len(xs)
+  ensures -2147483648 * n <= sum_upto(xs, n) && sum_upto(xs, n) <= 2147483647 * n
+  decreases n
+{
+  if n > 0 {
+    sum_bound(xs, n - 1);
+  }
+}
+
+fn total(xs: seq<i32>) -> i64
+  requires len(xs) <= 1000000
+  ensures result == sum_upto(xs, len(xs))
+{
+  let mut acc: i64 = 0;
+  let mut i: int = 0;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant acc == sum_upto(xs, i)
+    decreases len(xs) - i
+  {
+    sum_bound(xs, i + 1);
+    acc = acc + xs[i];
+    i = i + 1;
+  }
+  acc
+}

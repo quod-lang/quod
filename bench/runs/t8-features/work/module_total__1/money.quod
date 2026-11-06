@@ -1,0 +1,11 @@
+// Monetary amounts, in cents.
+struct Money { cents: i64 }
+
+// The sum of two amounts. The caller must ensure the sum fits in an i64.
+fn add(a: Money, b: Money) -> Money
+  requires -9223372036854775808 <= a.cents + b.cents
+  requires a.cents + b.cents <= 9223372036854775807
+  ensures result.cents == a.cents + b.cents
+{
+  Money(a.cents + b.cents)
+}

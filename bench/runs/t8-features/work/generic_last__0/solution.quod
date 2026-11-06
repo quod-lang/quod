@@ -1,0 +1,30 @@
+// The last element of xs, or `other` when xs is empty.
+fn last_or<T>(xs: seq<T>, other: T) -> T
+  ensures (len(xs) == 0 ==> result == other) && (len(xs) > 0 ==> result == xs[len(xs) - 1])
+{
+  let mut i: int = 0;
+  let mut r: T = other;
+  while i < len(xs)
+    invariant 0 <= i && i <= len(xs)
+    invariant (i == 0 ==> r == other) && (i > 0 ==> r == xs[i - 1])
+    decreases len(xs) - i
+  {
+    r = xs[i];
+    i = i + 1;
+  }
+  r
+}
+
+// The last score of xs, or 0 when xs is empty.
+fn last_score(xs: seq<i32>) -> i32
+  ensures (len(xs) == 0 ==> result == 0) && (len(xs) > 0 ==> result == xs[len(xs) - 1])
+{
+  last_or(xs, 0)
+}
+
+// The last flag of xs, or false when xs is empty.
+fn last_flag(xs: seq<bool>) -> bool
+  ensures (len(xs) == 0 ==> result == false) && (len(xs) > 0 ==> result == xs[len(xs) - 1])
+{
+  last_or(xs, false)
+}

@@ -1,0 +1,9 @@
+fn clamp_add(a: int, b: int, lo: int, hi: int) -> int
+  requires lo <= hi
+  ensures lo <= result && result <= hi
+  ensures a + b < lo ==> result == lo
+  ensures a + b > hi ==> result == hi
+  ensures lo <= a + b && a + b <= hi ==> result == a + b
+{
+  if a + b < lo { lo } else { if a + b > hi { hi } else { a + b } }
+}

@@ -34,3 +34,10 @@ artifacts/
 *.user
 *.suo
 TestResults/
+
+# T8: transcripts hold the configuration of the machine that ran them
+bench/runs/t8-features/work/*/agent_stdout.jsonl
+bench/runs/t8-features/work/*/agent_stderr.txt
+bench/runs/t8-features/work/*/.mcp.json
+bench/runs/t8-features/work/*/_py/
+bench/runs/t8-features.log

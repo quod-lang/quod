@@ -1,0 +1,34 @@
+struct Line { qty: i32, unit_cents: i32 }
+
+// The amount of one line, in mathematical integers: no bounded overflow.
+fn product(q: int, p: int) -> int {
+  q * p
+}
+
+// The sum of the amounts of the first `n` lines.
+fn total_upto(lines: seq<Line>, n: nat) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 {
+    0
+  } else {
+    total_upto(lines, n - 1) + product(lines[n - 1].qty, lines[n - 1].unit_cents)
+  }
+}
+
+fn invoice_total(lines: seq<Line>) -> int
+  ensures result == total_upto(lines, len(lines))
+{
+  let mut acc: int = 0;
+  let mut i: nat = 0;
+  while i < len(lines)
+    invariant 0 <= i && i <= len(lines)
+    invariant acc == total_upto(lines, i)
+    decreases len(lines) - i
+  {
+    acc = acc + product(lines[i].qty, lines[i].unit_cents);
+    i = i + 1;
+  }
+  acc
+}

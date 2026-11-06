@@ -1,0 +1,27 @@
+enum Customer { Regular, Member(nat), Staff }
+
+// The discount percentage of a customer.
+fn percent(c: Customer) -> int
+  ensures match c {
+    Regular => result == 0,
+    Member(years) => (years < 5 ==> result == 5) && (years >= 5 ==> result == 10),
+    Staff => result == 30,
+  }
+{
+  match c {
+    Regular => 0,
+    Member(years) => if years >= 5 { 10 } else { 5 },
+    Staff => 30,
+  }
+}
+
+fn discounted(amount: int, c: Customer) -> int
+  requires 0 <= amount && amount <= 10000000
+  ensures match c {
+    Regular => result == amount,
+    Member(years) => (years < 5 ==> result == amount - amount * 5 / 100) && (years >= 5 ==> result == amount - amount * 10 / 100),
+    Staff => result == amount - amount * 30 / 100,
+  }
+{
+  amount - amount * percent(c) / 100
+}

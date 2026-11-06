@@ -1,0 +1,12 @@
+import money
+
+// Adds three amounts. Each amount is between -10^15 and 10^15 cents, so every
+// intermediate sum stays far inside the range of i64.
+fn total_of(a: money.Money, b: money.Money, c: money.Money) -> money.Money
+  requires -1000000000000000 <= a.cents && a.cents <= 1000000000000000
+  requires -1000000000000000 <= b.cents && b.cents <= 1000000000000000
+  requires -1000000000000000 <= c.cents && c.cents <= 1000000000000000
+  ensures result.cents == a.cents + b.cents + c.cents
+{
+  money.add(money.add(a, b), c)
+}

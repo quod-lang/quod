@@ -1,0 +1,24 @@
+fn min_int(x: int, y: int) -> int
+  ensures result == x || result == y
+  ensures result <= x && result <= y
+{
+  if x <= y { x } else { y }
+}
+
+fn max_int(x: int, y: int) -> int
+  ensures result == x || result == y
+  ensures result >= x && result >= y
+{
+  if x >= y { x } else { y }
+}
+
+fn clamp_add(a: int, b: int, lo: int, hi: int) -> int
+  requires lo <= hi
+  ensures result == max_int(lo, min_int(hi, a + b))
+{
+  if a + b < lo {
+    lo
+  } else {
+    if a + b > hi { hi } else { a + b }
+  }
+}

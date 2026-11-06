@@ -1,0 +1,34 @@
+struct Line { qty: i32, unit_cents: i32 }
+
+// Widening i32 to int is implicit and exact.
+fn widen(x: i32) -> int {
+  x
+}
+
+// The total of the first n lines, as a mathematical model.
+fn sum_upto(lines: seq<Line>, n: nat) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 {
+    0
+  } else {
+    sum_upto(lines, n - 1) + widen(lines[n - 1].qty) * widen(lines[n - 1].unit_cents)
+  }
+}
+
+fn invoice_total(lines: seq<Line>) -> int
+  ensures result == sum_upto(lines, len(lines))
+{
+  let mut total: int = 0;
+  let mut i: nat = 0;
+  while i < len(lines)
+    invariant 0 <= i <= len(lines)
+    invariant total == sum_upto(lines, i)
+    decreases len(lines) - i
+  {
+    total = total + widen(lines[i].qty) * widen(lines[i].unit_cents);
+    i = i + 1;
+  }
+  total
+}

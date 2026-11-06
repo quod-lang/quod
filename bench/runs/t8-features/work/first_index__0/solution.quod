@@ -1,0 +1,21 @@
+import option
+
+fn first_index(xs: seq<i32>, x: i32) -> option.Option<nat>
+  ensures match result {
+    Some(i) => i < len(xs) && xs[i] == x && forall j in 0..i: xs[j] != x,
+    None => forall j in 0..len(xs): xs[j] != x,
+  }
+{
+  let mut i: nat = 0;
+  while i < len(xs)
+    invariant i <= len(xs)
+    invariant forall j in 0..i: xs[j] != x
+    decreases len(xs) - i
+  {
+    if xs[i] == x {
+      return option.Some(i);
+    }
+    i = i + 1;
+  }
+  option.None
+}

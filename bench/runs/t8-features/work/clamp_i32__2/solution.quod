@@ -1,0 +1,18 @@
+// clamp_add: a + b, brought back into the range lo..=hi.
+
+fn clamp_add(a: i32, b: i32, lo: i32, hi: i32) -> i32
+  requires lo <= hi
+  ensures (a + b < lo ==> result == lo)
+       && (a + b > hi ==> result == hi)
+       && (lo <= a + b && a + b <= hi ==> result == a + b)
+{
+  // The sum of two i32 can leave i32, so it is computed in i64, where it cannot.
+  let s: i64 = to_i64(a) + to_i64(b);
+  let lo64: i64 = to_i64(lo);
+  let hi64: i64 = to_i64(hi);
+  if s < lo64 {
+    lo
+  } else {
+    if s > hi64 { hi } else { to_i32(s) }
+  }
+}

@@ -1,0 +1,39 @@
+import option
+import strings
+
+// Index of the first '=' in s at or after i, or -1 when there is none.
+fn eq_from(s: string, i: nat) -> int
+  requires i <= len(s)
+  ensures result >= -1
+  ensures result == -1 ==> forall j in i..len(s): s[j] != '='
+  ensures result >= 0 ==> i <= result && result < len(s) && s[result] == '=' && (forall j in i..result: s[j] != '=')
+  decreases len(s) - i
+{
+  if i == len(s) {
+    -1
+  } else {
+    if s[i] == '=' { i } else { eq_from(s, i + 1) }
+  }
+}
+
+fn parse_kv(s: string) -> option.Option<(string, string)>
+  ensures match result {
+    Some(p) => eq_from(s, 0) >= 0
+      && p.0 == strings.trim(s[..eq_from(s, 0)])
+      && p.1 == strings.trim(s[eq_from(s, 0) + 1..])
+      && p.0 != "",
+    None => eq_from(s, 0) < 0 || strings.trim(s[..eq_from(s, 0)]) == "",
+  }
+{
+  let k: int = eq_from(s, 0);
+  if k < 0 {
+    option.None
+  } else {
+    let key: string = strings.trim(s[..k]);
+    if key == "" {
+      option.None
+    } else {
+      option.Some((key, strings.trim(s[k + 1..])))
+    }
+  }
+}

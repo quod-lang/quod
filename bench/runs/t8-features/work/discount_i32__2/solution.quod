@@ -1,0 +1,23 @@
+enum Customer { Regular, Member(nat), Staff }
+
+// The discount percentage of each kind of customer.
+fn percent_of(c: Customer) -> i32
+  ensures match c {
+    Regular => result == 0,
+    Member(years) => (years >= 5 && result == 10) || (years < 5 && result == 5),
+    Staff => result == 30,
+  }
+{
+  match c {
+    Regular => to_i32(0),
+    Member(years) => if years >= 5 { to_i32(10) } else { to_i32(5) },
+    Staff => to_i32(30),
+  }
+}
+
+fn discounted(amount: i32, c: Customer) -> i32
+  requires 0 <= amount && amount <= 10000000
+  ensures result == amount - amount * percent_of(c) / 100
+{
+  amount - amount * percent_of(c) / 100
+}

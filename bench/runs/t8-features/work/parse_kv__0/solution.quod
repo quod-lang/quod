@@ -1,0 +1,45 @@
+import option
+import strings
+
+// Index of the first '=' in s at or after position i, or -1 when there is none.
+fn eq_pos(s: string, i: int) -> int
+  requires 0 <= i
+  ensures result == -1 || (i <= result && result < len(s) && s[result] == '=')
+  ensures result == -1 ==> forall j in i..len(s): s[j] != '='
+  ensures result >= 0 ==> forall j in i..result: s[j] != '='
+  decreases len(s) - i
+{
+  if i >= len(s) {
+    -1
+  } else {
+    if s[i] == '=' { i } else { eq_pos(s, i + 1) }
+  }
+}
+
+// Index of the first '=' in s, or -1 when s has none.
+fn eq_index(s: string) -> int
+  ensures result == -1 || (0 <= result && result < len(s) && s[result] == '=')
+  ensures result == -1 ==> forall j in 0..len(s): s[j] != '='
+  ensures result >= 0 ==> forall j in 0..result: s[j] != '='
+{
+  eq_pos(s, 0)
+}
+
+fn parse_kv(s: string) -> option.Option<(string, string)>
+  ensures eq_index(s) < 0 ==> result == option.None
+  ensures eq_index(s) >= 0 && strings.trim(s[..eq_index(s)]) == "" ==> result == option.None
+  ensures eq_index(s) >= 0 && strings.trim(s[..eq_index(s)]) != "" ==>
+    result == option.Some((strings.trim(s[..eq_index(s)]), strings.trim(s[eq_index(s) + 1..])))
+{
+  let i = eq_index(s);
+  if i < 0 {
+    option.None
+  } else {
+    let k = strings.trim(s[..i]);
+    if k == "" {
+      option.None
+    } else {
+      option.Some((k, strings.trim(s[i + 1..])))
+    }
+  }
+}

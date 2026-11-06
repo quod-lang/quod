@@ -1,0 +1,33 @@
+// Sum of the elements of xs; 0 for the empty sequence.
+
+// Sum of the first k elements of xs.
+fn total_upto(xs: seq<int>, k: nat) -> int
+  requires k <= len(xs)
+  decreases k
+{
+  if k == 0 { 0 } else { total_upto(xs, k - 1) + xs[k - 1] }
+}
+
+fn total(xs: seq<int>) -> int
+  requires len(xs) <= 1000000
+  run_by total_loop
+{
+  total_upto(xs, len(xs))
+}
+
+fn total_loop(xs: seq<int>) -> int
+  requires len(xs) <= 1000000
+  ensures result == total(xs)
+{
+  let mut acc: int = 0;
+  let mut i: int = 0;
+  while i < len(xs)
+    invariant 0 <= i <= len(xs)
+    invariant acc == total_upto(xs, i)
+    decreases len(xs) - i
+  {
+    acc = acc + xs[i];
+    i = i + 1;
+  }
+  acc
+}
