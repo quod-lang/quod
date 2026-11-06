@@ -1,0 +1,75 @@
+// Catalog: the lines of an order, and what one line costs.
+// All amounts are in cents; percentages are whole numbers.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+// i32 widens to int implicitly; this named step keeps products in int.
+fn widen(x: i32) -> int { x }
+
+// A line the price accepts.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn gross(l: Line) -> int {
+  widen(l.qty) * widen(l.unit_cents)
+}
+
+// gross is bounded for an accepted line: at most 10000 * 100000000.
+lemma gross_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+{
+}
+
+// The net of an accepted line lies between 0 and its gross.
+lemma line_net_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= gross(l) && gross(l) <= 1000000000000
+{
+  gross_bounds(l);
+}
+
+// The volume discount, in cents: 10% from a quantity of 100, 5% from 10, none below; books never.
+fn line_discount(l: Line) -> int {
+  if l.category == Book { 0 } else {
+    if l.qty >= 100 { gross(l) * 10 / 100 } else {
+      if l.qty >= 10 { gross(l) * 5 / 100 } else { 0 }
+    }
+  }
+}
+
+// gross - gross * percent / 100, with percent the volume percentage above.
+fn line_net(l: Line) -> int {
+  gross(l) - line_discount(l)
+}
+
+// Weight of a line in grams: qty * grams.
+fn line_grams(l: Line) -> int {
+  widen(l.qty) * widen(l.grams)
+}
+
+lemma line_grams_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_grams(l) && line_grams(l) <= 10000000000
+{
+}
+
+// VAT rate of a category, in thousandths: 20%, 5.5%, 5.5%, 2.1%.
+fn vat_rate(c: Category) -> int {
+  match c {
+    Standard => 200,
+    Food => 55,
+    Book => 55,
+    Medicine => 21,
+  }
+}
+
+lemma vat_rate_bounds(c: Category)
+  ensures 0 <= vat_rate(c) && vat_rate(c) <= 200
+{
+}

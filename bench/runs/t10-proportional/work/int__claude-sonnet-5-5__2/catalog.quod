@@ -1,0 +1,68 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+fn line_valid(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn line_percent(l: Line) -> int {
+  if l.category == Book { 0 } else if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 }
+}
+
+fn line_net(l: Line) -> int {
+  l.qty * l.unit_cents - l.qty * l.unit_cents * line_percent(l) / 100
+}
+
+fn all_valid(lines: seq<Line>, n: nat) -> bool
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { true } else { all_valid(lines, n - 1) && line_valid(lines[n - 1]) }
+}
+
+fn cat_net(lines: seq<Line>, c: Category, n: nat) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { 0 } else { cat_net(lines, c, n - 1) + (if lines[n - 1].category == c { line_net(lines[n - 1]) } else { 0 }) }
+}
+
+fn total_net(lines: seq<Line>, n: nat) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { 0 } else { total_net(lines, n - 1) + line_net(lines[n - 1]) }
+}
+
+fn weight(lines: seq<Line>, n: nat) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { 0 } else { weight(lines, n - 1) + lines[n - 1].qty * lines[n - 1].grams }
+}
+
+lemma line_net_nonneg(l: Line)
+  requires line_valid(l)
+  ensures line_net(l) >= 0
+{
+  assert l.qty * l.unit_cents >= 0;
+  if line_percent(l) == 10 {
+    assert l.qty * l.unit_cents * 10 / 100 <= l.qty * l.unit_cents;
+  } else if line_percent(l) == 5 {
+    assert l.qty * l.unit_cents * 5 / 100 <= l.qty * l.unit_cents;
+  }
+}
+
+lemma sums_bounds(lines: seq<Line>, c: Category, n: nat)
+  requires n <= len(lines)
+  requires all_valid(lines, n)
+  ensures 0 <= cat_net(lines, c, n) && cat_net(lines, c, n) <= total_net(lines, n)
+  ensures weight(lines, n) >= 0
+  decreases n
+{
+  if n > 0 {
+    sums_bounds(lines, c, n - 1);
+    line_net_nonneg(lines[n - 1]);
+    assert lines[n - 1].qty * lines[n - 1].grams >= 0;
+  }
+}

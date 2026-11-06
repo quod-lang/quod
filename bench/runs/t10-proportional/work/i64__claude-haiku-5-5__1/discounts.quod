@@ -1,0 +1,64 @@
+// Discounts: what the customer and the coupon give on the subtotal.
+// All amounts are in cents; every division rounds down.
+
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+// A customer the price refuses.
+fn customer_bad(c: Customer) -> bool {
+  match c {
+    Guest => false,
+    Member(y) => y < 0,
+    Business(_) => false,
+  }
+}
+
+// A coupon the price refuses.
+fn coupon_bad(c: Coupon) -> bool {
+  match c {
+    NoCoupon => false,
+    Percent(p) => p < 0 || p > 50,
+    Fixed(v) => v < 0,
+    FreeShipping => false,
+  }
+}
+
+// Customer discount on the subtotal.
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+// Coupon discount on the amount left after the customer discount (base).
+fn coupon_discount(c: Coupon, base: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => base * p / 100,
+    Fixed(v) => if v < base { v } else { base },
+    FreeShipping => 0,
+  }
+}
+
+lemma customer_discount_bounds(c: Customer, s: int)
+  requires 0 <= s
+  ensures 0 <= customer_discount(c, s) && customer_discount(c, s) <= s
+{
+}
+
+lemma coupon_discount_bounds(c: Coupon, base: int)
+  requires 0 <= base && !coupon_bad(c)
+  ensures 0 <= coupon_discount(c, base) && coupon_discount(c, base) <= base
+{
+}
+
+// Amount from which a order ships for free, by customer.
+fn free_threshold(c: Customer) -> int {
+  match c {
+    Guest => 10000,
+    Member(_) => 5000,
+    Business(_) => 10000,
+  }
+}

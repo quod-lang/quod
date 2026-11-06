@@ -1,0 +1,43 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+fn line_ok(l: Line) -> bool
+  ensures result ==> (1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000)
+  ensures (1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000) ==> result
+{
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn vol_pct(l: Line) -> int
+  ensures 0 <= result && result <= 10
+  ensures l.category == Book ==> result == 0
+  ensures l.category != Book && l.qty >= 100 ==> result == 10
+  ensures l.category != Book && l.qty >= 10 && l.qty < 100 ==> result == 5
+  ensures l.category != Book && l.qty < 10 ==> result == 0
+{
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+fn gross(l: Line) -> int
+  requires line_ok(l)
+  ensures result >= 0
+  ensures result == l.qty * l.unit_cents
+{ l.qty * l.unit_cents }
+
+fn line_net(l: Line) -> int
+  requires line_ok(l)
+  ensures 0 <= result && result <= gross(l)
+  ensures result + gross(l) * vol_pct(l) / 100 == gross(l)
+{
+  gross(l) - gross(l) * vol_pct(l) / 100
+}
+
+fn weight(l: Line) -> int
+  requires line_ok(l)
+  ensures result >= 0
+  ensures result == l.qty * l.grams
+{ l.qty * l.grams }

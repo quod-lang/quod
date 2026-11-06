@@ -1,0 +1,5 @@
+// The catalog: what a line of an order is.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }

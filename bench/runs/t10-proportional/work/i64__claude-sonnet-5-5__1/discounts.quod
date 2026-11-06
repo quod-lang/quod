@@ -1,0 +1,44 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool {
+  match c {
+    Guest => true,
+    Member(y) => y >= 0,
+    Business(_) => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c {
+    NoCoupon => true,
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    FreeShipping => true,
+  }
+}
+
+fn customer_disc(c: Customer, st: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { st * 5 / 100 } else { st * 2 / 100 },
+    Business(_) => if st >= 100000 { st * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+lemma disc_bounds(cu: Customer, cp: Coupon, st: int)
+  requires st >= 0 && coupon_ok(cp)
+  ensures 0 <= customer_disc(cu, st) && customer_disc(cu, st) <= st
+    && 0 <= coupon_disc(cp, st - customer_disc(cu, st))
+    && coupon_disc(cp, st - customer_disc(cu, st)) <= st - customer_disc(cu, st)
+{
+}

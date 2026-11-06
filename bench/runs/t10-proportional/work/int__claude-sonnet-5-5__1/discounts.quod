@@ -1,0 +1,52 @@
+enum Customer { Guest, Member(int), Business(string) }
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool
+  ensures match c { Member(y) => result == (y >= 0), _ => result }
+{
+  match c {
+    Member(y) => y >= 0,
+    _ => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool
+  ensures match c { Percent(p) => result == (0 <= p && p <= 50), Fixed(v) => result == (v >= 0), _ => result }
+{
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int
+  ensures subtotal >= 0 ==> 0 <= result && result <= subtotal * 5 / 100
+  ensures match c {
+    Guest => result == 0,
+    Member(y) => (y >= 5 ==> result == subtotal * 5 / 100) && (y < 5 ==> result == subtotal * 2 / 100),
+    Business(_) => (subtotal >= 100000 ==> result == subtotal * 3 / 100) && (subtotal < 100000 ==> result == 0),
+  }
+{
+  match c {
+    Guest => 0,
+    Member(y) => subtotal * (if y >= 5 { 5 } else { 2 }) / 100,
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_discount(c: Coupon, amount: int) -> int
+  ensures match c {
+    Percent(p) => result == amount * p / 100,
+    Fixed(v) => (v < amount ==> result == v) && (v >= amount ==> result == amount),
+    NoCoupon => result == 0,
+    FreeShipping => result == 0,
+  }
+  ensures amount >= 0 && coupon_ok(c) ==> 0 <= result && result <= amount
+{
+  match c {
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    _ => 0,
+  }
+}

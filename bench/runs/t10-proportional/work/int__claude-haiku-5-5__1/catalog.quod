@@ -1,0 +1,76 @@
+// The catalog: product categories and order lines, with the per-line rules.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+// A line is well formed: quantity, unit price and weight within their bounds.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+// Every line of the sequence is well formed.
+fn lines_ok(lines: seq<Line>) -> bool
+  decreases len(lines)
+{
+  if len(lines) == 0 { true } else { line_ok(lines[0]) && lines_ok(lines[1..]) }
+}
+
+// Volume discount in percent: none for books, 10 from 100 units, 5 from 10 units.
+fn volume_percent(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } },
+  }
+}
+
+// The net amount of a line, after its volume discount: gross - gross * percent / 100.
+fn line_net(l: Line) -> int {
+  (l.qty * l.unit_cents) - ((l.qty * l.unit_cents) * volume_percent(l)) / 100
+}
+
+// The net of a well formed line is never negative: the discount is at most 10%.
+lemma line_net_nonneg(l: Line)
+  requires line_ok(l)
+  ensures line_net(l) >= 0
+{
+  assert 0 <= volume_percent(l) && volume_percent(l) <= 10;
+  assert (l.qty * l.unit_cents) * volume_percent(l) <= (l.qty * l.unit_cents) * 10;
+}
+
+// The sum of the nets of the lines of category `c`, added to `acc`.
+fn category_net(lines: seq<Line>, c: Category, acc: int) -> int
+  decreases len(lines)
+{
+  if len(lines) == 0 {
+    acc
+  } else {
+    category_net(lines[1..], c, if lines[0].category == c { acc + line_net(lines[0]) } else { acc })
+  }
+}
+
+// Adding nets of well formed lines to a nonnegative accumulator keeps it nonnegative.
+lemma category_net_nonneg(lines: seq<Line>, c: Category, acc: int)
+  requires acc >= 0
+  requires lines_ok(lines)
+  ensures category_net(lines, c, acc) >= 0
+  decreases len(lines)
+{
+  if len(lines) > 0 {
+    line_net_nonneg(lines[0]);
+    if lines[0].category == c {
+      category_net_nonneg(lines[1..], c, acc + line_net(lines[0]));
+    } else {
+      category_net_nonneg(lines[1..], c, acc);
+    }
+  }
+}
+
+// The total weight of the lines, in grams, added to `acc`.
+fn weight(lines: seq<Line>, acc: int) -> int
+  decreases len(lines)
+{
+  if len(lines) == 0 { acc } else { weight(lines[1..], acc + lines[0].qty * lines[0].grams) }
+}

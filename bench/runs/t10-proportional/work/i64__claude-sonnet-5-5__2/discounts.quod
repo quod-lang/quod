@@ -1,0 +1,27 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => 0 <= p && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+fn customer_pct(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+fn coupon_amount(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}

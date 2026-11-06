@@ -1,0 +1,290 @@
+// solution.quod: the billing engine.
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+// ---- The specification: sums over the first n lines, and each figure of the order. ----
+
+fn line_net_of(l: catalog.Line) -> int {
+  catalog.line_net(l.category, l.qty, l.unit_cents)
+}
+
+fn line_weight_of(l: catalog.Line) -> int {
+  catalog.line_weight(l.qty, l.grams)
+}
+
+fn lines_ok(ls: seq<catalog.Line>, n: int) -> bool
+  requires 0 <= n && n <= len(ls)
+  decreases n
+{
+  if n == 0 { true } else { lines_ok(ls, n - 1) && catalog.line_ok(ls[n - 1]) }
+}
+
+fn sum_net(ls: seq<catalog.Line>, n: int) -> int
+  requires 0 <= n && n <= len(ls)
+  decreases n
+{
+  if n == 0 { 0 } else { sum_net(ls, n - 1) + line_net_of(ls[n - 1]) }
+}
+
+fn sum_weight(ls: seq<catalog.Line>, n: int) -> int
+  requires 0 <= n && n <= len(ls)
+  decreases n
+{
+  if n == 0 { 0 } else { sum_weight(ls, n - 1) + line_weight_of(ls[n - 1]) }
+}
+
+fn sum_cat(ls: seq<catalog.Line>, n: int, c: catalog.Category) -> int
+  requires 0 <= n && n <= len(ls)
+  decreases n
+{
+  if n == 0 {
+    0
+  } else {
+    sum_cat(ls, n - 1, c) + (if ls[n - 1].category == c { line_net_of(ls[n - 1]) } else { 0 })
+  }
+}
+
+fn smaller(a: int, b: int) -> int {
+  if a < b { a } else { b }
+}
+
+// Shipping fee for a total weight g in grams.
+fn shipping_fee(g: int) -> int {
+  if g == 0 {
+    0
+  } else if g <= 1000 {
+    490
+  } else if g <= 5000 {
+    690
+  } else {
+    990 + 100 * ((g - 5000 + 999) / 1000)
+  }
+}
+
+// Share of the discount d for a category of net c, out of a subtotal s.
+fn share(d: int, c: int, s: int) -> int {
+  if s == 0 { 0 } else { d * c / s }
+}
+
+// VAT of a base b at a rate r per thousand, rounded half up.
+fn vat_amount(b: int, r: int) -> int {
+  (b * r + 500) / 1000
+}
+
+fn sub_of(o: Order) -> int {
+  sum_net(o.lines, len(o.lines))
+}
+
+fn weight_of(o: Order) -> int {
+  sum_weight(o.lines, len(o.lines))
+}
+
+fn cat_net_of(o: Order, c: catalog.Category) -> int {
+  sum_cat(o.lines, len(o.lines), c)
+}
+
+fn cdisc_of(o: Order) -> int {
+  discounts.customer_discount(o.customer, sub_of(o))
+}
+
+fn raw_disc_of(o: Order) -> int {
+  cdisc_of(o) + discounts.coupon_discount(o.coupon, sub_of(o) - cdisc_of(o))
+}
+
+fn disc_of(o: Order) -> int {
+  smaller(raw_disc_of(o), sub_of(o) * 30 / 100)
+}
+
+fn net_of(o: Order) -> int {
+  sub_of(o) - disc_of(o)
+}
+
+fn ship_of(o: Order) -> int {
+  if discounts.free_shipping(o.coupon, o.customer, net_of(o)) { 0 } else { shipping_fee(weight_of(o)) }
+}
+
+fn vat_cat_of(o: Order, c: catalog.Category) -> int {
+  vat_amount(cat_net_of(o, c) - share(disc_of(o), cat_net_of(o, c), sub_of(o)), catalog.rate(c))
+}
+
+fn vat_total_of(o: Order) -> int {
+  if discounts.reverse_charge(o.customer, o.country) {
+    0
+  } else {
+    vat_cat_of(o, catalog.Standard) + vat_cat_of(o, catalog.Food) + vat_cat_of(o, catalog.Book)
+      + vat_cat_of(o, catalog.Medicine) + vat_amount(ship_of(o), 200)
+  }
+}
+
+fn total_of(o: Order) -> int {
+  net_of(o) + ship_of(o) + vat_total_of(o)
+}
+
+// The first error of the order, if any.
+fn error_of(o: Order) -> option.Option<string> {
+  if len(o.lines) == 0 {
+    option.Some("empty order")
+  } else if len(o.lines) > 1000 {
+    option.Some("too many lines")
+  } else if !lines_ok(o.lines, len(o.lines)) {
+    option.Some("bad line")
+  } else if discounts.bad_customer(o.customer) {
+    option.Some("bad customer")
+  } else if discounts.bad_coupon(o.coupon) {
+    option.Some("bad coupon")
+  } else {
+    option.None
+  }
+}
+
+// ---- Bounds, so that the invoice fits in 64 bits. ----
+
+lemma share_bound(d: int, c: int, s: int)
+  requires 0 <= d && d <= s && 0 <= c
+  ensures 0 <= share(d, c, s) && share(d, c, s) <= c
+{
+  if s > 0 {
+    assert d * c <= s * c;
+  }
+}
+
+lemma vat_bound(b: int, r: int)
+  requires 0 <= b && 0 <= r && r <= 1000
+  ensures 0 <= vat_amount(b, r) && vat_amount(b, r) <= b + 1
+{
+  assert b * r <= b * 1000;
+}
+
+lemma line_bounds(l: catalog.Line)
+  requires catalog.line_ok(l)
+  ensures 0 <= line_net_of(l) && line_net_of(l) <= 1000000000000
+  ensures 0 <= line_weight_of(l) && line_weight_of(l) <= 10000000000
+{
+  assert 0 <= l.qty * l.unit_cents && l.qty * l.unit_cents <= 1000000000000;
+  assert 0 <= l.qty * l.grams && l.qty * l.grams <= 10000000000;
+}
+
+// ---- The billing engine. ----
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Err(m) => error_of(o) == option.Some(m),
+    Ok(i) => error_of(o) == option.None
+      && i.subtotal == sub_of(o)
+      && i.discount == disc_of(o)
+      && i.net == net_of(o)
+      && i.shipping == ship_of(o)
+      && i.vat == vat_total_of(o)
+      && i.total == total_of(o),
+  }
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && 0 <= i.discount && i.discount <= i.subtotal * 30 / 100
+      && 0 <= i.total,
+    Err(_) => true,
+  }
+{
+  let n = len(o.lines);
+  if n == 0 {
+    return option.Err("empty order");
+  }
+  if n > 1000 {
+    return option.Err("too many lines");
+  }
+  let mut subtotal: int = 0;
+  let mut weight: int = 0;
+  let mut std_net: int = 0;
+  let mut food_net: int = 0;
+  let mut book_net: int = 0;
+  let mut med_net: int = 0;
+  let mut ok = true;
+  let mut i: int = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant n == len(o.lines)
+    invariant ok == lines_ok(o.lines, i)
+    invariant subtotal == sum_net(o.lines, i)
+    invariant weight == sum_weight(o.lines, i)
+    invariant std_net == sum_cat(o.lines, i, catalog.Standard)
+    invariant food_net == sum_cat(o.lines, i, catalog.Food)
+    invariant book_net == sum_cat(o.lines, i, catalog.Book)
+    invariant med_net == sum_cat(o.lines, i, catalog.Medicine)
+    invariant ok ==> 0 <= subtotal && subtotal <= i * 1000000000000
+    invariant ok ==> 0 <= weight && weight <= i * 10000000000
+    invariant ok ==> 0 <= std_net && std_net <= i * 1000000000000
+    invariant ok ==> 0 <= food_net && food_net <= i * 1000000000000
+    invariant ok ==> 0 <= book_net && book_net <= i * 1000000000000
+    invariant ok ==> 0 <= med_net && med_net <= i * 1000000000000
+    decreases n - i
+  {
+    let l = o.lines[i];
+    let good = catalog.line_ok(l);
+    if !good {
+      ok = false;
+    }
+    if good {
+      line_bounds(l);
+    }
+    let x = catalog.line_net(l.category, l.qty, l.unit_cents);
+    subtotal = subtotal + x;
+    weight = weight + catalog.line_weight(l.qty, l.grams);
+    let s_std = if l.category == catalog.Standard { x } else { 0 };
+    let s_food = if l.category == catalog.Food { x } else { 0 };
+    let s_book = if l.category == catalog.Book { x } else { 0 };
+    let s_med = if l.category == catalog.Medicine { x } else { 0 };
+    std_net = std_net + s_std;
+    food_net = food_net + s_food;
+    book_net = book_net + s_book;
+    med_net = med_net + s_med;
+    i = i + 1;
+  }
+  if !ok {
+    return option.Err("bad line");
+  }
+  if discounts.bad_customer(o.customer) {
+    return option.Err("bad customer");
+  }
+  if discounts.bad_coupon(o.coupon) {
+    return option.Err("bad coupon");
+  }
+  let cdisc = discounts.customer_discount(o.customer, subtotal);
+  let raw = cdisc + discounts.coupon_discount(o.coupon, subtotal - cdisc);
+  let disc = smaller(raw, subtotal * 30 / 100);
+  let net = subtotal - disc;
+  let ship = if discounts.free_shipping(o.coupon, o.customer, net) { 0 } else { shipping_fee(weight) };
+  assert 0 <= disc && disc <= subtotal;
+  share_bound(disc, std_net, subtotal);
+  share_bound(disc, food_net, subtotal);
+  share_bound(disc, book_net, subtotal);
+  share_bound(disc, med_net, subtotal);
+  let v_std = vat_amount(std_net - share(disc, std_net, subtotal), catalog.rate(catalog.Standard));
+  let v_food = vat_amount(food_net - share(disc, food_net, subtotal), catalog.rate(catalog.Food));
+  let v_book = vat_amount(book_net - share(disc, book_net, subtotal), catalog.rate(catalog.Book));
+  let v_med = vat_amount(med_net - share(disc, med_net, subtotal), catalog.rate(catalog.Medicine));
+  let v_ship = vat_amount(ship, 200);
+  vat_bound(std_net - share(disc, std_net, subtotal), catalog.rate(catalog.Standard));
+  vat_bound(food_net - share(disc, food_net, subtotal), catalog.rate(catalog.Food));
+  vat_bound(book_net - share(disc, book_net, subtotal), catalog.rate(catalog.Book));
+  vat_bound(med_net - share(disc, med_net, subtotal), catalog.rate(catalog.Medicine));
+  vat_bound(ship, 200);
+  assert 0 <= v_std && v_std <= 1000000000000001;
+  assert 0 <= v_food && v_food <= 1000000000000001;
+  assert 0 <= v_book && v_book <= 1000000000000001;
+  assert 0 <= v_med && v_med <= 1000000000000001;
+  assert 0 <= v_ship && v_ship <= 10000000000001;
+  let vat = if discounts.reverse_charge(o.customer, o.country) {
+    0
+  } else {
+    v_std + v_food + v_book + v_med + v_ship
+  };
+  assert 0 <= net && net <= 1000000000000000;
+  assert 0 <= ship && ship <= 10000000000000;
+  let total = net + ship + vat;
+  option.Ok(Invoice(to_i64(subtotal), to_i64(disc), to_i64(net), to_i64(ship), to_i64(vat), to_i64(total)))
+}

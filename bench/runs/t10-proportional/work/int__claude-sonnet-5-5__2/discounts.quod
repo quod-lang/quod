@@ -1,0 +1,46 @@
+enum Customer { Guest, Member(int), Business(string) }
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => 0 <= p && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_discount(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+lemma customer_discount_bounds(c: Customer, s: int)
+  requires s >= 0
+  ensures 0 <= customer_discount(c, s) && customer_discount(c, s) <= s
+{
+}
+
+lemma coupon_discount_bounds(c: Coupon, a: int)
+  requires a >= 0 && coupon_ok(c)
+  ensures 0 <= coupon_discount(c, a) && coupon_discount(c, a) <= a
+{
+  let p = pct_of(c);
+  assert a * p <= a * 50;
+  assert a * p >= 0;
+}
+
+fn pct_of(c: Coupon) -> int {
+  match c { Percent(p) => p, _ => 0 }
+}

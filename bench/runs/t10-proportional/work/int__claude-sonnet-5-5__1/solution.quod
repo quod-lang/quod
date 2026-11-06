@@ -1,0 +1,281 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+// ---- sums over the lines, from index i (tail recursive) ----
+
+fn lof(ls: seq<catalog.Line>, i: int) -> bool
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i == len(ls) { true } else if !catalog.line_ok(ls[i]) { false } else { lof(ls, i + 1) }
+}
+
+fn sumf(ls: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc } else { sumf(ls, i + 1, acc + catalog.line_net(ls[i])) }
+}
+
+fn catf(ls: seq<catalog.Line>, i: int, c: catalog.Category, acc: int) -> int
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc } else {
+    catf(ls, i + 1, c, acc + (if ls[i].category == c { catalog.line_net(ls[i]) } else { 0 }))
+  }
+}
+
+fn wtf(ls: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc } else { wtf(ls, i + 1, acc + catalog.weight(ls[i])) }
+}
+
+lemma sum_shift(ls: seq<catalog.Line>, i: int, a: int)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures sumf(ls, i, a) == a + sumf(ls, i, 0)
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    sum_shift(ls, i + 1, a + catalog.line_net(ls[i]));
+    sum_shift(ls, i + 1, catalog.line_net(ls[i]));
+  }
+}
+
+lemma sum_nonneg(ls: seq<catalog.Line>, i: int)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures sumf(ls, i, 0) >= 0
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    sum_shift(ls, i + 1, catalog.line_net(ls[i]));
+    sum_nonneg(ls, i + 1);
+  }
+}
+
+lemma cat_shift(ls: seq<catalog.Line>, i: int, c: catalog.Category, a: int)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures catf(ls, i, c, a) == a + catf(ls, i, c, 0)
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    cat_shift(ls, i + 1, c, a + (if ls[i].category == c { catalog.line_net(ls[i]) } else { 0 }));
+    cat_shift(ls, i + 1, c, (if ls[i].category == c { catalog.line_net(ls[i]) } else { 0 }));
+  }
+}
+
+lemma cat_bounds(ls: seq<catalog.Line>, i: int, c: catalog.Category)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures 0 <= catf(ls, i, c, 0) && catf(ls, i, c, 0) <= sumf(ls, i, 0)
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    cat_shift(ls, i + 1, c, (if ls[i].category == c { catalog.line_net(ls[i]) } else { 0 }));
+    sum_shift(ls, i + 1, catalog.line_net(ls[i]));
+    sum_nonneg(ls, i + 1);
+    cat_bounds(ls, i + 1, c);
+  }
+}
+
+lemma wt_shift(ls: seq<catalog.Line>, i: int, a: int)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures wtf(ls, i, a) == a + wtf(ls, i, 0)
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    wt_shift(ls, i + 1, a + catalog.weight(ls[i]));
+    wt_shift(ls, i + 1, catalog.weight(ls[i]));
+  }
+}
+
+lemma wt_nonneg(ls: seq<catalog.Line>, i: int)
+  requires 0 <= i && i <= len(ls) && lof(ls, i)
+  ensures wtf(ls, i, 0) >= 0
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    wt_shift(ls, i + 1, catalog.weight(ls[i]));
+    wt_nonneg(ls, i + 1);
+  }
+}
+
+// ---- the pieces of the invoice ----
+
+fn subtotal_of(o: Order) -> int
+  requires lof(o.lines, 0)
+{ sumf(o.lines, 0, 0) }
+
+fn share(disc: int, cn: int, sub: int) -> int
+  ensures sub <= 0 ==> result == 0
+  ensures sub > 0 ==> result == disc * cn / sub
+{
+  if sub <= 0 { 0 } else { disc * cn / sub }
+}
+
+lemma share_bounds(disc: int, cn: int, sub: int)
+  requires 0 <= disc && disc <= sub && 0 <= cn && cn <= sub
+  ensures 0 <= share(disc, cn, sub) && share(disc, cn, sub) <= cn
+{
+  if sub > 0 {
+    assert disc * cn >= 0;
+    assert disc * cn <= sub * cn;
+    assert disc * cn / sub >= 0;
+    assert disc * cn / sub <= cn;
+  }
+}
+
+fn cat_vat(o: Order, c: catalog.Category, rate: int, sub: int, disc: int) -> int
+  requires lof(o.lines, 0)
+{
+  ((catf(o.lines, 0, c, 0) - share(disc, catf(o.lines, 0, c, 0), sub)) * rate + 500) / 1000
+}
+
+fn reverse_charge(o: Order) -> bool
+  ensures result == (match o.customer {
+    Business(v) => len(v) > 0 && o.country != "FR",
+    _ => false,
+  })
+{
+  match o.customer {
+    Business(v) => len(v) > 0 && o.country != "FR",
+    _ => false,
+  }
+}
+
+fn vat_of(o: Order, sub: int, disc: int, ship: int) -> int
+  requires lof(o.lines, 0)
+{
+  if reverse_charge(o) { 0 } else {
+    cat_vat(o, catalog.Standard, 200, sub, disc) + cat_vat(o, catalog.Food, 55, sub, disc)
+    + cat_vat(o, catalog.Book, 55, sub, disc) + cat_vat(o, catalog.Medicine, 21, sub, disc)
+    + (ship * 200 + 500) / 1000
+  }
+}
+
+fn ship_by_weight(g: int) -> int
+  ensures g <= 0 ==> result == 0
+  ensures g > 0 && g <= 1000 ==> result == 490
+  ensures g > 1000 && g <= 5000 ==> result == 690
+  ensures g > 5000 ==> result == 990 + 100 * ((g - 5000 + 999) / 1000)
+  ensures g >= 0 ==> result >= 0
+{
+  if g <= 0 { 0 } else if g <= 1000 { 490 } else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+fn free_threshold(c: discounts.Customer) -> int
+  ensures match c { Member(_) => result == 5000, _ => result == 10000 }
+{
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn shipping_of(o: Order, net: int) -> int
+  requires lof(o.lines, 0)
+{
+  if o.coupon == discounts.FreeShipping { 0 }
+  else if net >= free_threshold(o.customer) { 0 }
+  else { ship_by_weight(wtf(o.lines, 0, 0)) }
+}
+
+fn discount_of(o: Order, sub: int) -> int
+  ensures result <= sub * 30 / 100
+  ensures result == discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub))
+      || result == sub * 30 / 100
+  ensures result <= discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub))
+{
+  if discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub)) < sub * 30 / 100 {
+    discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub))
+  } else { sub * 30 / 100 }
+}
+
+fn make_invoice(o: Order) -> Invoice
+  requires lof(o.lines, 0)
+{
+  Invoice(
+    subtotal_of(o),
+    discount_of(o, subtotal_of(o)),
+    subtotal_of(o) - discount_of(o, subtotal_of(o)),
+    shipping_of(o, subtotal_of(o) - discount_of(o, subtotal_of(o))),
+    vat_of(o, subtotal_of(o), discount_of(o, subtotal_of(o)),
+      shipping_of(o, subtotal_of(o) - discount_of(o, subtotal_of(o)))),
+    subtotal_of(o) - discount_of(o, subtotal_of(o))
+      + shipping_of(o, subtotal_of(o) - discount_of(o, subtotal_of(o)))
+      + vat_of(o, subtotal_of(o), discount_of(o, subtotal_of(o)),
+          shipping_of(o, subtotal_of(o) - discount_of(o, subtotal_of(o)))))
+}
+
+lemma cat_vat_nonneg(o: Order, c: catalog.Category, rate: int, disc: int)
+  requires lof(o.lines, 0) && rate >= 0 && 0 <= disc && disc <= subtotal_of(o)
+  ensures cat_vat(o, c, rate, subtotal_of(o), disc) >= 0
+{
+  cat_bounds(o.lines, 0, c);
+  share_bounds(disc, catf(o.lines, 0, c, 0), subtotal_of(o));
+  assert catf(o.lines, 0, c, 0) - share(disc, catf(o.lines, 0, c, 0), subtotal_of(o)) >= 0;
+  assert (catf(o.lines, 0, c, 0) - share(disc, catf(o.lines, 0, c, 0), subtotal_of(o))) * rate >= 0;
+}
+
+lemma invoice_facts(o: Order)
+  requires lof(o.lines, 0) && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+  ensures make_invoice(o).discount >= 0
+  ensures make_invoice(o).discount <= make_invoice(o).subtotal * 30 / 100
+  ensures make_invoice(o).net == make_invoice(o).subtotal - make_invoice(o).discount
+  ensures make_invoice(o).total == make_invoice(o).net + make_invoice(o).shipping + make_invoice(o).vat
+  ensures make_invoice(o).total >= 0
+{
+  sum_nonneg(o.lines, 0);
+  wt_nonneg(o.lines, 0);
+  let sub = subtotal_of(o);
+  let cd = discounts.customer_discount(o.customer, sub);
+  assert cd >= 0;
+  let cp = discounts.coupon_discount(o.coupon, sub - cd);
+  assert cp >= 0;
+  let disc = discount_of(o, sub);
+  assert disc >= 0;
+  assert disc <= sub;
+  let ship = shipping_of(o, sub - disc);
+  assert ship >= 0;
+  cat_vat_nonneg(o, catalog.Standard, 200, disc);
+  cat_vat_nonneg(o, catalog.Food, 55, disc);
+  cat_vat_nonneg(o, catalog.Book, 55, disc);
+  cat_vat_nonneg(o, catalog.Medicine, 21, disc);
+  assert vat_of(o, sub, disc, ship) >= 0;
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures len(o.lines) > 1000 ==> result == option.Err("too many lines")
+  ensures len(o.lines) >= 1 && len(o.lines) <= 1000 && !lof(o.lines, 0)
+    ==> result == option.Err("bad line")
+  ensures len(o.lines) >= 1 && len(o.lines) <= 1000 && lof(o.lines, 0)
+    && !discounts.customer_ok(o.customer) ==> result == option.Err("bad customer")
+  ensures len(o.lines) >= 1 && len(o.lines) <= 1000 && lof(o.lines, 0)
+    && discounts.customer_ok(o.customer) && !discounts.coupon_ok(o.coupon) ==> result == option.Err("bad coupon")
+  ensures len(o.lines) >= 1 && len(o.lines) <= 1000 && lof(o.lines, 0)
+    && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+    ==> result == option.Ok(make_invoice(o))
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+    Err(_) => true,
+  }
+{
+  if len(o.lines) == 0 { option.Err("empty order") }
+  else if len(o.lines) > 1000 { option.Err("too many lines") }
+  else if !lof(o.lines, 0) { option.Err("bad line") }
+  else if !discounts.customer_ok(o.customer) { option.Err("bad customer") }
+  else if !discounts.coupon_ok(o.coupon) { option.Err("bad coupon") }
+  else {
+    invoice_facts(o);
+    option.Ok(make_invoice(o))
+  }
+}

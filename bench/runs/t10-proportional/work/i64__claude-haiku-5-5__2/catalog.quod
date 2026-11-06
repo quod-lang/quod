@@ -1,0 +1,40 @@
+// catalog.quod: the products, and the arithmetic of one line.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+// A line is valid when its numbers are in range (all bounds included).
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+// Volume discount, in percent: none for a book.
+fn volume_percent(c: Category, qty: int) -> int {
+  match c {
+    Book => 0,
+    _ => if qty >= 100 { 10 } else if qty >= 10 { 5 } else { 0 },
+  }
+}
+
+// Net amount of a line, in cents, rounded down.
+fn line_net(c: Category, qty: int, unit: int) -> int {
+  qty * unit - qty * unit * volume_percent(c, qty) / 100
+}
+
+// Total weight of a line, in grams.
+fn line_weight(qty: int, grams: int) -> int {
+  qty * grams
+}
+
+// VAT rate of a category, in per thousand.
+fn rate(c: Category) -> int {
+  match c {
+    Standard => 200,
+    Food => 55,
+    Book => 55,
+    Medicine => 21,
+  }
+}

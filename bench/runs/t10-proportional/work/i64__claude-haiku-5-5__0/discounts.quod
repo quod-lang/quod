@@ -1,0 +1,98 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn wide(x: i32) -> int { x }
+
+// Validation of the customer: a Member has a number of years that is not negative.
+fn customer_ok(c: Customer) -> bool {
+  match c {
+    Member(y) => y >= 0,
+    _ => true,
+  }
+}
+
+// Validation of the coupon: a Percent is in 0..50, a Fixed is not negative.
+fn coupon_ok(c: Coupon) -> bool {
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+// The discount of the customer, on the subtotal.
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+// The discount of the coupon, on what remains after the customer discount.
+fn coupon_discount(c: Coupon, base: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => base * wide(p) / 100,
+    Fixed(v) => if wide(v) < base { wide(v) } else { base },
+    FreeShipping => 0,
+  }
+}
+
+fn is_percent(c: Coupon) -> bool {
+  match c {
+    Percent(_) => true,
+    _ => false,
+  }
+}
+
+fn percent_value(c: Coupon) -> int {
+  match c {
+    Percent(p) => wide(p),
+    _ => 0,
+  }
+}
+
+fn is_free_coupon(c: Coupon) -> bool {
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+// The subtotal from which shipping is free.
+fn free_threshold(c: Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+// A business outside France with a VAT number: the reverse charge, no VAT.
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c {
+    Business(number) => len(number) > 0 && country != "FR",
+    _ => false,
+  }
+}
+
+lemma customer_bounds(c: Customer, s: int)
+  requires 0 <= s
+  ensures 0 <= customer_discount(c, s) && customer_discount(c, s) <= s
+{
+}
+
+lemma coupon_multiply_bound(p: int, b: int)
+  requires 0 <= p && p <= 50 && 0 <= b
+  ensures 0 <= b * p / 100 && b * p / 100 <= b
+{
+}
+
+lemma coupon_bounds(c: Coupon, b: int)
+  requires 0 <= b && coupon_ok(c)
+  ensures 0 <= coupon_discount(c, b) && coupon_discount(c, b) <= b
+{
+  if is_percent(c) {
+    coupon_multiply_bound(percent_value(c), b);
+  }
+}

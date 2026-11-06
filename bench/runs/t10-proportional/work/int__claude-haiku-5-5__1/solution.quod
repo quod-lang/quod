@@ -1,0 +1,247 @@
+// The billing engine: validates an order, then prices it in cents.
+
+import catalog
+import discounts
+import option
+
+struct Order {
+  lines: seq<catalog.Line>,
+  customer: discounts.Customer,
+  coupon: discounts.Coupon,
+  country: string,
+}
+
+struct Invoice {
+  subtotal: int,
+  discount: int,
+  net: int,
+  shipping: int,
+  vat: int,
+  total: int,
+}
+
+// The lines of the order are a non-empty list of at most 1000 well formed lines.
+private fn valid_lines(lines: seq<catalog.Line>) -> bool {
+  0 < len(lines) && len(lines) <= 1000 && catalog.lines_ok(lines)
+}
+
+// The sum of the nets of all the lines.
+private fn subtotal_of(lines: seq<catalog.Line>) -> int {
+  catalog.category_net(lines, catalog.Standard, 0)
+    + catalog.category_net(lines, catalog.Food, 0)
+    + catalog.category_net(lines, catalog.Book, 0)
+    + catalog.category_net(lines, catalog.Medicine, 0)
+}
+
+// The customer discount and the coupon discount together, at most 30% of the subtotal.
+private fn discount_of(sub: int, cd: int, kd: int) -> int {
+  if cd + kd < sub * 30 / 100 { cd + kd } else { sub * 30 / 100 }
+}
+
+// The share of a category in the discount, in proportion to its net.
+private fn share(disc: int, cat_net: int, sub: int) -> int {
+  if sub == 0 { 0 } else { disc * cat_net / sub }
+}
+
+// The VAT rate of a category, in thousandths.
+private fn rate_of(c: catalog.Category) -> int {
+  match c {
+    Standard => 200,
+    Food => 55,
+    Book => 55,
+    Medicine => 21,
+  }
+}
+
+// The VAT of a base at a rate per thousand, rounded to the nearest cent.
+private fn vat_of(base: int, rate: int) -> int {
+  (base * rate + 500) / 1000
+}
+
+// The VAT of a category: its net less its share of the discount, at its rate.
+private fn category_vat(lines: seq<catalog.Line>, c: catalog.Category, disc: int, sub: int) -> int {
+  vat_of(catalog.category_net(lines, c, 0) - share(disc, catalog.category_net(lines, c, 0), sub), rate_of(c))
+}
+
+// The shipping for a total weight in grams, when it is not free.
+private fn shipping_by_weight(g: int) -> int {
+  if g == 0 {
+    0
+  } else {
+    if g <= 1000 {
+      490
+    } else {
+      if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+    }
+  }
+}
+
+// The net from which shipping is free: 5000 for a member, 10000 for anyone else.
+private fn free_shipping_from(c: discounts.Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+// Shipping is free with the coupon FreeShipping, or from the threshold on the net.
+private fn shipping_model(o: Order) -> int {
+  if o.coupon == discounts.FreeShipping || discount_model_net(o) >= free_shipping_from(o.customer) {
+    0
+  } else {
+    shipping_by_weight(catalog.weight(o.lines, 0))
+  }
+}
+
+// The net of the order: subtotal less discount.
+private fn discount_model_net(o: Order) -> int {
+  subtotal_of(o.lines) - discount_model(o)
+}
+
+// The discount of the order.
+private fn discount_model(o: Order) -> int {
+  discount_of(
+    subtotal_of(o.lines),
+    discounts.customer_discount(o.customer, subtotal_of(o.lines)),
+    discounts.coupon_discount(
+      o.coupon,
+      subtotal_of(o.lines) - discounts.customer_discount(o.customer, subtotal_of(o.lines)),
+    ),
+  )
+}
+
+// A business in the EU, outside France, with a VAT number, pays no VAT.
+private fn reverse_charge(o: Order) -> bool {
+  match o.customer {
+    Business(vat_number) => vat_number != "" && o.country != "FR",
+    _ => false,
+  }
+}
+
+// The VAT of the whole order: the four categories and the shipping.
+private fn vat_model(o: Order) -> int {
+  if reverse_charge(o) {
+    0
+  } else {
+    category_vat(o.lines, catalog.Standard, discount_model(o), subtotal_of(o.lines))
+      + category_vat(o.lines, catalog.Food, discount_model(o), subtotal_of(o.lines))
+      + category_vat(o.lines, catalog.Book, discount_model(o), subtotal_of(o.lines))
+      + category_vat(o.lines, catalog.Medicine, discount_model(o), subtotal_of(o.lines))
+      + vat_of(shipping_model(o), 200)
+  }
+}
+
+// A share is at most the category net, when the discount is at most the subtotal.
+lemma share_bounds(disc: int, cat_net: int, sub: int)
+  requires 0 <= disc && disc <= sub && 0 <= cat_net
+  ensures 0 <= share(disc, cat_net, sub) && share(disc, cat_net, sub) <= cat_net
+{
+  if sub > 0 {
+    assert disc * cat_net <= sub * cat_net;
+    assert (sub * cat_net) / sub == cat_net;
+  }
+}
+
+// The base of a customer discount is never negative: the discount is at most the subtotal.
+lemma customer_discount_bounds(c: discounts.Customer, sub: int)
+  requires sub >= 0
+  ensures 0 <= discounts.customer_discount(c, sub) && discounts.customer_discount(c, sub) <= sub
+{
+  assert 0 <= discounts.customer_percent(c, sub) && discounts.customer_percent(c, sub) <= 5;
+  assert sub * discounts.customer_percent(c, sub) <= sub * 5;
+}
+
+// A coupon discount on a nonnegative base is nonnegative.
+lemma coupon_discount_nonneg(k: discounts.Coupon, base: int)
+  requires base >= 0
+  requires discounts.coupon_ok(k)
+  ensures discounts.coupon_discount(k, base) >= 0
+{
+}
+
+// The VAT of a base, at a nonnegative rate, is nonnegative.
+lemma vat_of_nonneg(base: int, rate: int)
+  requires base >= 0 && rate >= 0
+  ensures vat_of(base, rate) >= 0
+{
+  assert base * rate >= 0;
+}
+
+// The VAT of a category is nonnegative when the discount is between 0 and the subtotal.
+lemma category_vat_nonneg(lines: seq<catalog.Line>, c: catalog.Category, disc: int, sub: int)
+  requires catalog.lines_ok(lines)
+  requires 0 <= disc && disc <= sub
+  ensures category_vat(lines, c, disc, sub) >= 0
+{
+  catalog.category_net_nonneg(lines, c, 0);
+  share_bounds(disc, catalog.category_net(lines, c, 0), sub);
+  vat_of_nonneg(catalog.category_net(lines, c, 0) - share(disc, catalog.category_net(lines, c, 0), sub), rate_of(c));
+}
+
+// The invoice of a valid order, field by field.
+private fn invoice_model(o: Order) -> Invoice {
+  Invoice(
+    subtotal_of(o.lines),
+    discount_model(o),
+    discount_model_net(o),
+    shipping_model(o),
+    vat_model(o),
+    discount_model_net(o) + shipping_model(o) + vat_model(o),
+  )
+}
+
+// The price of an order, or the first rule it breaks.
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures len(o.lines) > 1000 ==> result == option.Err("too many lines")
+  ensures 0 < len(o.lines) && len(o.lines) <= 1000 && !catalog.lines_ok(o.lines)
+    ==> result == option.Err("bad line")
+  ensures valid_lines(o.lines) && !discounts.customer_ok(o.customer)
+    ==> result == option.Err("bad customer")
+  ensures valid_lines(o.lines) && discounts.customer_ok(o.customer) && !discounts.coupon_ok(o.coupon)
+    ==> result == option.Err("bad coupon")
+  ensures valid_lines(o.lines) && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+    ==> result == option.Ok(invoice_model(o))
+  ensures valid_lines(o.lines) && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+    ==> match result {
+      Ok(i) => i.net == i.subtotal - i.discount
+        && i.total == i.net + i.shipping + i.vat
+        && i.discount >= 0
+        && i.discount <= i.subtotal * 30 / 100
+        && i.total >= 0,
+      Err(_) => false,
+    }
+{
+  if len(o.lines) == 0 { return option.Err("empty order"); }
+  if len(o.lines) > 1000 { return option.Err("too many lines"); }
+  if !catalog.lines_ok(o.lines) { return option.Err("bad line"); }
+  if !discounts.customer_ok(o.customer) { return option.Err("bad customer"); }
+  if !discounts.coupon_ok(o.coupon) { return option.Err("bad coupon"); }
+
+  catalog.category_net_nonneg(o.lines, catalog.Standard, 0);
+  catalog.category_net_nonneg(o.lines, catalog.Food, 0);
+  catalog.category_net_nonneg(o.lines, catalog.Book, 0);
+  catalog.category_net_nonneg(o.lines, catalog.Medicine, 0);
+
+  let sub: int = subtotal_of(o.lines);
+  assert sub >= 0;
+  let cd: int = discounts.customer_discount(o.customer, sub);
+  customer_discount_bounds(o.customer, sub);
+  let kd: int = discounts.coupon_discount(o.coupon, sub - cd);
+  coupon_discount_nonneg(o.coupon, sub - cd);
+  let disc: int = discount_of(sub, cd, kd);
+  assert 0 <= disc && disc <= sub;
+  let net: int = sub - disc;
+
+  category_vat_nonneg(o.lines, catalog.Standard, disc, sub);
+  category_vat_nonneg(o.lines, catalog.Food, disc, sub);
+  category_vat_nonneg(o.lines, catalog.Book, disc, sub);
+  category_vat_nonneg(o.lines, catalog.Medicine, disc, sub);
+  let shipping: int = shipping_model(o);
+  assert shipping >= 0;
+  vat_of_nonneg(shipping, 200);
+  let vat: int = vat_model(o);
+  assert vat >= 0;
+  let total: int = net + shipping + vat;
+  return option.Ok(invoice_model(o));
+}

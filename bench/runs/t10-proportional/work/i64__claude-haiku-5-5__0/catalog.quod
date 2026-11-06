@@ -1,0 +1,59 @@
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn wide(x: i32) -> int { x }
+
+// A line whose numbers are all in range.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn gross(l: Line) -> int { wide(l.qty) * wide(l.unit_cents) }
+
+// The net of a line: the volume discount (10% from 100, 5% from 10), none for a Book.
+fn net(l: Line) -> int {
+  if l.category == Book {
+    gross(l)
+  } else if l.qty >= 100 {
+    gross(l) - gross(l) * 10 / 100
+  } else if l.qty >= 10 {
+    gross(l) - gross(l) * 5 / 100
+  } else {
+    gross(l)
+  }
+}
+
+// The weight of a line, in grams.
+fn weight(l: Line) -> int { wide(l.qty) * wide(l.grams) }
+
+// For a valid line: its gross is at most 1e12, its net is between 0 and that, its weight at most 1e10.
+lemma gross_bound(a: int, b: int)
+  requires 1 <= a && a <= 10000 && 0 <= b && b <= 100000000
+  ensures a * b <= 1000000000000
+{
+}
+
+lemma net_bound(l: Line)
+  ensures line_ok(l) ==> (0 <= net(l) && net(l) <= 1000000000000)
+{
+  if line_ok(l) {
+    gross_bound(wide(l.qty), wide(l.unit_cents));
+  }
+}
+
+lemma weight_prod_bound(a: int, b: int)
+  requires 1 <= a && a <= 10000 && 0 <= b && b <= 1000000
+  ensures a * b <= 10000000000
+{
+}
+
+lemma weight_bound(l: Line)
+  ensures line_ok(l) ==> (0 <= weight(l) && weight(l) <= 10000000000)
+{
+  if line_ok(l) {
+    weight_prod_bound(wide(l.qty), wide(l.grams));
+  }
+}

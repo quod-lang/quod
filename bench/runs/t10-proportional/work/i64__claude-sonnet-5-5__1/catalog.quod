@@ -1,0 +1,39 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn mul(a: int, b: int) -> int { a * b }
+
+fn gross(l: Line) -> int { mul(l.qty, l.unit_cents) }
+
+fn vol_pct(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+fn line_net(l: Line) -> int {
+  gross(l) - gross(l) * vol_pct(l) / 100
+}
+
+fn weight(l: Line) -> int { mul(l.qty, l.grams) }
+
+lemma line_bound(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+    && 0 <= weight(l) && weight(l) <= 10000000000
+{
+  let q: int = l.qty;
+  let u: int = l.unit_cents;
+  let g: int = l.grams;
+  assert q * u <= 10000 * u;
+  assert 0 <= q * u;
+  assert q * g <= 10000 * g;
+  assert 0 <= q * g;
+  assert gross(l) == q * u;
+  assert weight(l) == q * g;
+}

@@ -1,0 +1,129 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+fn check(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" }
+  else { if len(o.lines) > 1000 { "too many lines" }
+  else { if !catalog.all_valid(o.lines, 0) { "bad line" }
+  else { if !discounts.customer_ok(o.customer) { "bad customer" }
+  else { if !discounts.coupon_ok(o.coupon) { "bad coupon" } else { "" } } } } }
+}
+
+fn subtotal(o: Order) -> int { catalog.sum_net(o.lines) }
+
+fn cust_disc(o: Order) -> int {
+  subtotal(o) * discounts.customer_pct(o.customer, subtotal(o)) / 100
+}
+
+fn coupon_disc(o: Order) -> int {
+  discounts.coupon_amount(o.coupon, subtotal(o) - cust_disc(o))
+}
+
+fn discount(o: Order) -> int {
+  if cust_disc(o) + coupon_disc(o) < subtotal(o) * 30 / 100 { cust_disc(o) + coupon_disc(o) } else { subtotal(o) * 30 / 100 }
+}
+
+fn net(o: Order) -> int { subtotal(o) - discount(o) }
+
+fn threshold(c: discounts.Customer) -> int {
+  match c { Guest => 10000, Member(_) => 5000, Business(_) => 10000 }
+}
+
+fn ship_w(g: int) -> int {
+  if g <= 0 { 0 } else { if g <= 1000 { 490 } else { if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) } } }
+}
+
+fn free_ship(o: Order) -> bool {
+  (match o.coupon { FreeShipping => true, _ => false }) || net(o) >= threshold(o.customer)
+}
+
+fn shipping(o: Order) -> int {
+  if free_ship(o) { 0 } else { ship_w(catalog.total_weight(o.lines)) }
+}
+
+fn share(o: Order, c: catalog.Category) -> int {
+  if subtotal(o) == 0 { 0 } else { discount(o) * catalog.cat_net(o.lines, c) / subtotal(o) }
+}
+
+fn cat_vat(o: Order, c: catalog.Category) -> int {
+  ((catalog.cat_net(o.lines, c) - share(o, c)) * catalog.rate(c) + 500) / 1000
+}
+
+fn ship_vat(s: int) -> int { (s * 200 + 500) / 1000 }
+
+fn reverse_charge(o: Order) -> bool {
+  match o.customer { Business(v) => len(v) > 0 && o.country != "FR", _ => false }
+}
+
+fn vat(o: Order) -> int {
+  if reverse_charge(o) { 0 } else {
+    cat_vat(o, catalog.Standard) + cat_vat(o, catalog.Food) + cat_vat(o, catalog.Book) + cat_vat(o, catalog.Medicine) + ship_vat(shipping(o))
+  }
+}
+
+lemma share_bound(d: int, cn: int, s: int)
+  requires s > 0 && 0 <= d && d <= s && 0 <= cn
+  ensures 0 <= d * cn / s && d * cn / s <= cn
+{
+  assert (s - d) * cn >= 0;
+  assert d * cn <= s * cn;
+  assert d * cn / s <= cn;
+}
+
+lemma ship_bound(g: int)
+  requires 0 <= g && g <= 100000000000000
+  ensures 0 <= ship_w(g) && ship_w(g) <= 100000000000000
+{
+}
+
+lemma cat_share(o: Order, c: catalog.Category)
+  requires check(o) == ""
+  ensures 0 <= catalog.cat_net(o.lines, c) - share(o, c)
+    && catalog.cat_net(o.lines, c) - share(o, c) <= 1000000000000000
+    && 0 <= cat_vat(o, c) && cat_vat(o, c) <= 1000000000000000
+{
+  catalog.cat_bound(o.lines, 0, c, 0);
+  catalog.sum_bound(o.lines, 0, 0);
+  if subtotal(o) != 0 {
+    share_bound(discount(o), catalog.cat_net(o.lines, c), subtotal(o));
+  }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Err(m) => m == check(o) && m != "",
+    Ok(i) => check(o) == ""
+      && i.subtotal == subtotal(o) && i.discount == discount(o) && i.net == net(o)
+      && i.shipping == shipping(o) && i.vat == vat(o)
+      && i.total == net(o) + shipping(o) + vat(o)
+      && i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+  }
+{
+  if check(o) != "" {
+    return option.Err(check(o));
+  }
+  catalog.sum_bound(o.lines, 0, 0);
+  catalog.weight_bound(o.lines, 0, 0);
+  cat_share(o, catalog.Standard);
+  cat_share(o, catalog.Food);
+  cat_share(o, catalog.Book);
+  cat_share(o, catalog.Medicine);
+  assert 0 <= cust_disc(o) && cust_disc(o) <= subtotal(o);
+  assert 0 <= coupon_disc(o);
+  ship_bound(catalog.total_weight(o.lines));
+  let sub: i64 = to_i64(subtotal(o));
+  let disc: i64 = to_i64(discount(o));
+  let n: i64 = to_i64(net(o));
+  let sh: i64 = to_i64(shipping(o));
+  let v: i64 = to_i64(vat(o));
+  let t: i64 = to_i64(net(o) + shipping(o) + vat(o));
+  return option.Ok(Invoice(sub, disc, n, sh, v, t));
+}

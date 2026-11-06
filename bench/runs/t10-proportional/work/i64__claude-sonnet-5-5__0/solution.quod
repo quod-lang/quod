@@ -1,0 +1,249 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+fn valid_line(l: catalog.Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn all_valid(ls: seq<catalog.Line>, i: int) -> bool
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { true } else { if valid_line(ls[i]) { all_valid(ls, i + 1) } else { false } }
+}
+
+fn vol_pct(l: catalog.Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } },
+  }
+}
+
+fn gross_of(q: int, u: int) -> int { q * u }
+
+fn net_from(g: int, p: int) -> int { g - g * p / 100 }
+
+fn line_net(l: catalog.Line) -> int {
+  net_from(gross_of(l.qty, l.unit_cents), vol_pct(l))
+}
+
+lemma line_bound(l: catalog.Line)
+  requires valid_line(l)
+  ensures line_net(l) >= 0 && line_net(l) <= 1000000000000
+{
+  let g = gross_of(l.qty, l.unit_cents);
+  assert g >= 0;
+  assert l.qty * l.unit_cents <= 10000 * 100000000;
+  assert vol_pct(l) >= 0 && vol_pct(l) <= 10;
+  assert g * vol_pct(l) >= 0;
+  assert g * vol_pct(l) <= g * 10;
+  assert g * vol_pct(l) / 100 <= g;
+}
+
+fn sum_net(ls: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { sum_net(ls, i + 1, acc + line_net(ls[i])) }
+}
+
+fn cat_net(ls: seq<catalog.Line>, c: catalog.Category, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else {
+    if ls[i].category == c { cat_net(ls, c, i + 1, acc + line_net(ls[i])) } else { cat_net(ls, c, i + 1, acc) }
+  }
+}
+
+fn weight(ls: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { weight(ls, i + 1, acc + gross_of(ls[i].qty, ls[i].grams)) }
+}
+
+lemma sum_bound(ls: seq<catalog.Line>, i: int, acc: int)
+  requires 0 <= i && i <= len(ls) && all_valid(ls, i) && acc >= 0
+  ensures sum_net(ls, i, acc) >= acc && sum_net(ls, i, acc) <= acc + (len(ls) - i) * 1000000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) { line_bound(ls[i]); sum_bound(ls, i + 1, acc + line_net(ls[i])); }
+}
+
+lemma cat_bound(ls: seq<catalog.Line>, c: catalog.Category, i: int, acc: int)
+  requires 0 <= i && i <= len(ls) && all_valid(ls, i) && acc >= 0
+  ensures cat_net(ls, c, i, acc) >= acc && cat_net(ls, c, i, acc) <= acc + (len(ls) - i) * 1000000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    line_bound(ls[i]);
+    cat_bound(ls, c, i + 1, acc + line_net(ls[i]));
+    cat_bound(ls, c, i + 1, acc);
+  }
+}
+
+lemma weight_bound(ls: seq<catalog.Line>, i: int, acc: int)
+  requires 0 <= i && i <= len(ls) && all_valid(ls, i) && acc >= 0
+  ensures weight(ls, i, acc) >= acc && weight(ls, i, acc) <= acc + (len(ls) - i) * 10000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    assert ls[i].qty * ls[i].grams <= 10000 * 1000000;
+    weight_bound(ls, i + 1, acc + gross_of(ls[i].qty, ls[i].grams));
+  }
+}
+
+fn bad_customer(c: discounts.Customer) -> bool {
+  match c { Guest => false, Member(y) => y < 0, Business(_) => false }
+}
+
+fn bad_coupon(c: discounts.Coupon) -> bool {
+  match c { NoCoupon => false, Percent(p) => p < 0 || p > 50, Fixed(v) => v < 0, FreeShipping => false }
+}
+
+fn err_msg(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" } else {
+    if len(o.lines) > 1000 { "too many lines" } else {
+      if !all_valid(o.lines, 0) { "bad line" } else {
+        if bad_customer(o.customer) { "bad customer" } else {
+          if bad_coupon(o.coupon) { "bad coupon" } else { "" }
+        }
+      }
+    }
+  }
+}
+
+fn subtotal_of(o: Order) -> int { sum_net(o.lines, 0, 0) }
+
+fn cust_disc(c: discounts.Customer, s: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { s * 5 / 100 } else { s * 2 / 100 },
+    Business(_) => if s >= 100000 { s * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(c: discounts.Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn discount_cap(d: int, s: int) -> int {
+  if d < s * 30 / 100 { d } else { s * 30 / 100 }
+}
+
+fn discount_from(o: Order, s: int) -> int {
+  discount_cap(cust_disc(o.customer, s) + coupon_disc(o.coupon, s - cust_disc(o.customer, s)), s)
+}
+
+fn discount_of(o: Order) -> int {
+  discount_from(o, subtotal_of(o))
+}
+
+fn net_of(o: Order) -> int { subtotal_of(o) - discount_of(o) }
+
+fn free_threshold(c: discounts.Customer) -> int {
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn is_free(o: Order) -> bool {
+  match o.coupon {
+    FreeShipping => true,
+    _ => net_of(o) >= free_threshold(o.customer),
+  }
+}
+
+fn ship_w(g: int) -> int {
+  if g <= 0 { 0 } else { if g <= 1000 { 490 } else { if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) } } }
+}
+
+fn shipping_of(o: Order) -> int {
+  if is_free(o) { 0 } else { ship_w(weight(o.lines, 0, 0)) }
+}
+
+fn base_of(cn: int, d: int, s: int) -> int {
+  if s == 0 { cn } else { cn - d * cn / s }
+}
+
+fn vat_cat(o: Order, c: catalog.Category, rate: int) -> int {
+  (base_of(cat_net(o.lines, c, 0, 0), discount_of(o), subtotal_of(o)) * rate + 500) / 1000
+}
+
+fn reverse_charge(o: Order) -> bool {
+  match o.customer {
+    Business(v) => len(v) > 0 && o.country != "FR",
+    _ => false,
+  }
+}
+
+fn vat_of(o: Order) -> int {
+  if reverse_charge(o) { 0 } else {
+    vat_cat(o, catalog.Standard, 200) + vat_cat(o, catalog.Food, 55) + vat_cat(o, catalog.Book, 55)
+      + vat_cat(o, catalog.Medicine, 21) + (shipping_of(o) * 200 + 500) / 1000
+  }
+}
+
+lemma share_le(d: int, cn: int, s: int)
+  requires 0 <= d && d <= s && s > 0 && cn >= 0
+  ensures d * cn / s >= 0 && d * cn / s <= cn
+{
+  assert d * cn <= s * cn;
+  assert d * cn >= 0;
+  assert s * cn / s == cn;
+}
+
+lemma base_ok(d: int, cn: int, s: int)
+  requires 0 <= d && d <= s && s >= 0 && cn >= 0
+  ensures base_of(cn, d, s) >= 0 && base_of(cn, d, s) <= cn
+{
+  if s > 0 { share_le(d, cn, s); }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Err(m) => m == err_msg(o) && len(m) > 0,
+    Ok(i) => err_msg(o) == "" && i.subtotal == subtotal_of(o) && i.discount == discount_of(o)
+      && i.net == net_of(o) && i.shipping == shipping_of(o) && i.vat == vat_of(o)
+      && i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+  }
+{
+  if len(o.lines) == 0 { return option.Err("empty order"); }
+  if len(o.lines) > 1000 { return option.Err("too many lines"); }
+  if !all_valid(o.lines, 0) { return option.Err("bad line"); }
+  if bad_customer(o.customer) { return option.Err("bad customer"); }
+  if bad_coupon(o.coupon) { return option.Err("bad coupon"); }
+  sum_bound(o.lines, 0, 0);
+  weight_bound(o.lines, 0, 0);
+  cat_bound(o.lines, catalog.Standard, 0, 0);
+  cat_bound(o.lines, catalog.Food, 0, 0);
+  cat_bound(o.lines, catalog.Book, 0, 0);
+  cat_bound(o.lines, catalog.Medicine, 0, 0);
+  let s = subtotal_of(o);
+  let d = discount_of(o);
+  let n = net_of(o);
+  let sh = shipping_of(o);
+  let v = vat_of(o);
+  assert s >= 0 && s <= 1000000000000000;
+  assert d >= 0 && d <= s * 30 / 100;
+  let w = weight(o.lines, 0, 0);
+  assert w >= 0 && w <= 10000000000000;
+  assert sh >= 0 && sh <= 2000000000000;
+  base_ok(d, cat_net(o.lines, catalog.Standard, 0, 0), s);
+  base_ok(d, cat_net(o.lines, catalog.Food, 0, 0), s);
+  base_ok(d, cat_net(o.lines, catalog.Book, 0, 0), s);
+  base_ok(d, cat_net(o.lines, catalog.Medicine, 0, 0), s);
+  assert v >= 0 && v <= 2000000000000000;
+  return option.Ok(Invoice(to_i64(s), to_i64(d), to_i64(n), to_i64(sh), to_i64(v), to_i64(n + sh + v)));
+}

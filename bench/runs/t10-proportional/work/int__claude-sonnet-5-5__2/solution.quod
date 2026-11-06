@@ -1,0 +1,140 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+fn min2(a: int, b: int) -> int { if a < b { a } else { b } }
+
+fn share(d: int, c: int, s: int) -> int {
+  if s == 0 { 0 } else { d * c / s }
+}
+
+fn vat_cat(cnet: int, d: int, s: int, rate: int) -> int {
+  ((cnet - share(d, cnet, s)) * rate + 500) / 1000
+}
+
+fn threshold(c: discounts.Customer) -> int {
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn shipping_cost(o: Order, net: int, g: int) -> int {
+  if o.coupon == discounts.FreeShipping { 0 }
+  else if net >= threshold(o.customer) { 0 }
+  else if g == 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+fn reverse_charge(o: Order) -> bool {
+  match o.customer { Business(v) => len(v) > 0 && o.country != "FR", _ => false }
+}
+
+fn all_ok(o: Order) -> bool {
+  len(o.lines) <= 1000 && catalog.all_valid(o.lines, len(o.lines)) && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+}
+
+fn vat_total(o: Order, s: int, d: int, ship: int) -> int {
+  if reverse_charge(o) { 0 } else {
+    vat_cat(catalog.cat_net(o.lines, catalog.Standard, len(o.lines)), d, s, 200)
+    + vat_cat(catalog.cat_net(o.lines, catalog.Food, len(o.lines)), d, s, 55)
+    + vat_cat(catalog.cat_net(o.lines, catalog.Book, len(o.lines)), d, s, 55)
+    + vat_cat(catalog.cat_net(o.lines, catalog.Medicine, len(o.lines)), d, s, 21)
+    + (ship * 200 + 500) / 1000
+  }
+}
+
+fn fin(s: int, d: int, ship: int, vat: int) -> Invoice {
+  Invoice(s, d, s - d, ship, vat, s - d + ship + vat)
+}
+
+fn total_disc(o: Order, s: int, cd: int) -> int {
+  min2(cd + discounts.coupon_discount(o.coupon, s - cd), s * 30 / 100)
+}
+
+fn make3(o: Order, s: int, d: int) -> Invoice {
+  fin(s, d, shipping_cost(o, s - d, catalog.weight(o.lines, len(o.lines))), vat_total(o, s, d, shipping_cost(o, s - d, catalog.weight(o.lines, len(o.lines)))))
+}
+
+fn make(o: Order) -> Invoice {
+  make3(o, catalog.total_net(o.lines, len(o.lines)), total_disc(o, catalog.total_net(o.lines, len(o.lines)), discounts.customer_discount(o.customer, catalog.total_net(o.lines, len(o.lines)))))
+}
+
+fn quote(o: Order) -> option.Result<Invoice, string> {
+  if len(o.lines) == 0 { option.Err("empty order") }
+  else if len(o.lines) > 1000 { option.Err("too many lines") }
+  else if !catalog.all_valid(o.lines, len(o.lines)) { option.Err("bad line") }
+  else if !discounts.customer_ok(o.customer) { option.Err("bad customer") }
+  else if !discounts.coupon_ok(o.coupon) { option.Err("bad coupon") }
+  else { option.Ok(make(o)) }
+}
+
+lemma share_le(d: int, c: int, s: int)
+  requires 0 <= d && d <= s && 0 <= c && c <= s && s > 0
+  ensures 0 <= d * c / s && d * c / s <= c
+{
+  assert d * c <= s * c;
+  assert d * c >= 0;
+  assert (d * c / s) * s <= d * c;
+  assert d * c / s >= 0;
+  if d * c / s > c {
+    assert (d * c / s) * s >= (c + 1) * s;
+  }
+}
+
+lemma vat_cat_nonneg(c: int, d: int, s: int, rate: int)
+  requires 0 <= d && d <= s && 0 <= c && c <= s && rate >= 0
+  ensures vat_cat(c, d, s, rate) >= 0
+{
+  if s > 0 { share_le(d, c, s); }
+  assert (c - share(d, c, s)) >= 0;
+  assert (c - share(d, c, s)) * rate >= 0;
+}
+
+lemma quote_props(o: Order)
+  requires all_ok(o)
+  requires len(o.lines) > 0
+  ensures match make(o) {
+    Invoice(s, d, n, sh, v, t) => t == n + sh + v && n == s - d && d >= 0 && d <= s * 30 / 100 && t >= 0
+  }
+{
+  let n = len(o.lines);
+  catalog.sums_bounds(o.lines, catalog.Standard, n);
+  catalog.sums_bounds(o.lines, catalog.Food, n);
+  catalog.sums_bounds(o.lines, catalog.Book, n);
+  catalog.sums_bounds(o.lines, catalog.Medicine, n);
+  let s = catalog.total_net(o.lines, n);
+  let cd = discounts.customer_discount(o.customer, s);
+  let d = total_disc(o, s, cd);
+  assert s >= 0;
+  discounts.customer_discount_bounds(o.customer, s);
+  discounts.coupon_discount_bounds(o.coupon, s - cd);
+  assert discounts.coupon_discount(o.coupon, s - cd) >= 0;
+  assert s * 30 / 100 >= 0;
+  assert d >= 0;
+  assert d <= s * 30 / 100;
+  assert s * 30 / 100 <= s;
+  vat_cat_nonneg(catalog.cat_net(o.lines, catalog.Standard, n), d, s, 200);
+  vat_cat_nonneg(catalog.cat_net(o.lines, catalog.Food, n), d, s, 55);
+  vat_cat_nonneg(catalog.cat_net(o.lines, catalog.Book, n), d, s, 55);
+  vat_cat_nonneg(catalog.cat_net(o.lines, catalog.Medicine, n), d, s, 21);
+  let ship = shipping_cost(o, s - d, catalog.weight(o.lines, n));
+  assert ship >= 0;
+  assert (ship * 200 + 500) / 1000 >= 0;
+  assert vat_total(o, s, d, ship) >= 0;
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures result == quote(o)
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+    Err(_) => true,
+  }
+{
+  if all_ok(o) && len(o.lines) > 0 { quote_props(o); }
+  quote(o)
+}

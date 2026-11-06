@@ -1,0 +1,236 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+fn line_ok(l: catalog.Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn all_ok(ls: seq<catalog.Line>, n: nat) -> bool
+  requires n <= len(ls)
+  decreases n
+{
+  if n == 0 { true } else { all_ok(ls, n - 1) && line_ok(ls[n - 1]) }
+}
+
+fn vol_pct(l: catalog.Line) -> int {
+  if l.category == catalog.Book { 0 } else { if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } } }
+}
+
+fn gross(l: catalog.Line) -> int {
+  l.qty * l.unit_cents
+}
+
+fn line_net(l: catalog.Line) -> int {
+  gross(l) - gross(l) * vol_pct(l) / 100
+}
+
+fn sub_total(ls: seq<catalog.Line>, n: nat) -> int
+  requires n <= len(ls)
+  decreases n
+{
+  if n == 0 { 0 } else { sub_total(ls, n - 1) + line_net(ls[n - 1]) }
+}
+
+fn cat_net(ls: seq<catalog.Line>, c: catalog.Category, n: nat) -> int
+  requires n <= len(ls)
+  decreases n
+{
+  if n == 0 { 0 } else {
+    if ls[n - 1].category == c { cat_net(ls, c, n - 1) + line_net(ls[n - 1]) } else { cat_net(ls, c, n - 1) }
+  }
+}
+
+fn weight(ls: seq<catalog.Line>, n: nat) -> int
+  requires n <= len(ls)
+  decreases n
+{
+  if n == 0 { 0 } else { weight(ls, n - 1) + ls[n - 1].qty * ls[n - 1].grams }
+}
+
+lemma line_net_bounds(l: catalog.Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= gross(l) && gross(l) >= 0
+{
+  assert gross(l) >= 0;
+  assert vol_pct(l) >= 0 && vol_pct(l) <= 10;
+  assert gross(l) * vol_pct(l) >= 0;
+  assert gross(l) * vol_pct(l) <= gross(l) * 10;
+  assert gross(l) * vol_pct(l) / 100 <= gross(l);
+}
+
+lemma totals_bounds(ls: seq<catalog.Line>, c: catalog.Category, n: nat)
+  requires n <= len(ls) && all_ok(ls, n)
+  ensures 0 <= cat_net(ls, c, n) && cat_net(ls, c, n) <= sub_total(ls, n) && weight(ls, n) >= 0
+  decreases n
+{
+  if n > 0 {
+    totals_bounds(ls, c, n - 1);
+    line_net_bounds(ls[n - 1]);
+  }
+}
+
+fn cust_ok(c: discounts.Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+fn coupon_ok(c: discounts.Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => 0 <= p && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+fn cust_disc(c: discounts.Customer, sub: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(c: discounts.Coupon, amt: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amt * p / 100,
+    Fixed(v) => if v < amt { v } else { amt },
+    FreeShipping => 0,
+  }
+}
+
+fn total_disc(c: discounts.Customer, k: discounts.Coupon, sub: int) -> int {
+  if cust_disc(c, sub) + coupon_disc(k, sub - cust_disc(c, sub)) < sub * 30 / 100
+  { cust_disc(c, sub) + coupon_disc(k, sub - cust_disc(c, sub)) } else { sub * 30 / 100 }
+}
+
+lemma disc_bounds(c: discounts.Customer, k: discounts.Coupon, sub: int)
+  requires sub >= 0 && cust_ok(c) && coupon_ok(k)
+  ensures 0 <= total_disc(c, k, sub) && total_disc(c, k, sub) <= sub * 30 / 100 && sub * 30 / 100 <= sub
+{
+  assert sub * 30 / 100 <= sub;
+  assert 0 <= cust_disc(c, sub) && cust_disc(c, sub) <= sub;
+  assert 0 <= coupon_disc(k, sub - cust_disc(c, sub));
+}
+
+fn ship_cost(g: int) -> int {
+  if g == 0 { 0 } else { if g <= 1000 { 490 } else { if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) } } }
+}
+
+fn is_free(c: discounts.Coupon) -> bool {
+  match c { FreeShipping => true, _ => false }
+}
+
+fn threshold(c: discounts.Customer) -> int {
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn shipping(c: discounts.Customer, k: discounts.Coupon, net: int, g: int) -> int {
+  if is_free(k) || net >= threshold(c) { 0 } else { ship_cost(g) }
+}
+
+fn rate(c: catalog.Category) -> int {
+  match c { Standard => 200, Food => 55, Book => 55, Medicine => 21 }
+}
+
+fn share(disc: int, cn: int, sub: int) -> int {
+  if sub == 0 { 0 } else { disc * cn / sub }
+}
+
+fn base_vat(base: int, r: int) -> int {
+  (base * r + 500) / 1000
+}
+
+fn cat_vat(ls: seq<catalog.Line>, c: catalog.Category, sub: int, disc: int) -> int
+  requires all_ok(ls, len(ls))
+{
+  base_vat(cat_net(ls, c, len(ls)) - share(disc, cat_net(ls, c, len(ls)), sub), rate(c))
+}
+
+fn reverse(c: discounts.Customer, country: string) -> bool {
+  match c { Business(v) => len(v) > 0 && country != "FR", _ => false }
+}
+
+fn vat_of(o: Order, sub: int, disc: int, ship: int) -> int
+  requires all_ok(o.lines, len(o.lines))
+{
+  if reverse(o.customer, o.country) { 0 } else {
+    cat_vat(o.lines, catalog.Standard, sub, disc) + cat_vat(o.lines, catalog.Food, sub, disc)
+    + cat_vat(o.lines, catalog.Book, sub, disc) + cat_vat(o.lines, catalog.Medicine, sub, disc)
+    + base_vat(ship, 200)
+  }
+}
+
+fn invoice_of(o: Order, sub: int, disc: int, ship: int) -> Invoice
+  requires all_ok(o.lines, len(o.lines))
+{
+  Invoice(sub, disc, sub - disc, ship, vat_of(o, sub, disc, ship), sub - disc + ship + vat_of(o, sub, disc, ship))
+}
+
+fn build(o: Order) -> Invoice
+  requires all_ok(o.lines, len(o.lines))
+{
+  invoice_of(o, sub_total(o.lines, len(o.lines)),
+    total_disc(o.customer, o.coupon, sub_total(o.lines, len(o.lines))),
+    shipping(o.customer, o.coupon,
+      sub_total(o.lines, len(o.lines)) - total_disc(o.customer, o.coupon, sub_total(o.lines, len(o.lines))),
+      weight(o.lines, len(o.lines))))
+}
+
+fn model(o: Order) -> option.Result<Invoice, string> {
+  if len(o.lines) == 0 { option.Err("empty order") } else {
+  if len(o.lines) > 1000 { option.Err("too many lines") } else {
+  if !all_ok(o.lines, len(o.lines)) { option.Err("bad line") } else {
+  if !cust_ok(o.customer) { option.Err("bad customer") } else {
+  if !coupon_ok(o.coupon) { option.Err("bad coupon") } else {
+    option.Ok(build(o))
+  } } } } }
+}
+
+lemma vat_nonneg(o: Order, sub: int, disc: int, ship: int)
+  requires all_ok(o.lines, len(o.lines)) && sub == sub_total(o.lines, len(o.lines)) && 0 <= disc && disc <= sub && ship >= 0
+  ensures vat_of(o, sub, disc, ship) >= 0
+{
+  totals_bounds(o.lines, catalog.Standard, len(o.lines));
+  totals_bounds(o.lines, catalog.Food, len(o.lines));
+  totals_bounds(o.lines, catalog.Book, len(o.lines));
+  totals_bounds(o.lines, catalog.Medicine, len(o.lines));
+  share_ok(disc, cat_net(o.lines, catalog.Standard, len(o.lines)), sub);
+  share_ok(disc, cat_net(o.lines, catalog.Food, len(o.lines)), sub);
+  share_ok(disc, cat_net(o.lines, catalog.Book, len(o.lines)), sub);
+  share_ok(disc, cat_net(o.lines, catalog.Medicine, len(o.lines)), sub);
+}
+
+lemma share_ok(disc: int, cn: int, sub: int)
+  requires 0 <= cn && cn <= sub && 0 <= disc && disc <= sub
+  ensures 0 <= share(disc, cn, sub) && share(disc, cn, sub) <= cn
+{
+  if sub > 0 {
+    assert disc * cn <= sub * cn;
+    assert disc * cn >= 0;
+    assert disc * cn / sub <= cn;
+  }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures result == model(o)
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+    Err(_) => true,
+  }
+{
+  if len(o.lines) == 0 { return option.Err("empty order"); }
+  if len(o.lines) > 1000 { return option.Err("too many lines"); }
+  if !all_ok(o.lines, len(o.lines)) { return option.Err("bad line"); }
+  if !cust_ok(o.customer) { return option.Err("bad customer"); }
+  if !coupon_ok(o.coupon) { return option.Err("bad coupon"); }
+  let sub = sub_total(o.lines, len(o.lines));
+  totals_bounds(o.lines, catalog.Standard, len(o.lines));
+  disc_bounds(o.customer, o.coupon, sub);
+  let disc = total_disc(o.customer, o.coupon, sub);
+  let ship = shipping(o.customer, o.coupon, sub - disc, weight(o.lines, len(o.lines)));
+  assert ship >= 0;
+  vat_nonneg(o, sub, disc, ship);
+  return option.Ok(build(o));
+}
