@@ -397,9 +397,12 @@ of time is not proved: the function's definition stays unknown to the solver.
   are `int`, `bool` is `bool`.
 - `quod build` generates code only for a program that verifies. With `--runtime-checks`, a function
   whose proofs fail is still built, and its contracts (requires, ensures, invariants before each
-  iteration and after the last one, asserts) are checked at run time. They raise `AssertionError`
-  and are not Python `assert`s, so `python -O` keeps them. An underspecified contract always blocks
-  the build: no run-time check can tell that a result is the intended one.
+  iteration and after the last one, asserts) are checked at run time, and so is what a type promises:
+  an `i32` or `i64` result of an operation, the `nat` an `int` becomes, a conversion. They raise
+  `AssertionError` and are not Python `assert`s, so `python -O` keeps them. So are the functions that
+  rest on such a function, and those it calls. A contract found underspecified blocks the build: no
+  run-time check can tell that a result is the intended one. When the solver cannot decide, it is a
+  warning.
 - **A Python caller proves nothing.** A public function checks its `requires` without quantifier or call, and
   that a `nat` parameter is `>= 0` (`ValueError`). A list of `nat` counts as quantified. The others stay the caller's duty, and its docstring says so; `--check-requires all` checks them
   too, at their cost. Calls between Quod functions check nothing.
@@ -438,7 +441,7 @@ of time is not proved: the function's definition stays unknown to the solver.
   The result stays a `BigInteger`.
 - A recursive function calls `EnsureSufficientExecutionStack`: too deep a recursion raises an exception
   instead of ending the process.
-- With `--runtime-checks`, unproved contracts raise `QuodContractException`, and bounds always raise.
+- With `--runtime-checks`, unproved contracts and what a type promises raise `QuodContractException` (an operation on `i32` or `i64` is computed without bounds, then checked), and the bounds of a list always raise.
 - The generator is not proved. The generated code is tested against the evaluator on the programs of the
   repository, for both targets, and against the hidden tests of VerifBench.
 

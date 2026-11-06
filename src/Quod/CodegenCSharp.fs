@@ -217,6 +217,31 @@ let private helpers =
             return b.ToString();
         }
 "
+      // in a function checked at run time: without a proof, nothing else says what a type promises
+      "fit",
+      "private static int _quod_fit32(BigInteger v)
+        {
+            if (v < int.MinValue || v > int.MaxValue) throw new QuodContractException(\"the value \" + v + \" does not fit in i32 (not proved by quod: checked at run time)\");
+            return (int)v;
+        }
+
+        private static long _quod_fit64(BigInteger v)
+        {
+            if (v < long.MinValue || v > long.MaxValue) throw new QuodContractException(\"the value \" + v + \" does not fit in i64 (not proved by quod: checked at run time)\");
+            return (long)v;
+        }
+
+        private static BigInteger _quod_fit_nat(BigInteger v)
+        {
+            if (v.Sign < 0) throw new QuodContractException(\"the value \" + v + \" is not a nat (not proved by quod: checked at run time)\");
+            return v;
+        }
+
+        private static int _quod_fit_char(BigInteger v)
+        {
+            if (v.Sign < 0 || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF)) throw new QuodContractException(\"the value \" + v + \" is not a Unicode scalar value (not proved by quod: checked at run time)\");
+            return (int)v;
+        }"
       "with", "private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
       "hash",
       "private static int _quod_hash<T>(IReadOnlyList<T> xs, Func<T, int> f)
@@ -330,6 +355,9 @@ type private Gen(checks: Set<string>) =
     let mutable inPlace: Set<string> = Set.empty
 
     member _.Used = used
+
+    /// Is the function being generated checked at run time (--runtime-checks)?
+    member val Checking = false with get, set
 
     /// The integer constants of the class: `BigInteger.One` or `_quod_2`, not `new BigInteger(2)` at each use.
     member _.Constant(n: BigInteger) =
@@ -481,6 +509,10 @@ type private Gen(checks: Set<string>) =
             | _ -> failwith "a match on no data type"
         | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
         | ECall(f, args) -> g.Call(f, args)
+        // computed without bounds: C# would wrap, in silence, a value that no proof says fits
+        | ENeg _ | EArith _ when g.Checking && isBounded e.Ty ->
+            g.Help "fit" |> ignore
+            (if e.Ty = TyI32 then "_quod_fit32(" else "_quod_fit64(") + g.Expr({ e with Ty = TyInt }, TyInt) + ")"
         | ENeg x when isBounded x.Ty && not (isBounded e.Ty) -> "(-new BigInteger(" + g.Expr(x, x.Ty) + "))"
         | ENeg x -> "(-" + g.Expr(x, TyInt) + ")"
         | ENot { Kind = EEq(a, b) } when (match shape (merge (shape a.Ty) (shape b.Ty)) with TyInt | TyBool -> true | _ -> false) ->
@@ -528,7 +560,11 @@ type private Gen(checks: Set<string>) =
                 let name = g.Bind(v, TyInt)
                 text <- f + "(" + l + ", " + h + ", " + name + " => " + g.Expr(body, TyBool) + ")")
             text
+        | EToNat x when g.Checking -> g.Help "fit" + "_nat(" + g.Expr(x, TyInt) + ")"
         | EToNat x -> g.Expr(x, TyInt)
+        | EConvert x when g.Checking && e.Ty <> TyNat ->
+            let name = match e.Ty with TyChar -> "_char(" | TyI32 -> "32(" | _ -> "64("
+            g.Help "fit" + name + g.Expr(x, TyInt) + ")"
         | EConvert x when e.Ty = TyChar || e.Ty = TyI32 -> "((int)" + g.Expr(x, TyInt) + ")"
         | EConvert x when e.Ty = TyI64 -> "((long)" + g.Expr(x, TyInt) + ")"
         | EConvert x -> "new BigInteger(" + g.Expr(x, TyChar) + ")"
@@ -837,6 +873,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                       .Append(indent).Append("}\n\n") |> ignore
             // the implementation, which Quod code calls
             let sb = realSb
+            g.Checking <- isChecked
             sb.Append(indent).Append("private static ").Append(csType f.Ret).Append(' ').Append(implName f.Name).Append('(').Append(ps).Append(")\n")
               .Append(indent).Append("{\n") |> ignore
             if f.IsRecursive then
@@ -853,6 +890,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 if not (returns items) then
                     sb.Append(body).Append("throw new InvalidOperationException(\"unreachable: the function was proved to return\");\n") |> ignore
             sb.Append(indent).Append("}\n\n") |> ignore
+            g.Checking <- false
         // the structs and enums: immutable classes, equal by their values. Quod holds its own
         // representation in `_f0`; a C# caller builds and reads through what checks and converts.
         let dataText = StringBuilder()
@@ -863,7 +901,8 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 dataText.Append(indent).Append("public abstract class ").Append(dataName).Append("\n").Append(indent).Append("{\n")
                         .Append(inner).Append("private ").Append(dataName).Append("() { }\n\n") |> ignore
             for c in d.DataCases do
-                let name = shortName c.CaseName
+                // a struct is its type: a copy of a generic has the name of the copy
+                let name = if d.IsStruct then dataName else shortName c.CaseName
                 let i2 = inner + "    "
                 let i3 = i2 + "    "
                 let fields = c.Fields |> List.indexed

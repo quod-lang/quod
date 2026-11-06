@@ -407,10 +407,13 @@ fonction reste inconnue du solveur.
   restent des tuples, `int`/`nat` deviennent `int`, `bool` reste `bool`.
 - `quod build` ne génère du code que pour un programme vérifié. Avec `--runtime-checks`, une
   fonction dont des preuves échouent est tout de même compilée, et ses contrats (requires, ensures,
-  invariants avant chaque itération et après la dernière, assert) sont vérifiés à l'exécution. Ils
-  lèvent `AssertionError` ; ce ne sont pas des `assert` Python, donc `python -O` les conserve. Un
-  contrat sous-spécifié bloque toujours la compilation : aucune vérification à l'exécution ne peut
-  dire qu'un résultat est celui voulu.
+  invariants avant chaque itération et après la dernière, assert) sont vérifiés à l'exécution, ainsi
+  que ce qu'un type promet : le résultat `i32` ou `i64` d'une opération, le `nat` que devient un `int`,
+  une conversion. Ils lèvent `AssertionError` ; ce ne sont pas des `assert` Python, donc `python -O`
+  les conserve. Il en va de même des fonctions qui reposent sur une telle fonction, et de celles
+  qu'elle appelle. Un contrat reconnu sous-spécifié bloque la compilation : aucune vérification à
+  l'exécution ne peut dire qu'un résultat est celui voulu. Quand le solveur ne peut pas trancher,
+  c'est un avertissement.
 - Dans une telle fonction, l'indexation et les tranches vérifient leurs bornes (Python ferait boucler
   un indice négatif et tronquerait une tranche), et une division par zéro lève `ZeroDivisionError`.
   Un `nat` qui deviendrait négatif n'est pas vérifié.
@@ -454,7 +457,7 @@ déplié, est classé `restated`.
   aussi les `requires` quantifiés.
 - Une fonction récursive appelle `EnsureSufficientExecutionStack` : une récursion trop profonde lève une
   exception au lieu de mettre fin au processus.
-- Avec `--runtime-checks`, les contrats non prouvés lèvent `QuodContractException`, et les bornes lèvent toujours.
+- Avec `--runtime-checks`, les contrats non prouvés et ce qu'un type promet lèvent `QuodContractException` (une opération sur `i32` ou `i64` est calculée sans borne, puis vérifiée), et les bornes d'une liste lèvent toujours.
 - Le générateur n'est pas prouvé. Le code généré est testé contre l'évaluateur sur les programmes du dépôt, pour
   les deux cibles, et contre les tests cachés de VerifBench.
 

@@ -86,6 +86,54 @@ def _quod_slice(xs, lo: int, hi: int):
     return xs[lo:hi]
 """
 
+/// What a type promises, in a function checked at run time: without a proof, nothing else says it.
+let private fitPrelude =
+    """
+
+def _quod_fit(v: int, lo: int, hi: int, what: str) -> int:
+    if not lo <= v <= hi:
+        raise _quod_AssertionError("the value " + _quod_string(v) + " does not fit in " + what + " (not proved by quod: checked at run time)")
+    return v
+
+
+def _quod_fit_nat(v: int) -> int:
+    if v < 0:
+        raise _quod_AssertionError("the value " + _quod_string(v) + " is not a nat (not proved by quod: checked at run time)")
+    return v
+
+
+def _quod_fit_char(v: int) -> str:
+    if not 0 <= v <= 0x10FFFF or 0xD800 <= v <= 0xDFFF:
+        raise _quod_AssertionError("the value " + _quod_string(v) + " is not a Unicode scalar value (not proved by quod: checked at run time)")
+    return _quod_chr(v)
+"""
+
+/// What a value holds is its own: the proofs rely on it, and the list a reader gets back is that very one
+/// (review of 0.3). A list everywhere else, except that it refuses to change.
+let private dataPrelude =
+    """
+
+from dataclasses import dataclass as _quod_dataclass
+
+
+class _quod_frozen_list(list):
+    __slots__ = ()
+
+    def _quod_refuse(self, *args, **kwargs):
+        raise _quod_TypeError("a list held by a Quod value cannot change")
+
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = _quod_refuse
+    append = extend = insert = pop = remove = clear = sort = reverse = _quod_refuse
+
+
+def _quod_frozen(x):
+    if _quod_type(x) is _quod_list:
+        return _quod_frozen_list(_quod_frozen(y) for y in x)
+    if _quod_type(x) is _quod_tuple:
+        return _quod_tuple(_quod_frozen(y) for y in x)
+    return x
+"""
+
 /// A string or a char at the public boundary: a surrogate is not a Unicode scalar value, and would
 /// contradict what was proved. Only in a module whose signatures have one.
 let private textPrelude =
@@ -130,20 +178,27 @@ let private implName (f: string) =
     | Some m, g -> "_quod_m_" + m + "." + pyName g
     | None, _ -> "_quod_f_" + f
 
-/// The Python class of a type or of a case: a copy of a generic has a name of its own for each case.
+/// The Python class of a case: a copy of a generic has a name of its own for each case.
 let private caseClass (d: DataDecl) (k: int) =
     let case = shortName d.DataCases.[k].CaseName
     pyName (if d.Origin <> d.DataName then shortName d.DataName + "_" + case else case)
 
 type private Gen(checks: Set<string>, local: Set<string>) =
     let mutable counter = 0
-    /// Through its module, if the type is not of this one.
+    /// Is the function being generated checked at run time (--runtime-checks)?
+    let mutable checking = false
+    /// Through its module if the type is not of this one, or else through an alias that no
+    /// parameter or local named `Leaf` can shadow (review of 0.3).
     let qualified (d: DataDecl) (cls: string) =
         match Quod.Modules.split d.DataName with
         | Some m, _ when not (local.Contains d.DataName) -> "_quod_m_" + m + "." + cls
-        | _ -> cls
-    /// Is the function being generated checked at run time (--runtime-checks)?
-    let mutable checking = false
+        | _ -> "_quod_c_" + cls
+    /// What a bounded type promises, where a function checked at run time computes it.
+    let fit (t: Ty) (term: string) =
+        if checking && isBounded t then
+            let lo, hi = (boundsOf t).Value
+            "_quod_fit(" + term + ", " + lo.ToString() + ", " + hi.ToString() + ", \"" + tyText t + "\")"
+        else term
     /// Locals of the function being generated that are extended in place (see appendable).
     let mutable inPlace: Set<string> = Set.empty
 
@@ -198,7 +253,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
             | _ -> failwith "a match on no data type"
         | ELen s -> "_quod_len(" + go s + ")"
         | ECall(f, args) -> implName f + "(" + (args |> List.map go |> String.concat ", ") + ")"
-        | ENeg x -> "(-" + go x + ")"
+        | ENeg x -> fit e.Ty ("(-" + go x + ")")
         | ENot x -> "(not " + go x + ")"
         | EArith(op, a, b) ->
             match op with
@@ -207,6 +262,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
             | OMul -> "(" + go a + " * " + go b + ")"
             | ODiv -> "_quod_div(" + go a + ", " + go b + ")"
             | OMod -> "_quod_mod(" + go a + ", " + go b + ")"
+            |> fit e.Ty
         | EConcat(a, b) -> "(" + go a + " + " + go b + ")"
         | ECmp(op, a, b) ->
             let o = match op with OLt -> "<" | OLe -> "<=" | OGt -> ">" | OGe -> ">="
@@ -222,8 +278,9 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | EQuant(q, v, lo, hi, body) ->
             let f = match q with Syntax.Forall -> "_quod_all" | Syntax.Exists -> "_quod_any"
             f + "(" + go body + " for " + pyName v + " in _quod_range(" + go lo + ", " + go hi + "))"
-        | EToNat x -> go x
-        | EConvert x when isBounded e.Ty -> go x
+        | EToNat x -> if checking then "_quod_fit_nat(" + go x + ")" else go x
+        | EConvert x when isBounded e.Ty -> fit e.Ty (go x)
+        | EConvert x when checking && e.Ty = TyChar -> "_quod_fit_char(" + go x + ")"
         | EConvert x -> (if e.Ty = TyChar then "_quod_chr(" else "_quod_ord(") + go x + ")"
 
     /// An argument from Python as the generated code expects it: sequences as lists, tuples as
@@ -389,6 +446,7 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
         sb.Append("import ").Append(m).Append(" as _quod_m_").Append(m).Append("\n") |> ignore
     if not (Codegen.calledModules prog).IsEmpty then sb.Append("\n") |> ignore
     sb.Append(prelude) |> ignore
+    if not checks.IsEmpty then sb.Append(fitPrelude) |> ignore
     let rec hasChar (t: Ty) =
         match t with
         | TyChar -> true
@@ -400,7 +458,7 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
        || prog.Types |> List.exists (fun d -> hasChar (TyData d)) then
         sb.Append(textPrelude) |> ignore
     if not prog.Types.IsEmpty then
-        sb.Append("\n\nfrom dataclasses import dataclass as _quod_dataclass\n\n\ndef _quod_frozen(x):\n    if _quod_type(x) is _quod_list:\n        return [_quod_frozen(y) for y in x]\n    if _quod_type(x) is _quod_tuple:\n        return _quod_tuple(_quod_frozen(y) for y in x)\n    return x\n") |> ignore
+        sb.Append(dataPrelude) |> ignore
         let dataGen = Gen(checks, local)
         for d in prog.Types do
             if not d.IsStruct then
@@ -428,6 +486,7 @@ and generateWith (sourceFile: string) (prog: TProgram) (checks: Set<string>) (al
                 if not checks'.IsEmpty then
                     sb.Append("\n    def __post_init__(self):\n") |> ignore
                     for line in checks' do sb.Append(line) |> ignore
+                sb.Append("\n\n_quod_c_").Append(caseClass d k).Append(" = ").Append(caseClass d k).Append("\n") |> ignore
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
     let dataNames = prog.Types |> List.collect (fun d -> (if d.IsStruct then [] else [ pyName (shortName d.DataName) ]) @ (d.DataCases |> List.mapi (fun k _ -> caseClass d k)))
     sb.Append("\n\n__all__ = [").Append((fns |> List.filter (fun f -> not f.IsPrivate) |> List.map (fun f -> "\"" + pyName f.Name + "\"")) @ (dataNames |> List.map (fun n -> "\"" + n + "\"")) |> String.concat ", ").Append("]\n") |> ignore

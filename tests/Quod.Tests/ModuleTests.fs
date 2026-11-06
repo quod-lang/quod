@@ -517,3 +517,56 @@ let ``csharp: a copy of a generic can hold a type of the file`` () =
             | Result.Error why -> failwith why
         | other -> failwithf "%A" other)
 
+[<Fact>]
+let ``python: a name of a variable does not hide a case or a struct`` () =
+    let src = "enum Tree { Leaf, Node(int) }\nstruct Pt { x: int }\n\nfn is_leaf(t: Tree, Leaf: int) -> bool\n  ensures result == match t { Leaf => true, Node(_) => false }\n{\n  match t { Leaf => true, _ => false }\n}\n\nfn probe() -> bool\n  ensures result\n{\n  is_leaf(Leaf, 0)\n}\n\nfn build(v: int) -> Pt\n  ensures result.x == v\n{\n  let Pt: int = v;\n  Pt(Pt)\n}\n\nfn inner(t: Tree) -> int\n  ensures result == match t { Node(Leaf) => Leaf, Leaf => 0 }\n{\n  match t { Node(Leaf) => Leaf, Leaf => 0 }\n}\n"
+    Assert.Equal("True 4 7", pythonOf src "import main; print(main.probe(), main.build(4).x, main.inner(main.Node(7)))" false)
+
+[<Fact>]
+let ``python: a list read from a value cannot change it`` () =
+    let src = "struct Grid { rows: seq<seq<nat>> }\n\nfn first(g: Grid) -> bool\n  requires len(g.rows) > 0 && len(g.rows[0]) > 0\n  ensures result\n{\n  g.rows[0][0] >= 0\n}\n\nfn longer(g: Grid) -> seq<seq<nat>>\n  ensures result == g.rows + [[1]]\n{\n  g.rows + [[1]]\n}\n"
+    Assert.Contains("TypeError", pythonOf src "import main; g = main.Grid([[1]]); g.rows[0][0] = -1" false)
+    Assert.Contains("TypeError", pythonOf src "import main; g = main.Grid([[1]]); g.rows.append([])" false)
+    Assert.Equal("[[1], [1], 2] True", pythonOf src "import main; g = main.Grid([[1]]); r = main.longer(g); r.append(2); print(r, main.first(g))" false)
+
+let private unprovedTypes = "fn scale(x: i32) -> i32 {\n  x * 1000\n}\n\nfn shrink(n: nat) -> nat {\n  n - 1\n}\n\nfn minus(x: i32) -> i32 {\n  -x\n}\n\nfn narrow(x: int) -> i32 {\n  to_i32(x)\n}\n\nfn letter(x: int) -> char {\n  char_of(x)\n}\n"
+
+[<Fact>]
+let ``with runtime checks, what a type promises is checked`` () =
+    for call in [ "scale(2**30)"; "shrink(0)"; "minus(-2**31)"; "narrow(2**40)"; "letter(0xD800)" ] do
+        Assert.Contains("(not proved by quod", pythonOf unprovedTypes ("import main; print(main." + call + ")") true)
+    Assert.Equal("3000 3 -5 3 a", pythonOf unprovedTypes "import main; print(main.scale(3), main.shrink(4), main.minus(5), main.narrow(3), main.letter(97))" true)
+
+[<Fact>]
+let ``with runtime checks, a proved function is not called against its requires`` () =
+    let src = "fn half(n: int) -> int\n  requires n >= 0\n  ensures result == n / 2\n{\n  n / 2\n}\n\nfn wrong(x: int) -> int {\n  half(x - 5)\n}\n"
+    Assert.Contains("precondition", pythonOf src "import main; print(main.wrong(1))" true)
+
+[<Fact>]
+let ``csharp: with runtime checks, what a type promises is computed without bounds, then checked`` () =
+    withFiles [ "main", unprovedTypes ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r true with
+            | Ok g ->
+                Assert.Contains("_quod_fit32((new BigInteger(x) * new BigInteger(1000)))", g.Code)
+                Assert.Contains("_quod_fit_nat(", g.Code)
+                Assert.Contains("_quod_fit_char(", g.Code)
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``csharp: a generic struct has the name of its copy`` () =
+    withFiles [ "main", "struct Box<T> { v: T }\n\nfn one() -> Box<int>\n  ensures result == Box(1)\n{\n  Box(1)\n}\n" ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Ok g ->
+                Assert.Contains("public sealed class Box_int : IEquatable<Box_int>", g.Code)
+                Assert.Contains("public Box_int(BigInteger v)", g.Code)
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``a lemma cannot be generic, and says so`` () =
+    typeError "lemma same<T>(a: T)\n{\n}\n" "a lemma cannot be generic"

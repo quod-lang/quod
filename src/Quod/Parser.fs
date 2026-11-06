@@ -545,7 +545,10 @@ type private Parser(file: string, toks: Token[]) =
         let isLemma = p.IsKw "lemma"
         p.Next() |> ignore
         let name = p.Ident(if isLemma then "a lemma name after 'lemma'" else "a function name after 'fn'")
+        let genericAt = p.Peek.Span
         let generics = p.Generics()
+        if isLemma && not generics.IsEmpty then
+            p.Fail(genericAt, "a lemma cannot be generic: write a generic function that returns a bool")
         p.Sym "("
         let ps = ResizeArray<Param>()
         if not (p.IsSym ")") then

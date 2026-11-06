@@ -286,3 +286,18 @@ let ``the smt log replays to the answers it records`` () =
         Assert.Equal<string[]>(recorded, replayed)
     finally
         System.IO.File.Delete log
+
+[<Fact>]
+let ``source and path together are refused: the verdict would be on one of them only`` () =
+    let arguments = withArgs clamp "\"path\": \"other.quod\""
+    let r = request 7 "tools/call" ("{\"name\": \"quod_check\", \"arguments\": " + arguments + "}")
+    let result = r.GetProperty "result"
+    Assert.True(result.GetProperty("isError").GetBoolean())
+    Assert.Contains("not both", result.GetProperty("content").[0].GetProperty("text").GetString())
+
+[<Fact>]
+let ``the report says which modules a verdict rests on`` () =
+    let ok, text = call "quod_check" (source "import option\n\nfn f() -> option.Option<int>\n  ensures result == option.Some(1)\n{\n  option.Some(1)\n}\n")
+    Assert.True(ok.GetProperty("verified").GetBoolean(), text)
+    Assert.Equal("standard library", ok.GetProperty("modules").GetProperty("option").GetString())
+    Assert.Contains("modules: option (standard library)", text)

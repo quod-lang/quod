@@ -143,6 +143,7 @@ let private bool' (args: JsonElement) (name: string) =
 /// working directory). The name is what diagnostics show.
 let private program (args: JsonElement) : string * string =
     match str args "source", str args "path" with
+    | Some _, Some _ -> failTool "give 'source' or 'path', not both: the verdict would be on one of them only"
     | Some src, _ -> defaultArg (str args "file_name") "input.quod", src
     | None, Some p when File.Exists p -> p, File.ReadAllText p
     | None, Some p -> failTool ("file not found: " + p + " (relative to " + Directory.GetCurrentDirectory() + ")")
@@ -204,6 +205,22 @@ let contractCases (file: string) (src: string) (fn: string) (casesJson: string) 
 let private reportText (ds: Diagnostic list) =
     ds |> List.filter (fun d -> d.Severity <> Info) |> List.map toText |> String.concat "\n"
 
+/// The modules a verdict rests on, and where each came from: the same `import m` depends on `file_name`.
+let private modulesOf (file: string) (typed: TProgram) =
+    let dir = Path.GetDirectoryName(Path.GetFullPath file)
+    Codegen.importedModules typed
+    |> List.map (fun m ->
+        let p = Path.Combine(dir, m + ".quod")
+        m, (if File.Exists p then p else "standard library"))
+
+let private modulesLine (modules: (string * string) list) =
+    if modules.IsEmpty then "" else "\nmodules: " + String.Join(", ", modules |> List.map (fun (m, from) -> m + " (" + from + ")"))
+
+let private writeModules (w: Utf8JsonWriter) (modules: (string * string) list) =
+    w.WriteStartObject "modules"
+    for m, from in modules do w.WriteString(m, from)
+    w.WriteEndObject()
+
 let private writeDiagnostics (w: Utf8JsonWriter) (ds: Diagnostic list) =
     w.WriteStartArray("diagnostics")
     for d in ds do writeDiagnostic w d
@@ -218,12 +235,13 @@ let private check (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
         { Text = reportText ds + "\n" + line
           Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("verified", false); w.WriteString("summary", line); writeDiagnostics w ds; w.WriteEndObject())
           IsError = false }
-    | Pipeline.Checked(_, r) ->
+    | Pipeline.Checked(typed, r) ->
         let ok = (Pipeline.errorsOf r).IsEmpty
         let line = (if ok then "verified: " else "rejected: ") + Pipeline.summary r
         let report = reportText r.Diagnostics
-        { Text = (if report = "" then line else report + "\n" + line)
-          Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("verified", ok); w.WriteString("summary", line); writeDiagnostics w r.Diagnostics; w.WriteEndObject())
+        let modules = modulesOf file typed
+        { Text = (if report = "" then line else report + "\n" + line) + modulesLine modules
+          Structured = json (fun w -> w.WriteStartObject(); w.WriteBoolean("verified", ok); w.WriteString("summary", line); writeModules w modules; writeDiagnostics w r.Diagnostics; w.WriteEndObject())
           IsError = false }
 
 let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
@@ -256,6 +274,7 @@ let private build (base': Pipeline.Settings) (args: JsonElement) : ToolResult =
                     w.WriteString("summary", line)
                     w.WriteString("language", (match target with Pipeline.Python _ -> "python" | Pipeline.CSharp _ -> "csharp"))
                     w.WriteString("code", code)
+                    writeModules w (modulesOf file typed)
                     w.WriteStartObject "imported"
                     for m, text in generated.Imported do w.WriteString(m, text)
                     w.WriteEndObject()

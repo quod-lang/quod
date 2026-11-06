@@ -240,7 +240,11 @@ let dependents (prog: TProgram) (unproved: Set<string>) : Set<string> =
     let rec grow (known: Set<string>) =
         let more = prog.Fns |> List.filter (fun f -> not (known.Contains f.Name) && uses f |> List.exists known.Contains) |> List.map (fun f -> f.Name)
         if more.IsEmpty then known else grow (Set.union known (Set.ofList more))
-    grow unproved
+    let relying = grow unproved
+    // and what these call: a function proved under its requires, given arguments that nothing proved
+    let called = prog.Fns |> List.filter (fun f -> relying.Contains f.Name) |> List.collect uses
+    let functions = prog.Fns |> List.filter (fun f -> not f.IsLemma) |> List.map (fun f -> f.Name) |> Set.ofList
+    Set.union relying (called |> Set.ofList |> Set.intersect functions)
 
 /// What must be refused before any proof. A `run_by` function that reaches the function it runs for
 /// would loop for ever, though each is proved. A contract that speaks of its own function says nothing
