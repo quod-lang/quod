@@ -41,10 +41,11 @@ let pascal (n: string) =
     let joined = n.Split([| "__" |], StringSplitOptions.None) |> Array.map one |> String.concat "_"
     if joined.Trim('_') = "" then "_" elif Char.IsDigit joined.[0] then "_" + joined else joined
 
-/// The class that a file generates; its functions are its methods, which C# cannot name like it.
-let private classNameOf (file: string) (publicNames: string list) =
+/// The class that a file generates; its functions are its methods and its types are nested in it, and
+/// C# cannot name either like it: `Money` in `money.quod` is `MoneyModule.Money`.
+let private classNameOf (file: string) (publicNames: string list) (typeNames: string list) =
     let name = pascal (IO.Path.GetFileNameWithoutExtension file)
-    if List.contains name publicNames then name + "Module" else name
+    if List.contains name publicNames || List.contains name typeNames then name + "Module" else name
 
 /// The file `quod build` writes.
 let outputFile (file: string) = pascal (IO.Path.GetFileNameWithoutExtension file) + ".g.cs"
@@ -55,6 +56,9 @@ let private implName (f: string) = "_quod_f_" + f
 /// The class of the file being generated, for a copy of a generic of another module that holds one of
 /// its types: `Option<Pt>` lives in `Option`, and `Pt` in the file (review of 0.3).
 let private rootClass = new System.Threading.ThreadLocal<string>(fun () -> "")
+
+/// The class of each imported module of the program being generated, for its types.
+let private moduleClass = new System.Threading.ThreadLocal<Map<string, string>>(fun () -> Map.empty)
 
 /// A copy has `__` in its name, for the compiler: `Option__int` is `Option_int` to a C# reader. Should two
 /// fall on one name, the C# compiler says so.
@@ -68,9 +72,9 @@ let rec csType (t: Ty) =
     | TyChar | TyI32 -> "int"
     | TyI64 -> "long"
     | TyData d ->
-        // through its module's class, which holds it. A class named otherwise (see classNameOf) is refused.
+        // through its module's class, which holds it
         match Quod.Modules.split d.DataName with
-        | Some m, n -> pascal m + "." + n.Replace("__", "_")
+        | Some m, n -> defaultArg (moduleClass.Value.TryFind m) (pascal m) + "." + n.Replace("__", "_")
         | None, n -> (if rootClass.Value = "" then "" else rootClass.Value + ".") + n.Replace("__", "_")
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
@@ -723,15 +727,28 @@ let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : str
     | TyTuple ts ->
         "(" + (ts |> List.mapi (fun k c -> widen narrow c (term + ".Item" + string (k + 1)) depth) |> String.concat ", ") + ")"
 
+/// The class of each imported module of a flattened program.
+let private moduleClasses (whole: TProgram) : Map<string, string> =
+    Codegen.importedModules whole
+    |> List.map (fun m ->
+        let names = whole.Fns |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate && fst (Quod.Modules.split f.Name) = Some m) |> List.map (fun f -> pascal (snd (Quod.Modules.split f.Name)))
+        let types = whole.Types |> List.filter (fun d -> fst (Quod.Modules.split d.DataName) = Some m) |> List.map (fun d -> dataShort d.DataName)
+        m, classNameOf m names types)
+    |> Map.ofList
+
 /// Set while the modules of a file are generated.
-let setRootClass (file: string) (view: TProgram) =
+let setRootClass (file: string) (whole: TProgram) =
+    let view = Codegen.moduleView None whole
+    moduleClass.Value <- moduleClasses whole
     let methods =
         view.Fns
         |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate)
         |> List.map (fun f -> let m = pascal f.Name in if view.Types |> List.exists (fun d -> dataShort d.DataName = m) then m + "Of" else m)
-    rootClass.Value <- classNameOf file methods
+    rootClass.Value <- classNameOf file methods (view.Types |> List.map (fun d -> dataShort d.DataName))
 
-let clearRootClass () = rootClass.Value <- ""
+let clearRootClass () =
+    rootClass.Value <- ""
+    moduleClass.Value <- Map.empty
 
 /// The C# of a verified program, or why it cannot be generated. `checks` lists the functions whose
 /// proofs did not all pass (built only with --runtime-checks): their contracts run at run time.
@@ -759,12 +776,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         // names as this module calls them: its own short, the others in full
         g.Signatures <- (whole.Fns |> List.map (fun f -> f.Name, f)) @ (prog.Fns |> List.map (fun f -> f.Name, f)) |> Map.ofList
         g.ModuleMethod <- (fun m h -> methodIn (whole.Types |> List.filter (fun d -> fst (Quod.Modules.split d.DataName) = Some m)) h)
-        g.ModuleClasses <-
-            Codegen.importedModules whole
-            |> List.map (fun m ->
-                let names = whole.Fns |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate && fst (Quod.Modules.split f.Name) = Some m) |> List.map (fun f -> pascal (snd (Quod.Modules.split f.Name)))
-                m, classNameOf m names)
-            |> Map.ofList
+        g.ModuleClasses <- moduleClasses whole
         let sb = StringBuilder()
         let indent = "        "
         for f in fns do
@@ -991,7 +1003,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         out.Append("#pragma warning disable\n")
            .Append("using System;\nusing System.Collections.Generic;\nusing System.Numerics;\nusing System.Runtime.CompilerServices;\n\n")
            .Append("namespace ").Append(options.Namespace).Append("\n{\n")
-           .Append("    public static class ").Append(classNameOf sourceFile publicNames).Append("\n    {\n") |> ignore
+           .Append("    public static class ").Append(classNameOf sourceFile publicNames (prog.Types |> List.map (fun d -> dataShort d.DataName))).Append("\n    {\n") |> ignore
         if not checks.IsEmpty then
             out.Append("        public sealed class QuodContractException : Exception\n        {\n")
                .Append("            public QuodContractException(string message) : base(message) { }\n        }\n\n") |> ignore

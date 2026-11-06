@@ -570,3 +570,35 @@ let ``csharp: a generic struct has the name of its copy`` () =
 [<Fact>]
 let ``a lemma cannot be generic, and says so`` () =
     typeError "lemma same<T>(a: T)\n{\n}\n" "a lemma cannot be generic"
+
+[<Fact>]
+let ``csharp: a type named like its file does not name the class`` () =
+    let build (files: (string * string) list) (check: Generated -> unit) =
+        withFiles files (fun dir outcome ->
+            match outcome with
+            | Checked(typed, r) ->
+                match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+                | Ok g -> check g
+                | Result.Error why -> failwith why
+            | other -> failwithf "%A" other)
+    let money = "struct Money { cents: i64 }\n\nfn zero() -> Money\n  ensures result.cents == 0\n{\n  Money(0)\n}\n"
+    build [ "money", money; "main", "import money\n\nfn none() -> money.Money\n  ensures result.cents == 0\n{\n  money.zero()\n}\n" ] (fun g ->
+        Assert.Contains("MoneyModule.Money None()", g.Code)
+        Assert.Contains("MoneyModule.Zero()", g.Code)
+        let text = g.Imported |> List.find (fun (m, _) -> m = "money") |> snd
+        Assert.Contains("public static class MoneyModule", text)
+        Assert.Contains("public sealed class Money ", text))
+    build [ "main", "struct Main { x: i32 }\n\nfn make() -> Main\n  ensures result.x == 1\n{\n  Main(1)\n}\n" ] (fun g ->
+        Assert.Contains("public static class MainModule", g.Code))
+
+[<Fact>]
+let ``a case of another module is named in full, and the message says so`` () =
+    let lib = "enum Answer { Yes(int), Nope }\n"
+    rejectedWith "built by its full name, 'lib.Yes'" "main.quod" [ "lib", lib; "main", "import lib\n\nfn f() -> lib.Answer\n  ensures result == lib.Yes(1)\n{\n  Yes(1)\n}\n" ]
+    rejectedWith "built by its full name, 'lib.Nope'" "main.quod" [ "lib", lib; "main", "import lib\n\nfn f() -> lib.Answer\n  ensures result == lib.Nope\n{\n  Nope\n}\n" ]
+
+[<Fact>]
+let ``a literal in the cases of a match takes the bounded type its context wants`` () =
+    let src = "enum C { A, B(nat), D }\n\nfn p(c: C) -> i32\n  ensures result == match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, D => 30 }\n{\n  match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, D => 30 }\n}\n\nfn q(c: C, x: i32) -> i32\n  requires 0 <= x <= 100\n  ensures result == x - x * p(c) / 100\n{\n  let k: i32 = match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, _ => 30 };\n  x - x * k / 100\n}\n"
+    Assert.Equal("90 0 70", pythonOf src "import main; print(main.q(main.B(5), 100), main.q(main.A(), 0), main.q(main.D(), 100))" false)
+    typeError "enum C { A, B }\n\nfn p(c: C) -> i32\n  ensures result == 3000000000\n{\n  match c { A => 3000000000, B => 1 }\n}\n" "does not fit in i32"

@@ -317,6 +317,9 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             | EIf(cond, a, b), _ ->
                 let ta, tb = c.Coerce(a, expected, fn, what), c.Coerce(b, expected, fn, what)
                 { e with Kind = EIf(cond, ta, tb); Ty = (if ta.Ty = TyError || tb.Ty = TyError then TyError else expected) }
+            | EMatch(scrutinee, arms), _ ->
+                let typed = arms |> List.map (fun (k, names, b) -> k, names, c.Coerce(b, expected, fn, what))
+                { e with Kind = EMatch(scrutinee, typed); Ty = (if typed |> List.exists (fun (_, _, b) -> b.Ty = TyError) then TyError else expected) }
             | _ ->
                 let hint = if isBounded expected && (match e.Ty with TyInt | TyNat | TyI64 -> true | _ -> false) then " (nothing narrows by itself: write to_" + tyText expected + "(...), which must then be proved to fit)" else ""
                 c.Error(e.Span, fn, what + " has type " + tyText e.Ty + ", but " + tyText expected + " is expected" + hint)
@@ -459,7 +462,10 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
                 if fns.ContainsKey name then
                     c.Error(e.Span, ctx.FnName, "'" + name + "' is a function: call it with arguments, as in " + name + "(...)")
                 else
-                    c.Error(e.Span, ctx.FnName, "unknown variable '" + name + "'")
+                    // flattened by now: `option.None` is here, and `None` is not
+                    let elsewhere = declared |> Seq.tryPick (fun kv -> kv.Value.TypeCases |> List.tryPick (fun (case, _) -> if case.EndsWith("." + name) then Some case else None))
+                    let hint = match elsewhere with Some case -> ": a case of a type of another module is built by its full name, '" + case + "'" | None -> ""
+                    c.Error(e.Span, ctx.FnName, "unknown variable '" + name + "'" + hint)
                 fail ()
         | Result ->
             match ctx.ResultTy with

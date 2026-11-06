@@ -169,7 +169,7 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
             | CSharp options -> CodegenCSharp.generateIn source view typed (shortNames m) options
         // a copy of a generic of another module may hold a type of this file (review of 0.3)
         (match target with
-         | CSharp _ -> CodegenCSharp.setRootClass file (Codegen.moduleView None typed)
+         | CSharp _ -> CodegenCSharp.setRootClass file typed
          | _ -> ())
         use _reset = { new IDisposable with member _.Dispose() = CodegenCSharp.clearRootClass () }
         one None file

@@ -169,9 +169,11 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                         | None, ("code" | "char_of" | "to_i32" | "to_i64") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
-                            match elsewhere with
-                            | m :: _ -> refuse ("unknown function '" + g + "': a function of another module is called by its full name, '" + m + "." + g + "'")
-                            | [] -> refuse ("unknown function '" + g + "'")
+                            let caseIn = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Types |> List.exists (fun t -> t.TypeCases |> List.exists (fun (c, _) -> c = g)))
+                            match elsewhere, caseIn with
+                            | m :: _, _ -> refuse ("unknown function '" + g + "': a function of another module is called by its full name, '" + m + "." + g + "'")
+                            | _, m :: _ -> refuse ("unknown function '" + g + "': a case of a type of another module is built by its full name, '" + m + "." + g + "'")
+                            | [], [] -> refuse ("unknown function '" + g + "'")
                     let e = expr rename
                     { f with
                         Name = flat f.Name
