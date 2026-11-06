@@ -1,0 +1,87 @@
+// Product catalog: lines of an order and the per-line arithmetic.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+// The numbers of a line are in range.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn qty_int(l: Line) -> int { l.qty }
+
+fn unit_int(l: Line) -> int { l.unit_cents }
+
+fn grams_int(l: Line) -> int { l.grams }
+
+// qty * unit_cents, before any discount.
+fn gross(l: Line) -> int { qty_int(l) * unit_int(l) }
+
+// Volume discount in percent: none for books, 5 from 10, 10 from 100.
+fn volume_percent(l: Line) -> int {
+  if l.category == Book { 0 } else { if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } } }
+}
+
+// Net amount of a line.
+fn line_net(l: Line) -> int { gross(l) - gross(l) * volume_percent(l) / 100 }
+
+// qty * grams: the weight of a line.
+fn grams_of(l: Line) -> int { qty_int(l) * grams_int(l) }
+
+lemma gross_bound(l: Line)
+  requires line_ok(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+{
+}
+
+lemma net_bound(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+{
+  gross_bound(l);
+}
+
+lemma grams_bound(l: Line)
+  requires line_ok(l)
+  ensures 0 <= grams_of(l) && grams_of(l) <= 10000000000
+{
+}
+
+// Sums over the first i lines of xs.
+fn net_upto(xs: seq<Line>, i: int) -> int
+  requires 0 <= i && i <= len(xs)
+  decreases i
+{
+  if i == 0 { 0 } else { net_upto(xs, i - 1) + line_net(xs[i - 1]) }
+}
+
+fn cat_upto(xs: seq<Line>, i: int, c: Category) -> int
+  requires 0 <= i && i <= len(xs)
+  decreases i
+{
+  if i == 0 { 0 } else { cat_upto(xs, i - 1, c) + (if xs[i - 1].category == c { line_net(xs[i - 1]) } else { 0 }) }
+}
+
+fn weight_upto(xs: seq<Line>, i: int) -> int
+  requires 0 <= i && i <= len(xs)
+  decreases i
+{
+  if i == 0 { 0 } else { weight_upto(xs, i - 1) + grams_of(xs[i - 1]) }
+}
+
+// The first i lines are all in range.
+fn lines_ok_upto(xs: seq<Line>, i: int) -> bool
+  requires 0 <= i && i <= len(xs)
+  decreases i
+{
+  if i == 0 { true } else { lines_ok_upto(xs, i - 1) && line_ok(xs[i - 1]) }
+}
+
+lemma lines_ok_upto_is_forall(xs: seq<Line>, i: int)
+  requires 0 <= i && i <= len(xs)
+  ensures lines_ok_upto(xs, i) == (forall j in 0..i: line_ok(xs[j]))
+  decreases i
+{
+  if i > 0 { lines_ok_upto_is_forall(xs, i - 1); }
+}

@@ -1,0 +1,134 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+private fn ship_raw(c: discounts.Customer, k: discounts.Coupon, net: int, g: int) -> int {
+  if discounts.is_free(k) || net >= discounts.threshold(c) { 0 }
+  else if g == 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+private fn shipping(c: discounts.Customer, k: discounts.Coupon, net: int, g: int) -> int
+  requires net >= 0 && g >= 0 && g <= 10000000000000
+  ensures result == ship_raw(c, k, net, g) && result >= 0 && result <= 2000000000000
+{
+  ship_raw(c, k, net, g)
+}
+
+private fn rem(a: int, b: int) -> int
+  ensures result == (if a > b { a - b } else { 0 }) && result >= 0
+{
+  if a > b { a - b } else { 0 }
+}
+
+private fn vat_of(base: int, rate: int) -> int
+  requires base >= 0 && rate >= 0 && rate <= 200
+  ensures result == (base * rate + 500) / 1000 && result >= 0 && result <= base
+{
+  (base * rate + 500) / 1000
+}
+
+private fn vat_raw(ns: int, nf: int, nb: int, nm: int, d: int, ship: int) -> int
+  requires ns >= 0 && nf >= 0 && nb >= 0 && nm >= 0 && d >= 0 && ship >= 0
+{
+  vat_of(rem(ns, d), 200) + vat_of(rem(nf, rem(d, ns)), 55)
+    + vat_of(rem(nb, rem(rem(d, ns), nf)), 55)
+    + vat_of(rem(nm, rem(rem(rem(d, ns), nf), nb)), 21) + vat_of(ship, 200)
+}
+
+private fn vat_total(ns: int, nf: int, nb: int, nm: int, d: int, ship: int) -> int
+  requires ns >= 0 && nf >= 0 && nb >= 0 && nm >= 0 && d >= 0 && ship >= 0
+  ensures result == vat_raw(ns, nf, nb, nm, d, ship)
+    && result >= 0 && result <= ns + nf + nb + nm + ship
+{
+  vat_raw(ns, nf, nb, nm, d, ship)
+}
+
+private fn mk(s: int, d: int, ship: int, vat: int) -> Invoice
+  requires s >= 0 && s <= 4000000000000000 && d >= 0 && d <= s * 30 / 100
+    && ship >= 0 && ship <= 2000000000000 && vat >= 0 && vat <= s + ship
+  ensures result.subtotal == s && result.discount == d && result.net == s - d
+    && result.shipping == ship && result.vat == vat
+    && result.total == s - d + ship + vat
+{
+  Invoice(to_i64(s), to_i64(d), to_i64(s - d), to_i64(ship), to_i64(vat), to_i64(s - d + ship + vat))
+}
+
+private fn inv2(o: Order, ns: int, nf: int, nb: int, nm: int, d: int, ship: int) -> Invoice
+  requires ns >= 0 && nf >= 0 && nb >= 0 && nm >= 0
+    && ns + nf + nb + nm <= 4000000000000000
+    && d >= 0 && d <= (ns + nf + nb + nm) * 30 / 100 && d <= ns + nf + nb + nm
+    && ship >= 0 && ship <= 2000000000000
+  ensures result.subtotal == ns + nf + nb + nm && result.discount == d
+    && result.net == ns + nf + nb + nm - d && result.shipping == ship
+    && result.vat == (if discounts.reverse_charge(o.customer, o.country) { 0 }
+                      else { vat_total(ns, nf, nb, nm, d, ship) })
+    && result.total == result.net + result.shipping + result.vat
+{
+  mk(ns + nf + nb + nm, d, ship,
+    if discounts.reverse_charge(o.customer, o.country) { 0 }
+    else { vat_total(ns, nf, nb, nm, d, ship) })
+}
+
+private fn inv1(o: Order, ns: int, nf: int, nb: int, nm: int, g: int) -> Invoice
+  requires ns >= 0 && nf >= 0 && nb >= 0 && nm >= 0
+    && ns + nf + nb + nm <= 4000000000000000
+    && g >= 0 && g <= 10000000000000 && discounts.valid_coupon(o.coupon)
+  ensures result == inv2(o, ns, nf, nb, nm,
+      discounts.total_discount(o.customer, o.coupon, ns + nf + nb + nm),
+      shipping(o.customer, o.coupon,
+        ns + nf + nb + nm - discounts.total_discount(o.customer, o.coupon, ns + nf + nb + nm), g))
+    && result.total == result.net + result.shipping + result.vat
+    && result.net == result.subtotal - result.discount
+    && result.discount >= 0 && result.discount <= result.subtotal * 30 / 100
+    && result.total >= 0
+{
+  inv2(o, ns, nf, nb, nm,
+    discounts.total_discount(o.customer, o.coupon, ns + nf + nb + nm),
+    shipping(o.customer, o.coupon,
+      ns + nf + nb + nm - discounts.total_discount(o.customer, o.coupon, ns + nf + nb + nm), g))
+}
+
+private fn model(o: Order) -> option.Result<Invoice, string> {
+  if len(o.lines) == 0 { option.Err("empty order") }
+  else if len(o.lines) > 1000 { option.Err("too many lines") }
+  else if !catalog.all_valid(o.lines, 0) { option.Err("bad line") }
+  else if !discounts.valid_customer(o.customer) { option.Err("bad customer") }
+  else if !discounts.valid_coupon(o.coupon) { option.Err("bad coupon") }
+  else {
+    option.Ok(inv1(o,
+      catalog.cat_net(o.lines, catalog.Standard, 0, 0),
+      catalog.cat_net(o.lines, catalog.Food, 0, 0),
+      catalog.cat_net(o.lines, catalog.Book, 0, 0),
+      catalog.cat_net(o.lines, catalog.Medicine, 0, 0),
+      catalog.weight(o.lines, 0, 0)))
+  }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures result == model(o)
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+    Err(_) => true,
+  }
+{
+  if len(o.lines) == 0 || len(o.lines) > 1000 || !catalog.all_valid(o.lines, 0)
+    || !discounts.valid_customer(o.customer) || !discounts.valid_coupon(o.coupon) {
+    return model(o);
+  }
+  let i = inv1(o,
+      catalog.cat_net(o.lines, catalog.Standard, 0, 0),
+      catalog.cat_net(o.lines, catalog.Food, 0, 0),
+      catalog.cat_net(o.lines, catalog.Book, 0, 0),
+      catalog.cat_net(o.lines, catalog.Medicine, 0, 0),
+      catalog.weight(o.lines, 0, 0));
+  assert model(o) == option.Ok(i);
+  return model(o);
+}

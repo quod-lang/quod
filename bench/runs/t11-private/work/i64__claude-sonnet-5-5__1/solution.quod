@@ -1,0 +1,224 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+private fn wide(x: i32) -> int { x }
+
+private fn min2(a: int, b: int) -> int
+  ensures result <= a && result <= b && (result == a || result == b)
+{ if a < b { a } else { b } }
+
+private fn line_ok(l: catalog.Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+private fn gross(l: catalog.Line) -> int { wide(l.qty) * wide(l.unit_cents) }
+
+private fn lweight(l: catalog.Line) -> int { wide(l.qty) * wide(l.grams) }
+
+private fn pct(l: catalog.Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+private fn lnet(l: catalog.Line) -> int { gross(l) - gross(l) * pct(l) / 100 }
+
+private lemma mul_bound(a: int, b: int, x: int, y: int)
+  requires 0 <= a && a <= x && 0 <= b && b <= y
+  ensures 0 <= a * b && a * b <= x * y
+{ assert a * b <= x * b; assert x * b <= x * y; }
+
+private lemma line_b(l: catalog.Line)
+  requires line_ok(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+    && 0 <= lweight(l) && lweight(l) <= 10000000000
+    && 0 <= lnet(l) && lnet(l) <= 1000000000000
+{
+  mul_bound(wide(l.qty), wide(l.unit_cents), 10000, 100000000);
+  mul_bound(wide(l.qty), wide(l.grams), 10000, 1000000);
+  assert pct(l) >= 0 && pct(l) <= 10;
+  assert gross(l) * pct(l) <= gross(l) * 10;
+}
+
+private fn all_ok(lines: seq<catalog.Line>, i: nat) -> bool
+  requires i <= len(lines)
+  ensures result <==> (forall j in i..len(lines): line_ok(lines[j]))
+  decreases len(lines) - i
+{
+  if i == len(lines) { true } else if line_ok(lines[i]) { all_ok(lines, i + 1) } else { false }
+}
+
+private fn cat_net(lines: seq<catalog.Line>, i: nat, c: catalog.Category, acc: int) -> int
+  requires i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) { acc }
+  else if lines[i].category == c { cat_net(lines, i + 1, c, acc + lnet(lines[i])) }
+  else { cat_net(lines, i + 1, c, acc) }
+}
+
+private fn weight(lines: seq<catalog.Line>, i: nat, acc: int) -> int
+  requires i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) { acc } else { weight(lines, i + 1, acc + lweight(lines[i])) }
+}
+
+private lemma cat_b(lines: seq<catalog.Line>, i: nat, c: catalog.Category, acc: int)
+  requires i <= len(lines) && acc >= 0 && (forall j in i..len(lines): line_ok(lines[j]))
+  ensures acc <= cat_net(lines, i, c, acc) && cat_net(lines, i, c, acc) <= acc + (len(lines) - i) * 1000000000000
+  decreases len(lines) - i
+{
+  if i < len(lines) {
+    line_b(lines[i]);
+    if lines[i].category == c { cat_b(lines, i + 1, c, acc + lnet(lines[i])); }
+    else { cat_b(lines, i + 1, c, acc); }
+  }
+}
+
+private lemma weight_b(lines: seq<catalog.Line>, i: nat, acc: int)
+  requires i <= len(lines) && acc >= 0 && (forall j in i..len(lines): line_ok(lines[j]))
+  ensures acc <= weight(lines, i, acc) && weight(lines, i, acc) <= acc + (len(lines) - i) * 10000000000
+  decreases len(lines) - i
+{
+  if i < len(lines) {
+    line_b(lines[i]);
+    weight_b(lines, i + 1, acc + lweight(lines[i]));
+  }
+}
+
+private fn cust_ok(c: discounts.Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+private fn coupon_ok(c: discounts.Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => 0 <= p && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+private fn error(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" }
+  else if len(o.lines) > 1000 { "too many lines" }
+  else if !all_ok(o.lines, 0) { "bad line" }
+  else if !cust_ok(o.customer) { "bad customer" }
+  else if !coupon_ok(o.coupon) { "bad coupon" }
+  else { "" }
+}
+
+private fn s_cat(o: Order, c: catalog.Category) -> int { cat_net(o.lines, 0, c, 0) }
+
+private fn sub(o: Order) -> int
+{ s_cat(o, catalog.Standard) + s_cat(o, catalog.Food) + s_cat(o, catalog.Book) + s_cat(o, catalog.Medicine) }
+
+private fn cdisc(o: Order) -> int {
+  match o.customer {
+    Guest => 0,
+    Member(y) => sub(o) * (if y >= 5 { 5 } else { 2 }) / 100,
+    Business(_) => if sub(o) >= 100000 { sub(o) * 3 / 100 } else { 0 },
+  }
+}
+
+private fn cpct(c: discounts.Coupon) -> int { match c { Percent(p) => wide(p), _ => 0 } }
+
+private fn cp_amt(c: discounts.Coupon, a: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(_) => a * cpct(c) / 100,
+    Fixed(v) => min2(wide(v), a),
+    FreeShipping => 0,
+  }
+}
+
+private fn cpd(o: Order) -> int { cp_amt(o.coupon, sub(o) - cdisc(o)) }
+
+private fn disc(o: Order) -> int { min2(cdisc(o) + cpd(o), sub(o) * 30 / 100) }
+
+private fn onet(o: Order) -> int { sub(o) - disc(o) }
+
+private fn wship(g: int) -> int {
+  if g == 0 { 0 } else if g <= 1000 { 490 } else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+private fn free_ship(o: Order) -> bool {
+  (match o.coupon { FreeShipping => true, _ => false })
+  || onet(o) >= (match o.customer { Member(_) => 5000, _ => 10000 })
+}
+
+private fn ship(o: Order) -> int {
+  if free_ship(o) { 0 } else { wship(weight(o.lines, 0, 0)) }
+}
+
+private fn take0(o: Order) -> int { min2(disc(o), s_cat(o, catalog.Standard)) }
+
+private fn take1(o: Order) -> int { min2(disc(o) - take0(o), s_cat(o, catalog.Food)) }
+
+private fn take2(o: Order) -> int { min2(disc(o) - take0(o) - take1(o), s_cat(o, catalog.Book)) }
+
+private fn take3(o: Order) -> int { min2(disc(o) - take0(o) - take1(o) - take2(o), s_cat(o, catalog.Medicine)) }
+
+private fn vat_of(base: int, rate: int) -> int { (base * rate + 500) / 1000 }
+
+private fn vat(o: Order) -> int {
+  if (match o.customer { Business(v) => len(v) > 0 && o.country != "FR", _ => false }) { 0 }
+  else {
+    vat_of(s_cat(o, catalog.Standard) - take0(o), 200)
+    + vat_of(s_cat(o, catalog.Food) - take1(o), 55)
+    + vat_of(s_cat(o, catalog.Book) - take2(o), 55)
+    + vat_of(s_cat(o, catalog.Medicine) - take3(o), 21)
+    + vat_of(ship(o), 200)
+  }
+}
+
+private lemma pbound(a: int, p: int)
+  requires 0 <= a && 0 <= p && p <= 50
+  ensures 0 <= a * p / 100 && a * p / 100 <= a
+{ assert a * p <= a * 50; }
+
+private lemma facts(o: Order)
+  requires error(o) == ""
+  ensures 0 <= sub(o) && sub(o) <= 4000000000000000
+    && 0 <= cdisc(o) && cdisc(o) <= sub(o)
+    && 0 <= cpd(o) && cpd(o) <= sub(o) - cdisc(o)
+    && 0 <= disc(o) && disc(o) <= sub(o) * 30 / 100
+    && 0 <= onet(o) && onet(o) <= sub(o)
+    && 0 <= ship(o) && ship(o) <= 2000000000000
+    && 0 <= vat(o) && vat(o) <= 10000000000000000
+{
+  assert len(o.lines) <= 1000;
+  assert all_ok(o.lines, 0);
+  cat_b(o.lines, 0, catalog.Standard, 0);
+  cat_b(o.lines, 0, catalog.Food, 0);
+  cat_b(o.lines, 0, catalog.Book, 0);
+  cat_b(o.lines, 0, catalog.Medicine, 0);
+  weight_b(o.lines, 0, 0);
+  assert 0 <= sub(o);
+  assert coupon_ok(o.coupon);
+  assert 0 <= cpct(o.coupon) && cpct(o.coupon) <= 50;
+  pbound(sub(o) - cdisc(o), cpct(o.coupon));
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Err(m) => error(o) != "" && m == error(o),
+    Ok(i) => error(o) == ""
+      && i.subtotal == sub(o) && i.discount == disc(o) && i.net == onet(o)
+      && i.shipping == ship(o) && i.vat == vat(o)
+      && i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+  }
+{
+  if error(o) != "" { option.Err(error(o)) }
+  else {
+    facts(o);
+    option.Ok(Invoice(to_i64(sub(o)), to_i64(disc(o)), to_i64(onet(o)), to_i64(ship(o)),
+      to_i64(vat(o)), to_i64(onet(o) + ship(o) + vat(o))))
+  }
+}

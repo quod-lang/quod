@@ -1,0 +1,16 @@
+import catalog
+import discounts
+import option
+import solution
+
+fn case_guest() -> option.Result<solution.Invoice, string> {
+  solution.price(solution.Order([catalog.Line("a", catalog.Standard, 1, 1000, 500)], discounts.Guest, discounts.NoCoupon, "FR"))
+}
+
+fn case_member_book() -> option.Result<solution.Invoice, string> {
+  solution.price(solution.Order([catalog.Line("b", catalog.Book, 100, 1000, 0)], discounts.Member(5), discounts.Percent(10), "DE"))
+}
+
+fn case_empty() -> option.Result<solution.Invoice, string> {
+  solution.price(solution.Order([], discounts.Guest, discounts.NoCoupon, "FR"))
+}

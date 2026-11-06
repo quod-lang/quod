@@ -1,0 +1,40 @@
+// Order lines and the rules that depend on one line alone.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+// A line passes validation when every bound is included.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+// Widens a bounded integer to an exact one.
+private fn exact(x: i32) -> int { x }
+
+// qty * unit_cents
+fn line_gross(l: Line) -> int { exact(l.qty) * exact(l.unit_cents) }
+
+// Volume discount in percent. Books never get one.
+fn volume_percent(l: Line) -> int {
+  if l.category == Book { 0 } else if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 }
+}
+
+// gross - gross * percent / 100
+fn line_net(l: Line) -> int {
+  line_gross(l) - line_gross(l) * volume_percent(l) / 100
+}
+
+// qty * grams
+fn line_grams(l: Line) -> int { exact(l.qty) * exact(l.grams) }
+
+// Size bounds of a valid line, which keep the order sums within 64 bits.
+lemma line_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+  ensures 0 <= line_grams(l) && line_grams(l) <= 10000000000
+{
+  assert exact(l.qty) * exact(l.unit_cents) <= 10000 * exact(l.unit_cents);
+}

@@ -1,0 +1,322 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+// The figures of an invoice in exact integers: the model `price` must agree with.
+struct Quote { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+// Sum of the nets of the first i lines.
+private fn sum_net(ls: seq<catalog.Line>, i: nat) -> int
+  requires i <= len(ls)
+  decreases i
+{
+  if i == 0 { 0 } else { sum_net(ls, i - 1) + catalog.line_net(ls[i - 1]) }
+}
+
+// Sum of the weights (qty * grams) of the first i lines.
+private fn sum_grams(ls: seq<catalog.Line>, i: nat) -> int
+  requires i <= len(ls)
+  decreases i
+{
+  if i == 0 { 0 } else { sum_grams(ls, i - 1) + catalog.line_grams(ls[i - 1]) }
+}
+
+// Sum of the nets of the first i lines of category c.
+private fn cat_net(ls: seq<catalog.Line>, i: nat, c: catalog.Category) -> int
+  requires i <= len(ls)
+  decreases i
+{
+  if i == 0 {
+    0
+  } else {
+    cat_net(ls, i - 1, c) + (if ls[i - 1].category == c { catalog.line_net(ls[i - 1]) } else { 0 })
+  }
+}
+
+// The first i lines are all valid.
+private fn lines_ok_upto(ls: seq<catalog.Line>, i: nat) -> bool
+  requires i <= len(ls)
+  decreases i
+{
+  if i == 0 { true } else { lines_ok_upto(ls, i - 1) && catalog.line_ok(ls[i - 1]) }
+}
+
+// Every line of the sequence is valid.
+private fn lines_ok(ls: seq<catalog.Line>) -> bool {
+  lines_ok_upto(ls, len(ls))
+}
+
+// If line i is invalid, no prefix that reaches past it is valid.
+lemma lines_ok_upto_bad(ls: seq<catalog.Line>, i: nat, k: nat)
+  requires i < k && k <= len(ls)
+  requires !catalog.line_ok(ls[i])
+  ensures !lines_ok_upto(ls, k)
+  decreases k - i
+{
+  if k > i + 1 {
+    lines_ok_upto_bad(ls, i, k - 1);
+  }
+}
+
+// The invoice is the one the model gives.
+private fn matches(i: Invoice, q: Quote) -> bool {
+  i.subtotal == q.subtotal && i.discount == q.discount && i.net == q.net
+    && i.shipping == q.shipping && i.vat == q.vat && i.total == q.total
+}
+
+// The first error of an order, in the order of the rules.
+private fn first_error(o: Order) -> option.Option<string>
+  ensures result == if len(o.lines) == 0 {
+    option.Some("empty order")
+  } else if len(o.lines) > 1000 {
+    option.Some("too many lines")
+  } else if !lines_ok(o.lines) {
+    option.Some("bad line")
+  } else if !discounts.customer_ok(o.customer) {
+    option.Some("bad customer")
+  } else if !discounts.coupon_ok(o.coupon) {
+    option.Some("bad coupon")
+  } else {
+    option.None
+  }
+{
+  if len(o.lines) == 0 {
+    option.Some("empty order")
+  } else if len(o.lines) > 1000 {
+    option.Some("too many lines")
+  } else if !lines_ok(o.lines) {
+    option.Some("bad line")
+  } else if !discounts.customer_ok(o.customer) {
+    option.Some("bad customer")
+  } else if !discounts.coupon_ok(o.coupon) {
+    option.Some("bad coupon")
+  } else {
+    option.None
+  }
+}
+
+private fn min2(a: int, b: int) -> int { if a < b { a } else { b } }
+
+// Discount of the order: customer and coupon, at most 30% of the subtotal.
+private fn discount_of(o: Order, sub: int) -> int {
+  min2(
+    discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub)),
+    sub * 30 / 100)
+}
+
+// Shipping fee for a total weight, when shipping is not free.
+private fn shipping_fee(g: int) -> int {
+  if g == 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+private fn shipping_of(o: Order, net: int, g: int) -> int {
+  if discounts.is_free_shipping(o.coupon) || net >= discounts.free_shipping_threshold(o.customer) {
+    0
+  } else {
+    shipping_fee(g)
+  }
+}
+
+// The discount that is still to be taken once the categories before have taken theirs.
+private fn left(d: int, cat: int) -> int { d - min2(d, cat) }
+
+// The base of a category: its net less what the discount takes from it.
+private fn base_of(d: int, cat: int) -> int { cat - min2(d, cat) }
+
+// VAT of a base, rate per thousand, rounded half up.
+private fn vat_of(base: int, per_mille: int) -> int { (base * per_mille + 500) / 1000 }
+
+private fn vat_total(o: Order, cs: int, cf: int, cb: int, cm: int, d: int, shipping: int) -> int {
+  if discounts.reverse_charge(o.customer, o.country) {
+    0
+  } else {
+    vat_of(base_of(d, cs), 200)
+      + vat_of(base_of(left(d, cs), cf), 55)
+      + vat_of(base_of(left(left(d, cs), cf), cb), 55)
+      + vat_of(base_of(left(left(left(d, cs), cf), cb), cm), 21)
+      + vat_of(shipping, 200)
+  }
+}
+
+lemma product_nonneg(a: int, b: int)
+  requires 0 <= a && 0 <= b
+  ensures 0 <= a * b
+{
+}
+
+// The customer discount lies between 0 and the subtotal.
+lemma customer_discount_bounds(c: discounts.Customer, sub: int)
+  requires 0 <= sub
+  ensures 0 <= discounts.customer_discount(c, sub) && discounts.customer_discount(c, sub) <= sub
+{
+  product_nonneg(sub, discounts.customer_percent(c, sub));
+  product_nonneg(sub, 5 - discounts.customer_percent(c, sub));
+}
+
+// The coupon discount is nonnegative for a valid coupon.
+lemma coupon_discount_nonneg(c: discounts.Coupon, amount: int)
+  requires 0 <= amount && discounts.coupon_ok(c)
+  ensures 0 <= discounts.coupon_discount(c, amount)
+{
+  product_nonneg(amount, discounts.percent_value(c));
+}
+
+// The discount of an order is nonnegative.
+lemma discount_nonneg(o: Order, sub: int)
+  requires 0 <= sub && discounts.coupon_ok(o.coupon)
+  ensures 0 <= discount_of(o, sub)
+{
+  customer_discount_bounds(o.customer, sub);
+  coupon_discount_nonneg(o.coupon, sub - discounts.customer_discount(o.customer, sub));
+}
+
+// Shipping is nonnegative.
+lemma shipping_nonneg(o: Order, net: int, g: int)
+  requires 0 <= g
+  ensures 0 <= shipping_of(o, net, g)
+{
+}
+
+// A base lies between 0 and its category, and the discount left lies between 0 and the discount.
+lemma base_le(d: int, cat: int)
+  requires 0 <= d && 0 <= cat
+  ensures 0 <= base_of(d, cat) && base_of(d, cat) <= cat
+  ensures 0 <= left(d, cat) && left(d, cat) <= d
+{
+}
+
+// A VAT is at most its base.
+lemma vat_of_le(base: int, rate: int)
+  requires 0 <= base && 0 <= rate && rate <= 200
+  ensures 0 <= vat_of(base, rate) && vat_of(base, rate) <= base
+{
+}
+
+// The VAT of an invoice is nonnegative and at most the nets it applies to, plus the shipping.
+lemma vat_total_le(o: Order, cs: int, cf: int, cb: int, cm: int, d: int, sh: int)
+  requires 0 <= cs && 0 <= cf && 0 <= cb && 0 <= cm && 0 <= d && 0 <= sh
+  ensures 0 <= vat_total(o, cs, cf, cb, cm, d, sh)
+  ensures vat_total(o, cs, cf, cb, cm, d, sh) <= cs + cf + cb + cm + sh
+{
+  base_le(d, cs);
+  base_le(left(d, cs), cf);
+  base_le(left(left(d, cs), cf), cb);
+  base_le(left(left(left(d, cs), cf), cb), cm);
+  vat_of_le(base_of(d, cs), 200);
+  vat_of_le(base_of(left(d, cs), cf), 55);
+  vat_of_le(base_of(left(left(d, cs), cf), cb), 55);
+  vat_of_le(base_of(left(left(left(d, cs), cf), cb), cm), 21);
+  vat_of_le(sh, 200);
+}
+
+private fn build(sub: int, d: int, sh: int, v: int) -> Quote {
+  Quote(sub, d, sub - d, sh, v, sub - d + sh + v)
+}
+
+private fn quote_with(o: Order, sub: int, g: int, cs: int, cf: int, cb: int, cm: int, d: int) -> Quote {
+  build(sub, d, shipping_of(o, sub - d, g), vat_total(o, cs, cf, cb, cm, d, shipping_of(o, sub - d, g)))
+}
+
+// The specification of a valid order's invoice.
+private fn quote(o: Order) -> Quote {
+  quote_with(
+    o,
+    sum_net(o.lines, len(o.lines)),
+    sum_grams(o.lines, len(o.lines)),
+    cat_net(o.lines, len(o.lines), catalog.Standard),
+    cat_net(o.lines, len(o.lines), catalog.Food),
+    cat_net(o.lines, len(o.lines), catalog.Book),
+    cat_net(o.lines, len(o.lines), catalog.Medicine),
+    discount_of(o, sum_net(o.lines, len(o.lines))))
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Ok(i) => first_error(o) == option.None
+      && matches(i, quote(o))
+      && i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+    Err(m) => first_error(o) == option.Some(m),
+  }
+{
+  if len(o.lines) == 0 {
+    return option.Err("empty order");
+  }
+  if len(o.lines) > 1000 {
+    return option.Err("too many lines");
+  }
+  let n = len(o.lines);
+  let mut i: nat = 0;
+  let mut sub: int = 0;
+  let mut g: int = 0;
+  let mut cs: int = 0;
+  let mut cf: int = 0;
+  let mut cb: int = 0;
+  let mut cm: int = 0;
+  while i < n
+    invariant i <= n
+    invariant lines_ok_upto(o.lines, i)
+    invariant sub == sum_net(o.lines, i)
+    invariant g == sum_grams(o.lines, i)
+    invariant cs == cat_net(o.lines, i, catalog.Standard)
+    invariant cf == cat_net(o.lines, i, catalog.Food)
+    invariant cb == cat_net(o.lines, i, catalog.Book)
+    invariant cm == cat_net(o.lines, i, catalog.Medicine)
+    invariant 0 <= sub && sub <= i * 1000000000000
+    invariant 0 <= g && g <= i * 10000000000
+    invariant cs + cf + cb + cm == sub
+    invariant 0 <= cs && 0 <= cf && 0 <= cb && 0 <= cm
+    decreases n - i
+  {
+    let l = o.lines[i];
+    if !catalog.line_ok(l) {
+      lines_ok_upto_bad(o.lines, i, n);
+      return option.Err("bad line");
+    }
+    catalog.line_bounds(l);
+    let net = catalog.line_net(l);
+    sub = sub + net;
+    g = g + catalog.line_grams(l);
+    cs = cs + (if l.category == catalog.Standard { net } else { 0 });
+    cf = cf + (if l.category == catalog.Food { net } else { 0 });
+    cb = cb + (if l.category == catalog.Book { net } else { 0 });
+    cm = cm + (if l.category == catalog.Medicine { net } else { 0 });
+    i = i + 1;
+  }
+  if !discounts.customer_ok(o.customer) {
+    return option.Err("bad customer");
+  }
+  if !discounts.coupon_ok(o.coupon) {
+    return option.Err("bad coupon");
+  }
+  let d = discount_of(o, sub);
+  let net = sub - d;
+  let sh = shipping_of(o, net, g);
+  let v = vat_total(o, cs, cf, cb, cm, d, sh);
+  discount_nonneg(o, sub);
+  shipping_nonneg(o, net, g);
+  vat_total_le(o, cs, cf, cb, cm, d, sh);
+  assert n <= 1000;
+  assert sub <= 1000000000000000;
+  assert g <= 10000000000000;
+  assert sh <= 1000000000000 + 2000;
+  assert v <= sub + sh;
+  assert net + sh + v <= 3000000000000000;
+  return option.Ok(Invoice(
+    to_i64(sub),
+    to_i64(d),
+    to_i64(net),
+    to_i64(sh),
+    to_i64(v),
+    to_i64(net + sh + v),
+  ));
+}

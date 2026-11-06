@@ -1,0 +1,313 @@
+// The billing engine: validation, then the invoice of an order.
+//
+// Amounts are computed in `int` (mathematical integers) and only the invoice
+// is narrowed to `i64`, once each field is shown to fit. Every rule is written
+// once, as a private expression function that the contract of `price` refers to;
+// the loops of `price` keep their accumulators equal to the sums of those
+// functions, so the result of `price` is determined by its contract.
+
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+// ---------------------------------------------------------------- validation
+
+private fn line_ok(l: catalog.Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+private fn customer_ok(c: discounts.Customer) -> bool {
+  match c {
+    Guest => true,
+    Member(y) => y >= 0,
+    Business(_) => true,
+  }
+}
+
+private fn coupon_ok(c: discounts.Coupon) -> bool {
+  match c {
+    NoCoupon => true,
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    FreeShipping => true,
+  }
+}
+
+// Some line of the first `k` is invalid.
+private fn bad_upto(lines: seq<catalog.Line>, k: nat) -> bool
+  requires k <= len(lines)
+  decreases k
+{
+  if k == 0 { false } else { bad_upto(lines, k - 1) || !line_ok(lines[k - 1]) }
+}
+
+// The error `price` answers, by the order of the rules; None when the order is valid.
+private fn err_of(o: Order) -> option.Option<string> {
+  if len(o.lines) == 0 { option.Some("empty order") }
+  else if len(o.lines) > 1000 { option.Some("too many lines") }
+  else if bad_upto(o.lines, len(o.lines)) { option.Some("bad line") }
+  else if !customer_ok(o.customer) { option.Some("bad customer") }
+  else if !coupon_ok(o.coupon) { option.Some("bad coupon") }
+  else { option.None }
+}
+
+// ---------------------------------------------------------------- one line
+
+private fn prod(q: int, u: int) -> int { q * u }
+
+// Net of a line after its volume discount `p` (0, 5 or 10 per cent).
+private fn after_pct(g: int, p: int) -> int {
+  if p == 10 { g - g * 10 / 100 }
+  else if p == 5 { g - g * 5 / 100 }
+  else { g }
+}
+
+private fn vol_pct(q: int, book: bool) -> int {
+  if book { 0 } else if q >= 100 { 10 } else if q >= 10 { 5 } else { 0 }
+}
+
+private fn is_book(c: catalog.Category) -> bool {
+  match c {
+    Standard => false,
+    Food => false,
+    Book => true,
+    Medicine => false,
+  }
+}
+
+// Index of the VAT category: Standard 0, Food 1, Book 2, Medicine 3.
+private fn cat_idx(c: catalog.Category) -> int {
+  match c {
+    Standard => 0,
+    Food => 1,
+    Book => 2,
+    Medicine => 3,
+  }
+}
+
+private fn line_net(l: catalog.Line) -> int {
+  after_pct(prod(l.qty, l.unit_cents), vol_pct(l.qty, is_book(l.category)))
+}
+
+// ---------------------------------------------------------------- sums over the first k lines
+
+private fn sub_upto(lines: seq<catalog.Line>, k: nat) -> int
+  requires k <= len(lines)
+  decreases k
+{
+  if k == 0 { 0 } else { sub_upto(lines, k - 1) + line_net(lines[k - 1]) }
+}
+
+// Sum of the nets of the first k lines whose category index is c.
+private fn cat_upto(lines: seq<catalog.Line>, k: nat, c: int) -> int
+  requires k <= len(lines)
+  decreases k
+{
+  if k == 0 { 0 }
+  else if cat_idx(lines[k - 1].category) == c { cat_upto(lines, k - 1, c) + line_net(lines[k - 1]) }
+  else { cat_upto(lines, k - 1, c) }
+}
+
+// Total weight of the first k lines, in grams.
+private fn wt_upto(lines: seq<catalog.Line>, k: nat) -> int
+  requires k <= len(lines)
+  decreases k
+{
+  if k == 0 { 0 } else { wt_upto(lines, k - 1) + prod(lines[k - 1].qty, lines[k - 1].grams) }
+}
+
+// ---------------------------------------------------------------- the order
+
+private fn sub_of(o: Order) -> int { sub_upto(o.lines, len(o.lines)) }
+private fn std_of(o: Order) -> int { cat_upto(o.lines, len(o.lines), 0) }
+private fn food_of(o: Order) -> int { cat_upto(o.lines, len(o.lines), 1) }
+private fn book_of(o: Order) -> int { cat_upto(o.lines, len(o.lines), 2) }
+private fn med_of(o: Order) -> int { cat_upto(o.lines, len(o.lines), 3) }
+private fn wt_of(o: Order) -> int { wt_upto(o.lines, len(o.lines)) }
+
+// The smaller of a and b.
+private fn take(a: int, b: int) -> int { if a < b { a } else { b } }
+
+private fn cust_disc(c: discounts.Customer, sub: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+private fn coupon_disc(c: discounts.Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => take(amount, v),
+    FreeShipping => 0,
+  }
+}
+
+private fn disc_amt(sub: int, cd: int, cp: int) -> int {
+  if cd + cp < sub * 30 / 100 { cd + cp } else { sub * 30 / 100 }
+}
+
+private fn cd_of(o: Order) -> int { cust_disc(o.customer, sub_of(o)) }
+private fn cp_of(o: Order) -> int { coupon_disc(o.coupon, sub_of(o) - cd_of(o)) }
+private fn disc_of(o: Order) -> int { disc_amt(sub_of(o), cd_of(o), cp_of(o)) }
+private fn net_of(o: Order) -> int { sub_of(o) - disc_of(o) }
+
+private fn is_free(c: discounts.Coupon) -> bool {
+  match c {
+    NoCoupon => false,
+    Percent(_) => false,
+    Fixed(_) => false,
+    FreeShipping => true,
+  }
+}
+
+private fn threshold(c: discounts.Customer) -> int {
+  match c {
+    Guest => 10000,
+    Member(_) => 5000,
+    Business(_) => 10000,
+  }
+}
+
+private fn ship_w(g: int) -> int {
+  if g == 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+private fn ship_of(o: Order) -> int {
+  if is_free(o.coupon) || net_of(o) >= threshold(o.customer) { 0 } else { ship_w(wt_of(o)) }
+}
+
+// ---------------------------------------------------------------- VAT
+
+// What is left of a category of net `cat` after a discount `rem`.
+private fn base_of(cat: int, rem: int) -> int { cat - take(cat, rem) }
+private fn left_of(cat: int, rem: int) -> int { rem - take(cat, rem) }
+
+// VAT of a base, in cents, at a rate per thousand.
+private fn vat_base_of(b: int, rate: int) -> int { (b * rate + 500) / 1000 }
+
+private fn rem1_of(o: Order) -> int { left_of(std_of(o), disc_of(o)) }
+private fn rem2_of(o: Order) -> int { left_of(food_of(o), rem1_of(o)) }
+private fn rem3_of(o: Order) -> int { left_of(book_of(o), rem2_of(o)) }
+
+private fn reverse_charge(o: Order) -> bool {
+  match o.customer {
+    Guest => false,
+    Member(_) => false,
+    Business(n) => n != "" && o.country != "FR",
+  }
+}
+
+private fn vat_of(o: Order) -> int {
+  if reverse_charge(o) { 0 }
+  else {
+    vat_base_of(base_of(std_of(o), disc_of(o)), 200)
+      + vat_base_of(base_of(food_of(o), rem1_of(o)), 55)
+      + vat_base_of(base_of(book_of(o), rem2_of(o)), 55)
+      + vat_base_of(base_of(med_of(o), rem3_of(o)), 21)
+      + vat_base_of(ship_of(o), 200)
+  }
+}
+
+private fn total_of(o: Order) -> int { net_of(o) + ship_of(o) + vat_of(o) }
+
+// ---------------------------------------------------------------- price
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Ok(i) => err_of(o) == option.None
+      && i.subtotal == sub_of(o)
+      && i.discount == disc_of(o)
+      && i.net == net_of(o)
+      && i.shipping == ship_of(o)
+      && i.vat == vat_of(o)
+      && i.total == total_of(o)
+      && i.net == i.subtotal - i.discount
+      && 0 <= i.discount && i.discount <= i.subtotal * 30 / 100
+      && 0 <= i.total
+      && i.total == i.net + i.shipping + i.vat,
+    Err(m) => err_of(o) == option.Some(m),
+  }
+{
+  if len(o.lines) == 0 { return option.Err("empty order"); }
+  if len(o.lines) > 1000 { return option.Err("too many lines"); }
+
+  let mut bad: bool = false;
+  let mut sub: int = 0;
+  let mut c_std: int = 0;
+  let mut c_food: int = 0;
+  let mut c_book: int = 0;
+  let mut c_med: int = 0;
+  let mut wt: int = 0;
+  let mut i: nat = 0;
+  while i < len(o.lines)
+    invariant 0 <= i && i <= len(o.lines)
+    invariant bad == bad_upto(o.lines, i)
+    invariant sub == sub_upto(o.lines, i)
+    invariant c_std == cat_upto(o.lines, i, 0)
+    invariant c_food == cat_upto(o.lines, i, 1)
+    invariant c_book == cat_upto(o.lines, i, 2)
+    invariant c_med == cat_upto(o.lines, i, 3)
+    invariant wt == wt_upto(o.lines, i)
+    invariant bad || (0 <= sub && sub <= i * 1000000000000)
+    invariant bad || (0 <= c_std && 0 <= c_food && 0 <= c_book && 0 <= c_med)
+    invariant bad || c_std + c_food + c_book + c_med == sub
+    invariant bad || (0 <= wt && wt <= i * 10000000000)
+    decreases len(o.lines) - i
+  {
+    let l = o.lines[i];
+    bad = bad || !line_ok(l);
+    let n = line_net(l);
+    sub = sub + n;
+    let c = cat_idx(l.category);
+    if c == 0 { c_std = c_std + n; }
+    else if c == 1 { c_food = c_food + n; }
+    else if c == 2 { c_book = c_book + n; }
+    else { c_med = c_med + n; }
+    wt = wt + prod(l.qty, l.grams);
+    i = i + 1;
+  }
+
+  if bad { return option.Err("bad line"); }
+  if !customer_ok(o.customer) { return option.Err("bad customer"); }
+  if !coupon_ok(o.coupon) { return option.Err("bad coupon"); }
+
+  // Bounds, so that every amount fits in i64: at most 1000 lines of at most 10^12 each.
+  assert 0 <= sub && sub <= 1000000000000000;
+  assert 0 <= wt && wt <= 10000000000000;
+  assert 0 <= c_std && 0 <= c_food && 0 <= c_book && 0 <= c_med;
+
+  let cd = cust_disc(o.customer, sub);
+  let cp = coupon_disc(o.coupon, sub - cd);
+  let disc = disc_amt(sub, cd, cp);
+  assert 0 <= disc && disc <= sub;
+  let net = sub - disc;
+  assert 0 <= net && net <= 1000000000000000;
+  let ship = if is_free(o.coupon) || net >= threshold(o.customer) { 0 } else { ship_w(wt) };
+  assert 0 <= ship && ship <= 2000000000000;
+  let rem1 = left_of(c_std, disc);
+  let rem2 = left_of(c_food, rem1);
+  let rem3 = left_of(c_book, rem2);
+  let vat = if reverse_charge(o) { 0 }
+    else {
+      vat_base_of(base_of(c_std, disc), 200)
+        + vat_base_of(base_of(c_food, rem1), 55)
+        + vat_base_of(base_of(c_book, rem2), 55)
+        + vat_base_of(base_of(c_med, rem3), 21)
+        + vat_base_of(ship, 200)
+    };
+  assert 0 <= vat && vat <= 1000000000000000;
+  let total = net + ship + vat;
+  assert 0 <= total && total <= 3000000000000000;
+  option.Ok(Invoice(to_i64(sub), to_i64(disc), to_i64(net), to_i64(ship), to_i64(vat), to_i64(total)))
+}

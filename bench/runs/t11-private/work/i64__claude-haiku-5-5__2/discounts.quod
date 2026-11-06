@@ -1,0 +1,114 @@
+// Customer and coupon rules.
+
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool
+  ensures result == match c {
+    Member(years) => years >= 0,
+    _ => true,
+  }
+{
+  match c {
+    Member(years) => years >= 0,
+    _ => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool
+  ensures result == match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+{
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+// Percent of the subtotal granted by the customer.
+fn customer_percent(c: Customer, subtotal: int) -> int
+  ensures result == match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+{
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int
+  ensures result == subtotal * customer_percent(c, subtotal) / 100
+{
+  subtotal * customer_percent(c, subtotal) / 100
+}
+
+// Coupon discount on the amount left after the customer discount.
+fn coupon_discount(c: Coupon, amount: int) -> int
+  ensures result == match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+{
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+// The percent of a percentage coupon, 0 for the others.
+fn percent_value(c: Coupon) -> int {
+  match c {
+    Percent(p) => p,
+    _ => 0,
+  }
+}
+
+fn is_free_shipping(c: Coupon) -> bool
+  ensures result == match c {
+    FreeShipping => true,
+    _ => false,
+  }
+{
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+// Subtotal from which shipping is free.
+fn free_shipping_threshold(c: Customer) -> int
+  ensures result == match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+{
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+// Reverse charge: a business with a VAT number, invoiced outside France.
+fn reverse_charge(c: Customer, country: string) -> bool
+  ensures result == match c {
+    Business(number) => number != "" && country != "FR",
+    _ => false,
+  }
+{
+  match c {
+    Business(number) => number != "" && country != "FR",
+    _ => false,
+  }
+}

@@ -1,0 +1,2 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }

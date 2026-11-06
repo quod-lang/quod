@@ -1,0 +1,69 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn valid_customer(c: Customer) -> bool {
+  match c { Member(y) => y >= 0, _ => true }
+}
+
+fn valid_coupon(k: Coupon) -> bool {
+  match k { Percent(p) => p >= 0 && p <= 50, Fixed(v) => v >= 0, _ => true }
+}
+
+fn customer_pct(c: Customer, s: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { 5 } else { 2 },
+    Business(_) => if s >= 100000 { 3 } else { 0 },
+  }
+}
+
+fn customer_disc(c: Customer, s: int) -> int
+  requires s >= 0
+  ensures result == s * customer_pct(c, s) / 100 && result >= 0 && result <= s
+{
+  s * customer_pct(c, s) / 100
+}
+
+fn coupon_raw(k: Coupon, amount: int) -> int {
+  match k {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn coupon_disc(k: Coupon, amount: int) -> int
+  requires amount >= 0 && valid_coupon(k)
+  ensures result == coupon_raw(k, amount) && result >= 0 && result <= amount
+{
+  coupon_raw(k, amount)
+}
+
+fn cap(d: int, s: int) -> int
+  requires s >= 0 && d >= 0
+  ensures result == (if d < s * 30 / 100 { d } else { s * 30 / 100 })
+    && result >= 0 && result <= s * 30 / 100
+{
+  if d < s * 30 / 100 { d } else { s * 30 / 100 }
+}
+
+fn total_discount(c: Customer, k: Coupon, s: int) -> int
+  requires s >= 0 && valid_coupon(k)
+  ensures result == cap(customer_disc(c, s) + coupon_disc(k, s - customer_disc(c, s)), s)
+    && result >= 0 && result <= s * 30 / 100
+{
+  cap(customer_disc(c, s) + coupon_disc(k, s - customer_disc(c, s)), s)
+}
+
+fn is_free(k: Coupon) -> bool {
+  match k { FreeShipping => true, _ => false }
+}
+
+fn threshold(c: Customer) -> int {
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c { Business(v) => len(v) > 0 && country != "FR", _ => false }
+}

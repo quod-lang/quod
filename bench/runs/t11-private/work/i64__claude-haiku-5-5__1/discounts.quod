@@ -1,0 +1,46 @@
+// Customer and coupon discounts.
+
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn min_int(a: int, b: int) -> int { if a < b { a } else { b } }
+
+fn int_of(v: i32) -> int { v }
+
+// Customer discount in percent of the subtotal.
+fn customer_percent(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  subtotal * customer_percent(c, subtotal) / 100
+}
+
+// Coupon discount on the amount left after the customer discount.
+fn coupon_discount(k: Coupon, amount: int) -> int {
+  match k {
+    NoCoupon => 0,
+    Percent(p) => amount * int_of(p) / 100,
+    Fixed(v) => min_int(int_of(v), amount),
+    FreeShipping => 0,
+  }
+}
+
+fn bad_customer(c: Customer) -> bool {
+  match c {
+    Member(years) => years < 0,
+    _ => false,
+  }
+}
+
+fn bad_coupon(k: Coupon) -> bool {
+  match k {
+    Percent(p) => p < 0 || p > 50,
+    Fixed(v) => v < 0,
+    _ => false,
+  }
+}

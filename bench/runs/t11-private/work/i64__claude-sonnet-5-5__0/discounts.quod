@@ -1,0 +1,65 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn cust_disc(c: Customer, s: int) -> int
+{
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { s * 5 / 100 } else { s * 2 / 100 },
+    Business(_) => if s >= 100000 { s * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(cp: Coupon, amt: int) -> int
+  requires amt >= 0
+{
+  match cp {
+    Percent(p) => if p >= 0 && p <= 100 { amt * p / 100 } else { 0 },
+    Fixed(v) => if v < 0 { 0 } else if v < amt { v } else { amt },
+    NoCoupon => 0,
+    FreeShipping => 0,
+  }
+}
+
+fn valid_customer(c: Customer) -> bool
+{
+  match c {
+    Guest => true,
+    Member(y) => y >= 0,
+    Business(_) => true,
+  }
+}
+
+fn valid_coupon(cp: Coupon) -> bool
+{
+  match cp {
+    Percent(p) => p >= 0 && p <= 50,
+    Fixed(v) => v >= 0,
+    NoCoupon => true,
+    FreeShipping => true,
+  }
+}
+
+fn free_ship(cp: Coupon) -> bool
+{
+  match cp {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+fn ship_threshold(c: Customer) -> int
+{
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+fn reverse_charge(c: Customer, country: string) -> bool
+{
+  match c {
+    Business(v) => len(v) > 0 && country != "FR",
+    _ => false,
+  }
+}

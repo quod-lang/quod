@@ -1,0 +1,177 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+private fn mul(a: int, b: int) -> int { a * b }
+
+private fn imin(a: int, b: int) -> int { if a < b { a } else { b } }
+
+private fn line_ok(l: catalog.Line) -> bool {
+  l.qty >= 1 && l.qty <= 10000 && l.unit_cents >= 0 && l.unit_cents <= 100000000
+    && l.grams >= 0 && l.grams <= 1000000
+}
+
+private fn lines_ok(ls: seq<catalog.Line>) -> bool
+  decreases len(ls)
+{
+  if len(ls) == 0 { true } else { line_ok(ls[0]) && lines_ok(ls[1..]) }
+}
+
+private fn gross(l: catalog.Line) -> int { mul(l.qty, l.unit_cents) }
+
+private fn vol_pct(l: catalog.Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+private fn line_net(l: catalog.Line) -> int { gross(l) - gross(l) * vol_pct(l) / 100 }
+
+private fn subtotal(ls: seq<catalog.Line>) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 } else { line_net(ls[0]) + subtotal(ls[1..]) }
+}
+
+private fn cat_net(ls: seq<catalog.Line>, c: catalog.Category) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 } else {
+    (if ls[0].category == c { line_net(ls[0]) } else { 0 }) + cat_net(ls[1..], c)
+  }
+}
+
+private fn weight(ls: seq<catalog.Line>) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 } else { mul(ls[0].qty, ls[0].grams) + weight(ls[1..]) }
+}
+
+private lemma line_bounds(l: catalog.Line)
+  requires line_ok(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+    && 0 <= line_net(l) && line_net(l) <= gross(l)
+    && 0 <= mul(l.qty, l.grams) && mul(l.qty, l.grams) <= 10000000000
+{
+  assert l.qty * l.unit_cents <= 10000 * l.unit_cents;
+  assert l.qty * l.unit_cents >= 0;
+  assert l.qty * l.grams <= 10000 * l.grams;
+  assert l.qty * l.grams >= 0;
+  assert gross(l) * vol_pct(l) <= gross(l) * 10;
+  assert gross(l) * vol_pct(l) >= 0;
+}
+
+private lemma lines_bounds(ls: seq<catalog.Line>)
+  requires lines_ok(ls)
+  ensures 0 <= subtotal(ls) && subtotal(ls) <= len(ls) * 1000000000000
+    && 0 <= cat_net(ls, catalog.Standard) && cat_net(ls, catalog.Standard) <= len(ls) * 1000000000000
+    && 0 <= cat_net(ls, catalog.Food) && cat_net(ls, catalog.Food) <= len(ls) * 1000000000000
+    && 0 <= cat_net(ls, catalog.Book) && cat_net(ls, catalog.Book) <= len(ls) * 1000000000000
+    && 0 <= cat_net(ls, catalog.Medicine) && cat_net(ls, catalog.Medicine) <= len(ls) * 1000000000000
+    && 0 <= weight(ls) && weight(ls) <= len(ls) * 10000000000
+  decreases len(ls)
+{
+  if len(ls) > 0 {
+    line_bounds(ls[0]);
+    lines_bounds(ls[1..]);
+  }
+}
+
+private fn verr(o: Order) -> int {
+  if len(o.lines) == 0 { 1 }
+  else if len(o.lines) > 1000 { 2 }
+  else if !lines_ok(o.lines) { 3 }
+  else if !discounts.valid_customer(o.customer) { 4 }
+  else if !discounts.valid_coupon(o.coupon) { 5 }
+  else { 0 }
+}
+
+private fn vmsg(code: int) -> string {
+  if code == 1 { "empty order" }
+  else if code == 2 { "too many lines" }
+  else if code == 3 { "bad line" }
+  else if code == 4 { "bad customer" }
+  else { "bad coupon" }
+}
+
+private fn order_disc(s: int, c: discounts.Customer, cp: discounts.Coupon) -> int
+  requires s >= 0
+{
+  imin(discounts.cust_disc(c, s)
+         + discounts.coupon_disc(cp, s - discounts.cust_disc(c, s)),
+       s * 30 / 100)
+}
+
+private fn ship_cost(g: int) -> int {
+  if g <= 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+private fn ship_final(net: int, c: discounts.Customer, cp: discounts.Coupon, g: int) -> int {
+  if discounts.free_ship(cp) || net >= discounts.ship_threshold(c) { 0 } else { ship_cost(g) }
+}
+
+private fn rem1(n0: int, d: int) -> int { d - imin(d, n0) }
+private fn rem2(n0: int, n1: int, d: int) -> int { rem1(n0, d) - imin(rem1(n0, d), n1) }
+private fn rem3(n0: int, n1: int, n2: int, d: int) -> int {
+  rem2(n0, n1, d) - imin(rem2(n0, n1, d), n2)
+}
+
+private fn vat_part(base: int, rate: int) -> int { (base * rate + 500) / 1000 }
+
+private fn vat_calc(n0: int, n1: int, n2: int, n3: int, d: int, sh: int) -> int {
+  vat_part(n0 - imin(d, n0), 200)
+    + vat_part(n1 - imin(rem1(n0, d), n1), 55)
+    + vat_part(n2 - imin(rem2(n0, n1, d), n2), 55)
+    + vat_part(n3 - imin(rem3(n0, n1, n2, d), n3), 21)
+    + vat_part(sh, 200)
+}
+
+private fn vat_order(o: Order, d: int, sh: int) -> int {
+  if discounts.reverse_charge(o.customer, o.country) { 0 } else {
+    vat_calc(cat_net(o.lines, catalog.Standard), cat_net(o.lines, catalog.Food),
+             cat_net(o.lines, catalog.Book), cat_net(o.lines, catalog.Medicine), d, sh)
+  }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Err(m) => verr(o) != 0 && m == vmsg(verr(o)),
+    Ok(i) => verr(o) == 0
+      && i.subtotal == subtotal(o.lines)
+      && i.discount == order_disc(i.subtotal, o.customer, o.coupon)
+      && i.net == i.subtotal - i.discount
+      && i.shipping == ship_final(i.net, o.customer, o.coupon, weight(o.lines))
+      && i.vat == vat_order(o, i.discount, i.shipping)
+      && i.total == i.net + i.shipping + i.vat
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+  }
+{
+  let code = verr(o);
+  if code != 0 {
+    option.Err(vmsg(code))
+  } else {
+    lines_bounds(o.lines);
+    let s = subtotal(o.lines);
+    let d = order_disc(s, o.customer, o.coupon);
+    let net = s - d;
+    let g = weight(o.lines);
+    let sh = ship_final(net, o.customer, o.coupon, g);
+    let v = vat_order(o, d, sh);
+    assert s <= 1000000000000000;
+    assert g <= 10000000000000;
+    assert sh >= 0 && sh <= 2000000000000;
+    assert d >= 0 && d <= s * 30 / 100;
+    assert net >= 0;
+    assert v >= 0 && v <= 4000000000000000;
+    option.Ok(Invoice(to_i64(s), to_i64(d), to_i64(net), to_i64(sh), to_i64(v), to_i64(net + sh + v)))
+  }
+}

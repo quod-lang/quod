@@ -1,0 +1,99 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn wide(x: i32) -> int { x }
+
+fn valid_line(l: Line) -> bool {
+  l.qty >= 1 && l.qty <= 10000 && l.unit_cents >= 0 && l.unit_cents <= 100000000
+    && l.grams >= 0 && l.grams <= 1000000
+}
+
+fn vol_percent(l: Line) -> int
+  ensures result == match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+{
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+fn gross(l: Line) -> int
+  requires valid_line(l)
+  ensures result == wide(l.qty) * wide(l.unit_cents) && result >= 0 && result <= 1000000000000
+{
+  wide(l.qty) * wide(l.unit_cents)
+}
+
+fn line_net(l: Line) -> int
+  requires valid_line(l)
+  ensures result == gross(l) - gross(l) * vol_percent(l) / 100 && result >= 0 && result <= 1000000000000
+{
+  gross(l) - gross(l) * vol_percent(l) / 100
+}
+
+fn in_category(l: Line, c: Category) -> bool {
+  match l.category {
+    Standard => match c { Standard => true, _ => false },
+    Food => match c { Food => true, _ => false },
+    Book => match c { Book => true, _ => false },
+    Medicine => match c { Medicine => true, _ => false },
+  }
+}
+
+fn all_valid(ls: seq<Line>, i: nat) -> bool
+  requires i <= len(ls)
+  decreases len(ls) - i
+{
+  if i == len(ls) { true } else if !valid_line(ls[i]) { false } else { all_valid(ls, i + 1) }
+}
+
+fn contrib(l: Line, c: Category) -> int
+  requires valid_line(l)
+  ensures result == (if in_category(l, c) { line_net(l) } else { 0 }) && result >= 0 && result <= 1000000000000
+{
+  if in_category(l, c) { line_net(l) } else { 0 }
+}
+
+fn cat_sum(ls: seq<Line>, c: Category, i: nat) -> int
+  requires i <= len(ls) && all_valid(ls, i)
+  decreases len(ls) - i
+{
+  if i == len(ls) { 0 } else { contrib(ls[i], c) + cat_sum(ls, c, i + 1) }
+}
+
+fn cat_net(ls: seq<Line>, c: Category, i: nat, acc: int) -> int
+  requires i <= len(ls) && all_valid(ls, i) && acc >= 0
+  ensures result == acc + cat_sum(ls, c, i)
+    && result >= acc && result <= acc + (len(ls) - i) * 1000000000000
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc }
+  else { cat_net(ls, c, i + 1, acc + contrib(ls[i], c)) }
+}
+
+fn wt(l: Line) -> int
+  requires valid_line(l)
+  ensures result == wide(l.qty) * wide(l.grams) && result >= 0 && result <= 10000000000
+{
+  wide(l.qty) * wide(l.grams)
+}
+
+fn wsum(ls: seq<Line>, i: nat) -> int
+  requires i <= len(ls) && all_valid(ls, i)
+  decreases len(ls) - i
+{
+  if i == len(ls) { 0 } else { wt(ls[i]) + wsum(ls, i + 1) }
+}
+
+fn weight(ls: seq<Line>, i: nat, acc: int) -> int
+  requires i <= len(ls) && all_valid(ls, i) && acc >= 0
+  ensures result == acc + wsum(ls, i)
+    && result >= acc && result <= acc + (len(ls) - i) * 10000000000
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc }
+  else { weight(ls, i + 1, acc + wt(ls[i])) }
+}
