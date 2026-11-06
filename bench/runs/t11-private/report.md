@@ -21,7 +21,7 @@ Cost does not move: 2.26 USD against 2.10.
 
 ## What this does not show
 
-- **Not all of it goes away.** A helper called from another module must stay public: Quod has no visibility in between. Runs that keep logic in `catalog` and `discounts` keep 9 to 17; the two at 0 put every function in `solution.quod`, which the task allows, and gave up the split into modules to do it. A visibility for a whole program would be the real answer.
+- **Not all of it goes away.** A helper called from another module must stay public: Quod has no visibility in between. Runs that keep logic in `catalog` and `discounts` keep 3 to 17; the two at 0 put every function in `solution.quod`, which the task allows, and gave up the split into modules to do it. A visibility for a whole program would be the real answer.
 - **The code inside does not change.** The generated files still hold 120 to 259 `BigInteger`, against 189 to 259: they are out of the API, not out of the code.
 - 6 runs of one task, one model pair. Run rows are not paired: the same number is not the same agent.
 
