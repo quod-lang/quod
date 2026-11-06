@@ -1,0 +1,88 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn cust_ok(c: Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => 0 <= p && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+fn cust_disc(sub: int, c: Customer) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(amount: int, c: Coupon) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn mn(a: int, b: int) -> int { if a < b { a } else { b } }
+
+fn discount(sub: int, c: Customer, cp: Coupon) -> int {
+  mn(cust_disc(sub, c) + coupon_disc(sub - cust_disc(sub, c), cp), sub * 30 / 100)
+}
+
+lemma discount_ok(sub: int, c: Customer, cp: Coupon)
+  requires sub >= 0 && cust_ok(c) && coupon_ok(cp)
+  ensures 0 <= discount(sub, c, cp) && discount(sub, c, cp) <= sub * 30 / 100
+{
+  assert 0 <= cust_disc(sub, c) && cust_disc(sub, c) <= sub;
+  assert 0 <= coupon_disc(sub - cust_disc(sub, c), cp) && coupon_disc(sub - cust_disc(sub, c), cp) <= sub - cust_disc(sub, c);
+}
+
+fn free_threshold(c: Customer) -> int {
+  match c { Member(_) => 5000, _ => 10000 }
+}
+
+fn weight_ship(g: int) -> int {
+  if g == 0 { 0 } else { if g <= 1000 { 490 } else { if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) } } }
+}
+
+fn is_free(cp: Coupon) -> bool {
+  match cp { FreeShipping => true, _ => false }
+}
+
+fn shipping(net: int, g: int, c: Customer, cp: Coupon) -> int {
+  if is_free(cp) || net >= free_threshold(c) { 0 } else { weight_ship(g) }
+}
+
+lemma shipping_ok(net: int, g: int, c: Customer, cp: Coupon)
+  requires 0 <= g && g <= 10000000000000
+  ensures 0 <= shipping(net, g, c, cp) && shipping(net, g, c, cp) <= 2000000000000
+{
+  assert 0 <= weight_ship(g) && weight_ship(g) <= 2000000000000;
+}
+
+fn take(n: int, d: int) -> int { mn(d, n) }
+
+fn vt(b: int, r: int) -> int { (b * r + 500) / 1000 }
+
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c { Business(vn) => len(vn) > 0 && country != "FR", _ => false }
+}
+
+fn vat_total(ns: int, nf: int, nb: int, nm: int, d: int, ship: int, rev: bool) -> int {
+  if rev { 0 } else {
+    vt(ns - take(ns, d), 200)
+    + vt(nf - take(nf, d - take(ns, d)), 55)
+    + vt(nb - take(nb, d - take(ns, d) - take(nf, d - take(ns, d))), 55)
+    + vt(nm - take(nm, d - take(ns, d) - take(nf, d - take(ns, d)) - take(nb, d - take(ns, d) - take(nf, d - take(ns, d)))), 21)
+    + vt(ship, 200)
+  }
+}
+
+lemma vat_ok(ns: int, nf: int, nb: int, nm: int, d: int, ship: int, rev: bool)
+  requires 0 <= ns && 0 <= nf && 0 <= nb && 0 <= nm && 0 <= d && d <= ns + nf + nb + nm && 0 <= ship
+  ensures 0 <= vat_total(ns, nf, nb, nm, d, ship, rev) && vat_total(ns, nf, nb, nm, d, ship, rev) <= ns + nf + nb + nm + ship + 5
+{
+}

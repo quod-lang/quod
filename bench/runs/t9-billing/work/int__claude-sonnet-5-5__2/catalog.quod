@@ -1,0 +1,104 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+fn valid_line(l: Line) -> bool {
+  l.qty >= 1 && l.qty <= 10000 && l.unit_cents >= 0 && l.unit_cents <= 100000000 && l.grams >= 0 && l.grams <= 1000000
+}
+
+fn valid_all(ls: seq<Line>) -> bool
+  decreases len(ls)
+{
+  if len(ls) == 0 { true } else { valid_line(ls[0]) && valid_all(ls[1..]) }
+}
+
+fn vol_percent(l: Line) -> int {
+  if l.category == Book { 0 } else if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 }
+}
+
+fn gross(l: Line) -> int { l.qty * l.unit_cents }
+
+fn line_net(l: Line) -> int {
+  gross(l) - gross(l) * vol_percent(l) / 100
+}
+
+fn sum_acc(ls: seq<Line>, acc: int) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { acc } else { sum_acc(ls[1..], acc + line_net(ls[0])) }
+}
+
+fn sum_net(ls: seq<Line>) -> int { sum_acc(ls, 0) }
+
+fn cat_acc(ls: seq<Line>, c: Category, acc: int) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { acc } else {
+    cat_acc(ls[1..], c, acc + (if ls[0].category == c { line_net(ls[0]) } else { 0 }))
+  }
+}
+
+fn cat_net(ls: seq<Line>, c: Category) -> int { cat_acc(ls, c, 0) }
+
+fn weight_acc(ls: seq<Line>, acc: int) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { acc } else { weight_acc(ls[1..], acc + ls[0].qty * ls[0].grams) }
+}
+
+fn weight(ls: seq<Line>) -> int { weight_acc(ls, 0) }
+
+lemma line_net_nonneg(l: Line)
+  requires l.qty >= 0 && l.unit_cents >= 0
+  ensures line_net(l) >= 0
+{
+  assert gross(l) >= 0;
+  assert gross(l) * vol_percent(l) <= gross(l) * 10;
+}
+
+lemma sum_acc_nonneg(ls: seq<Line>, acc: int)
+  requires valid_all(ls) && acc >= 0
+  ensures sum_acc(ls, acc) >= 0
+  decreases len(ls)
+{
+  if len(ls) > 0 { line_net_nonneg(ls[0]); sum_acc_nonneg(ls[1..], acc + line_net(ls[0])); }
+}
+
+lemma sum_net_nonneg(ls: seq<Line>)
+  requires valid_all(ls)
+  ensures sum_net(ls) >= 0
+{
+  sum_acc_nonneg(ls, 0);
+}
+
+lemma cat_acc_nonneg(ls: seq<Line>, c: Category, acc: int)
+  requires valid_all(ls) && acc >= 0
+  ensures cat_acc(ls, c, acc) >= 0
+  decreases len(ls)
+{
+  if len(ls) > 0 {
+    line_net_nonneg(ls[0]);
+    cat_acc_nonneg(ls[1..], c, acc + (if ls[0].category == c { line_net(ls[0]) } else { 0 }));
+  }
+}
+
+lemma cat_net_nonneg(ls: seq<Line>, c: Category)
+  requires valid_all(ls)
+  ensures cat_net(ls, c) >= 0
+{
+  cat_acc_nonneg(ls, c, 0);
+}
+
+lemma weight_acc_nonneg(ls: seq<Line>, acc: int)
+  requires valid_all(ls) && acc >= 0
+  ensures weight_acc(ls, acc) >= 0
+  decreases len(ls)
+{
+  if len(ls) > 0 { weight_acc_nonneg(ls[1..], acc + ls[0].qty * ls[0].grams); }
+}
+
+lemma weight_nonneg(ls: seq<Line>)
+  requires valid_all(ls)
+  ensures weight(ls) >= 0
+{
+  weight_acc_nonneg(ls, 0);
+}

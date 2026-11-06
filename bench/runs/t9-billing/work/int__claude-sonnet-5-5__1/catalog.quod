@@ -1,0 +1,89 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+fn valid_line(l: Line) -> bool {
+  l.qty >= 1 && l.qty <= 10000 && l.unit_cents >= 0 && l.unit_cents <= 100000000 && l.grams >= 0 && l.grams <= 1000000
+}
+
+fn lines_ok(ls: seq<Line>, i: int) -> bool
+  requires 0 <= i
+  decreases len(ls) - i
+{
+  if i >= len(ls) { true } else { valid_line(ls[i]) && lines_ok(ls, i + 1) }
+}
+
+fn vol_percent(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } },
+  }
+}
+
+fn line_net(l: Line) -> int {
+  l.qty * l.unit_cents - l.qty * l.unit_cents * vol_percent(l) / 100
+}
+
+fn sub_acc(ls: seq<Line>, i: int, acc: int) -> int
+  requires 0 <= i
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { sub_acc(ls, i + 1, acc + line_net(ls[i])) }
+}
+
+fn weight_acc(ls: seq<Line>, i: int, acc: int) -> int
+  requires 0 <= i
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { weight_acc(ls, i + 1, acc + ls[i].qty * ls[i].grams) }
+}
+
+fn cat_acc(ls: seq<Line>, i: int, acc: int, c: Category) -> int
+  requires 0 <= i
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else {
+    cat_acc(ls, i + 1, acc + (if ls[i].category == c { line_net(ls[i]) } else { 0 }), c)
+  }
+}
+
+lemma line_net_nn(l: Line)
+  requires valid_line(l)
+  ensures line_net(l) >= 0
+{
+  assert l.qty * l.unit_cents >= 0;
+  assert l.qty * l.unit_cents * vol_percent(l) <= l.qty * l.unit_cents * 10;
+  assert l.qty * l.unit_cents * vol_percent(l) / 100 <= l.qty * l.unit_cents;
+}
+
+lemma sub_nn(ls: seq<Line>, i: int, acc: int)
+  requires 0 <= i && lines_ok(ls, i) && acc >= 0
+  ensures sub_acc(ls, i, acc) >= acc
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    line_net_nn(ls[i]);
+    sub_nn(ls, i + 1, acc + line_net(ls[i]));
+  }
+}
+
+lemma weight_nn(ls: seq<Line>, i: int, acc: int)
+  requires 0 <= i && lines_ok(ls, i) && acc >= 0
+  ensures weight_acc(ls, i, acc) >= acc
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    assert ls[i].qty * ls[i].grams >= 0;
+    weight_nn(ls, i + 1, acc + ls[i].qty * ls[i].grams);
+  }
+}
+
+lemma cat_nn(ls: seq<Line>, i: int, acc: int, c: Category)
+  requires 0 <= i && lines_ok(ls, i) && acc >= 0
+  ensures cat_acc(ls, i, acc, c) >= acc
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    line_net_nn(ls[i]);
+    cat_nn(ls, i + 1, acc + (if ls[i].category == c { line_net(ls[i]) } else { 0 }), c);
+  }
+}

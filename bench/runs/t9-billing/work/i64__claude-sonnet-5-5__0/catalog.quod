@@ -1,0 +1,94 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn wi(x: i32) -> int { x }
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn gross(l: Line) -> int { wi(l.qty) * wi(l.unit_cents) }
+
+fn volume_pct(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 },
+  }
+}
+
+fn line_net(l: Line) -> int { gross(l) - gross(l) * volume_pct(l) / 100 }
+
+fn line_grams(l: Line) -> int { wi(l.qty) * wi(l.grams) }
+
+fn in_cat(l: Line, c: Category) -> bool {
+  match l.category {
+    Standard => match c { Standard => true, _ => false },
+    Food => match c { Food => true, _ => false },
+    Book => match c { Book => true, _ => false },
+    Medicine => match c { Medicine => true, _ => false },
+  }
+}
+
+fn sum_net(ls: seq<Line>, k: nat) -> int
+  requires k <= len(ls)
+  decreases k
+{
+  if k == 0 { 0 } else { sum_net(ls, k - 1) + line_net(ls[k - 1]) }
+}
+
+fn sum_g(ls: seq<Line>, k: nat) -> int
+  requires k <= len(ls)
+  decreases k
+{
+  if k == 0 { 0 } else { sum_g(ls, k - 1) + line_grams(ls[k - 1]) }
+}
+
+fn cat_net(ls: seq<Line>, k: nat, c: Category) -> int
+  requires k <= len(ls)
+  decreases k
+{
+  if k == 0 { 0 } else {
+    cat_net(ls, k - 1, c) + (if in_cat(ls[k - 1], c) { line_net(ls[k - 1]) } else { 0 })
+  }
+}
+
+fn all_ok(ls: seq<Line>, k: nat) -> bool
+  requires k <= len(ls)
+  decreases k
+{
+  if k == 0 { true } else { all_ok(ls, k - 1) && line_ok(ls[k - 1]) }
+}
+
+lemma line_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= gross(l) && gross(l) <= 1000000000000
+    && 0 <= line_grams(l) && line_grams(l) <= 10000000000
+{
+  assert wi(l.qty) * wi(l.unit_cents) <= 10000 * wi(l.unit_cents);
+  assert 10000 * wi(l.unit_cents) <= 10000 * 100000000;
+  assert 0 <= wi(l.qty) * wi(l.unit_cents);
+  assert wi(l.qty) * wi(l.grams) <= 10000 * wi(l.grams);
+  assert 0 <= wi(l.qty) * wi(l.grams);
+  assert gross(l) * volume_pct(l) <= gross(l) * 10;
+  assert 0 <= gross(l) * volume_pct(l);
+}
+
+lemma sums_bounds(ls: seq<Line>, k: nat)
+  requires k <= len(ls)
+  requires all_ok(ls, k)
+  ensures 0 <= sum_net(ls, k) && sum_net(ls, k) <= 1000000000000 * k
+    && 0 <= sum_g(ls, k) && sum_g(ls, k) <= 10000000000 * k
+    && 0 <= cat_net(ls, k, Standard) && cat_net(ls, k, Standard) <= sum_net(ls, k)
+    && 0 <= cat_net(ls, k, Food) && cat_net(ls, k, Food) <= sum_net(ls, k)
+    && 0 <= cat_net(ls, k, Book) && cat_net(ls, k, Book) <= sum_net(ls, k)
+    && 0 <= cat_net(ls, k, Medicine) && cat_net(ls, k, Medicine) <= sum_net(ls, k)
+    && cat_net(ls, k, Standard) + cat_net(ls, k, Food) + cat_net(ls, k, Book)
+       + cat_net(ls, k, Medicine) == sum_net(ls, k)
+  decreases k
+{
+  if k > 0 {
+    sums_bounds(ls, k - 1);
+    line_bounds(ls[k - 1]);
+  }
+}

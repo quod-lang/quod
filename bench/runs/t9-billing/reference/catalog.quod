@@ -1,0 +1,44 @@
+// What is sold, and what one line of an order costs.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn times(a: int, b: int) -> int {
+  a * b
+}
+
+fn valid_line(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+// Books never get a volume discount.
+fn volume_percent(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } },
+  }
+}
+
+fn gross(l: Line) -> int {
+  times(l.qty, l.unit_cents)
+}
+
+fn line_net(l: Line) -> int {
+  gross(l) - times(gross(l), volume_percent(l)) / 100
+}
+
+fn line_grams(l: Line) -> int {
+  times(l.qty, l.grams)
+}
+
+// What the proofs of the totals need: a line stays within these bounds.
+lemma line_bounds(l: Line)
+  requires valid_line(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+  ensures 0 <= line_grams(l) && line_grams(l) <= 10000000000
+{
+}

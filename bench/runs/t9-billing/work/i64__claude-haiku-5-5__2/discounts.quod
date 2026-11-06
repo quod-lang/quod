@@ -1,0 +1,89 @@
+// The discounts: what a customer and a coupon give.
+
+enum Customer {
+  Guest,
+  Member(i32),
+  Business(string),
+}
+
+enum Coupon {
+  NoCoupon,
+  Percent(i32),
+  Fixed(i32),
+  FreeShipping,
+}
+
+// An i32 field, as a mathematical integer.
+fn wide(x: i32) -> int {
+  x
+}
+
+// A member with a negative number of years is refused.
+fn bad_customer(c: Customer) -> bool {
+  match c {
+    Guest => false,
+    Member(years) => years < 0,
+    Business(_) => false,
+  }
+}
+
+// A coupon is refused when its percentage is outside 0..50 or its amount is negative.
+fn bad_coupon(cp: Coupon) -> bool {
+  match cp {
+    NoCoupon => false,
+    Percent(p) => p < 0 || p > 50,
+    Fixed(v) => v < 0,
+    FreeShipping => false,
+  }
+}
+
+// The customer discount in percent, on the subtotal.
+fn customer_percent(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+// The customer discount, in cents, on the subtotal.
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  subtotal * customer_percent(c, subtotal) / 100
+}
+
+// The coupon discount, in cents, on the amount left after the customer discount.
+fn coupon_discount(cp: Coupon, amount: int) -> int {
+  match cp {
+    NoCoupon => 0,
+    Percent(p) => amount * wide(p) / 100,
+    Fixed(v) => if wide(v) < amount { wide(v) } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+// The net from which shipping is free.
+fn free_threshold(c: Customer) -> int {
+  match c {
+    Guest => 10000,
+    Member(_) => 5000,
+    Business(_) => 10000,
+  }
+}
+
+fn is_free_shipping(cp: Coupon) -> bool {
+  match cp {
+    NoCoupon => false,
+    Percent(_) => false,
+    Fixed(_) => false,
+    FreeShipping => true,
+  }
+}
+
+// A business with a VAT number, outside France, pays no VAT.
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c {
+    Guest => false,
+    Member(_) => false,
+    Business(vat_number) => len(vat_number) > 0 && country != "FR",
+  }
+}

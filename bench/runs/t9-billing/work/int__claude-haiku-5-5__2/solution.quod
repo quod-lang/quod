@@ -1,0 +1,136 @@
+// solution.quod: the billing engine. All amounts are in cents.
+
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+fn least(a: int, b: int) -> int {
+  if a < b { a } else { b }
+}
+
+// The first validation error, in the order of the rules.
+fn error_of(o: Order, s: catalog.Sums) -> option.Option<string> {
+  if len(o.lines) == 0 {
+    option.Some("empty order")
+  } else if len(o.lines) > 1000 {
+    option.Some("too many lines")
+  } else if s.bad > 0 {
+    option.Some("bad line")
+  } else if discounts.bad_customer(o.customer) {
+    option.Some("bad customer")
+  } else if discounts.bad_coupon(o.coupon) {
+    option.Some("bad coupon")
+  } else {
+    option.None
+  }
+}
+
+fn customer_part(o: Order, s: catalog.Sums) -> int {
+  discounts.customer_discount(o.customer, s.net)
+}
+
+fn coupon_part(o: Order, s: catalog.Sums) -> int {
+  discounts.coupon_discount(o.coupon, s.net - customer_part(o, s))
+}
+
+// The discount of the order, at most 30% of the subtotal.
+fn discount_of(o: Order, s: catalog.Sums) -> int {
+  least(customer_part(o, s) + coupon_part(o, s), s.net * 30 / 100)
+}
+
+fn net_of(o: Order, s: catalog.Sums) -> int {
+  s.net - discount_of(o, s)
+}
+
+fn weight_shipping(g: int) -> int {
+  if g == 0 {
+    0
+  } else if g <= 1000 {
+    490
+  } else if g <= 5000 {
+    690
+  } else {
+    990 + 100 * ((g - 5000 + 999) / 1000)
+  }
+}
+
+fn shipping_of(o: Order, s: catalog.Sums) -> int {
+  if discounts.free_shipping_coupon(o.coupon) || net_of(o, s) >= discounts.free_shipping_threshold(o.customer) {
+    0
+  } else {
+    weight_shipping(s.weight)
+  }
+}
+
+// What is left of the discount once the categories before it have been taken.
+fn rest_after(before: int, net: int) -> int {
+  before - least(before, net)
+}
+
+// The base of a category: its net, less what the discount takes from it.
+fn base_of(net: int, before: int) -> int {
+  net - least(before, net)
+}
+
+fn vat_amount(base: int, rate: int) -> int {
+  (base * rate + 500) / 1000
+}
+
+// VAT of the four category bases; the discount is taken Standard, Food, Book, then Medicine.
+fn goods_vat(s: catalog.Sums, d: int) -> int {
+  vat_amount(base_of(s.standard, d), 200)
+    + vat_amount(base_of(s.food, rest_after(d, s.standard)), 55)
+    + vat_amount(base_of(s.book, rest_after(rest_after(d, s.standard), s.food)), 55)
+    + vat_amount(base_of(s.medicine, rest_after(rest_after(rest_after(d, s.standard), s.food), s.book)), 21)
+}
+
+fn reverse_charge(o: Order) -> bool {
+  match o.customer {
+    Business(vat_number) => len(vat_number) > 0 && o.country != "FR",
+    _ => false,
+  }
+}
+
+fn vat_of(o: Order, s: catalog.Sums) -> int {
+  if reverse_charge(o) {
+    0
+  } else {
+    goods_vat(s, discount_of(o, s)) + vat_amount(shipping_of(o, s), 200)
+  }
+}
+
+fn invoice_of(o: Order, s: catalog.Sums) -> Invoice {
+  Invoice(s.net, discount_of(o, s), net_of(o, s), shipping_of(o, s), vat_of(o, s),
+    net_of(o, s) + shipping_of(o, s) + vat_of(o, s))
+}
+
+// The answer of the billing, as a specification.
+fn quote(o: Order) -> option.Result<Invoice, string> {
+  match error_of(o, catalog.sums(o.lines)) {
+    Some(message) => option.Err(message),
+    None => option.Ok(invoice_of(o, catalog.sums(o.lines))),
+  }
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures result == quote(o)
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0
+      && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+    Err(_) => true,
+  }
+{
+  catalog.sums_ok(o.lines, len(o.lines));
+  let s = catalog.sums(o.lines);
+  return match error_of(o, s) {
+    Some(message) => option.Err(message),
+    None => option.Ok(invoice_of(o, s)),
+  };
+}

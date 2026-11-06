@@ -1,0 +1,46 @@
+// Who buys, and what an order takes off.
+
+enum Customer { Guest, Member(i32), Business(string) }
+
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn valid_customer(c: Customer) -> bool {
+  match c { Member(years) => years >= 0, _ => true }
+}
+
+fn valid_coupon(c: Coupon) -> bool {
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => subtotal * (if years >= 5 { 5 } else { 2 }) / 100,
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+fn smaller(a: int, b: int) -> int {
+  if a < b { a } else { b }
+}
+
+fn pct_of(amount: int, p: int) -> int {
+  amount * p / 100
+}
+
+fn coupon_discount(c: Coupon, amount: int) -> int {
+  match c {
+    Percent(p) => pct_of(amount, p),
+    Fixed(v) => smaller(v, amount),
+    _ => 0,
+  }
+}
+
+// At most 30% of the subtotal comes off.
+fn order_discount(cu: Customer, co: Coupon, subtotal: int) -> int {
+  smaller(customer_discount(cu, subtotal) + coupon_discount(co, subtotal - customer_discount(cu, subtotal)), subtotal * 30 / 100)
+}

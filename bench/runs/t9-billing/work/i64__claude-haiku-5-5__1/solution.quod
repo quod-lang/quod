@@ -1,0 +1,375 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+// ---------- validation ----------
+
+fn line_valid(l: catalog.Line) -> bool {
+  l.qty >= 1 && l.qty <= 10000 && l.unit_cents >= 0 && l.unit_cents <= 100000000 && l.grams >= 0 && l.grams <= 1000000
+}
+
+// the first n lines are all valid
+fn all_valid(lines: seq<catalog.Line>, n: nat) -> bool
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { true } else { line_valid(lines[n - 1]) && all_valid(lines, n - 1) }
+}
+
+fn bad_customer(c: discounts.Customer) -> bool {
+  match c {
+    Member(y) => y < 0,
+    _ => false,
+  }
+}
+
+fn bad_coupon(c: discounts.Coupon) -> bool {
+  match c {
+    Percent(p) => p < 0 || p > 50,
+    Fixed(v) => v < 0,
+    _ => false,
+  }
+}
+
+// "" when the order is valid, else the message of the first rule broken
+fn first_error(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" }
+  else if len(o.lines) > 1000 { "too many lines" }
+  else if !all_valid(o.lines, len(o.lines)) { "bad line" }
+  else if bad_customer(o.customer) { "bad customer" }
+  else if bad_coupon(o.coupon) { "bad coupon" }
+  else { "" }
+}
+
+// ---------- one line ----------
+
+fn gross_of(qty: int, unit: int) -> int { qty * unit }
+
+fn weight_of(qty: int, grams: int) -> int { qty * grams }
+
+fn volume_pct(qty: int) -> int {
+  if qty >= 100 { 10 } else if qty >= 10 { 5 } else { 0 }
+}
+
+fn line_pct(l: catalog.Line) -> int {
+  match l.category {
+    Book => 0,
+    _ => volume_pct(l.qty),
+  }
+}
+
+fn net_amount(g: int, p: int) -> int { g - g * p / 100 }
+
+fn line_net(l: catalog.Line) -> int {
+  net_amount(gross_of(l.qty, l.unit_cents), line_pct(l))
+}
+
+// ---------- sums over the first n lines (tail recursive: they run as loops) ----------
+
+fn subtotal_acc(lines: seq<catalog.Line>, n: nat, acc: int) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { acc } else { subtotal_acc(lines, n - 1, acc + line_net(lines[n - 1])) }
+}
+
+fn cat_acc(lines: seq<catalog.Line>, n: nat, c: catalog.Category, acc: int) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { acc }
+  else { cat_acc(lines, n - 1, c, if lines[n - 1].category == c { acc + line_net(lines[n - 1]) } else { acc }) }
+}
+
+fn weight_acc(lines: seq<catalog.Line>, n: nat, acc: int) -> int
+  requires n <= len(lines)
+  decreases n
+{
+  if n == 0 { acc } else { weight_acc(lines, n - 1, acc + weight_of(lines[n - 1].qty, lines[n - 1].grams)) }
+}
+
+// ---------- bounds, to fit the i64 fields ----------
+
+lemma line_bounds(l: catalog.Line)
+  requires line_valid(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+  ensures 0 <= weight_of(l.qty, l.grams) && weight_of(l.qty, l.grams) <= 10000000000
+{
+}
+
+lemma subtotal_bounds(lines: seq<catalog.Line>, n: nat, acc: int)
+  requires n <= len(lines)
+  requires all_valid(lines, n)
+  requires 0 <= acc
+  ensures 0 <= subtotal_acc(lines, n, acc)
+  ensures subtotal_acc(lines, n, acc) <= acc + n * 1000000000000
+  decreases n
+{
+  if n > 0 {
+    line_bounds(lines[n - 1]);
+    subtotal_bounds(lines, n - 1, acc + line_net(lines[n - 1]));
+  }
+}
+
+lemma cat_bounds(lines: seq<catalog.Line>, n: nat, c: catalog.Category, acc: int)
+  requires n <= len(lines)
+  requires all_valid(lines, n)
+  requires 0 <= acc
+  ensures 0 <= cat_acc(lines, n, c, acc)
+  ensures cat_acc(lines, n, c, acc) <= acc + n * 1000000000000
+  decreases n
+{
+  if n > 0 {
+    line_bounds(lines[n - 1]);
+    cat_bounds(lines, n - 1, c, if lines[n - 1].category == c { acc + line_net(lines[n - 1]) } else { acc });
+  }
+}
+
+lemma weight_bounds(lines: seq<catalog.Line>, n: nat, acc: int)
+  requires n <= len(lines)
+  requires all_valid(lines, n)
+  requires 0 <= acc
+  ensures 0 <= weight_acc(lines, n, acc)
+  ensures weight_acc(lines, n, acc) <= acc + n * 10000000000
+  decreases n
+{
+  if n > 0 {
+    line_bounds(lines[n - 1]);
+    weight_bounds(lines, n - 1, acc + weight_of(lines[n - 1].qty, lines[n - 1].grams));
+  }
+}
+
+// ---------- the order ----------
+
+fn min2(a: int, b: int) -> int { if a < b { a } else { b } }
+
+// a percentage of s, rounded down: 0 <= s * p / 100 <= s for 0 <= p <= 100
+lemma pct_bounds(s: int, p: int)
+  requires 0 <= s
+  requires 0 <= p && p <= 100
+  ensures 0 <= s * p / 100 && s * p / 100 <= s
+{
+}
+
+fn subtotal_of(o: Order) -> int { subtotal_acc(o.lines, len(o.lines), 0) }
+
+fn cust_pct(c: discounts.Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+lemma cust_pct_range(c: discounts.Customer, subtotal: int)
+  ensures 0 <= cust_pct(c, subtotal) && cust_pct(c, subtotal) <= 5
+{
+}
+
+fn cust_disc_of(o: Order) -> int {
+  subtotal_of(o) * cust_pct(o.customer, subtotal_of(o)) / 100
+}
+
+fn coupon_amount(c: discounts.Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => min2(v, amount),
+    FreeShipping => 0,
+  }
+}
+
+lemma coupon_range(c: discounts.Coupon, amount: int)
+  requires 0 <= amount
+  requires !bad_coupon(c)
+  ensures 0 <= coupon_amount(c, amount)
+{
+}
+
+fn coupon_disc_of(o: Order) -> int {
+  coupon_amount(o.coupon, subtotal_of(o) - cust_disc_of(o))
+}
+
+fn discount_of(o: Order) -> int {
+  min2(cust_disc_of(o) + coupon_disc_of(o), subtotal_of(o) * 30 / 100)
+}
+
+fn net_of_order(o: Order) -> int { subtotal_of(o) - discount_of(o) }
+
+fn threshold_of(c: discounts.Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+fn is_free_coupon(c: discounts.Coupon) -> bool {
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+fn ship_fee(g: int) -> int {
+  if g == 0 { 0 }
+  else if g <= 1000 { 490 }
+  else if g <= 5000 { 690 }
+  else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+}
+
+lemma ship_fee_bounds(g: int)
+  requires 0 <= g
+  ensures 0 <= ship_fee(g) && ship_fee(g) <= g + 1000
+{
+}
+
+fn shipping_of(o: Order) -> int {
+  if is_free_coupon(o.coupon) || net_of_order(o) >= threshold_of(o.customer) { 0 }
+  else { ship_fee(weight_acc(o.lines, len(o.lines), 0)) }
+}
+
+// ---------- VAT ----------
+
+// the VAT of a base, in thousandths of the rate: 20%, 5.5% and 2.1%
+fn vat200(b: int) -> int { (b * 200 + 500) / 1000 }
+fn vat55(b: int) -> int { (b * 55 + 500) / 1000 }
+fn vat21(b: int) -> int { (b * 21 + 500) / 1000 }
+
+lemma vat_rate_bounds(b: int)
+  requires 0 <= b
+  ensures 0 <= vat200(b) && vat200(b) <= b
+  ensures 0 <= vat55(b) && vat55(b) <= b
+  ensures 0 <= vat21(b) && vat21(b) <= b
+{
+}
+
+// what the discount leaves of each category, taken in the order Standard, Food, Book, Medicine
+fn rem1(sS: int, d: int) -> int { d - min2(sS, d) }
+fn rem2(sS: int, sF: int, d: int) -> int { rem1(sS, d) - min2(sF, rem1(sS, d)) }
+fn rem3(sS: int, sF: int, sB: int, d: int) -> int { rem2(sS, sF, d) - min2(sB, rem2(sS, sF, d)) }
+
+fn vat_lines(sS: int, sF: int, sB: int, sM: int, d: int) -> int {
+  vat200(sS - min2(sS, d))
+  + vat55(sF - min2(sF, rem1(sS, d)))
+  + vat55(sB - min2(sB, rem2(sS, sF, d)))
+  + vat21(sM - min2(sM, rem3(sS, sF, sB, d)))
+}
+
+lemma vat_lines_bounds(sS: int, sF: int, sB: int, sM: int, d: int)
+  requires 0 <= sS && 0 <= sF && 0 <= sB && 0 <= sM && 0 <= d
+  ensures 0 <= vat_lines(sS, sF, sB, sM, d)
+  ensures vat_lines(sS, sF, sB, sM, d) <= sS + sF + sB + sM
+{
+  vat_rate_bounds(sS - min2(sS, d));
+  vat_rate_bounds(sF - min2(sF, rem1(sS, d)));
+  vat_rate_bounds(sB - min2(sB, rem2(sS, sF, d)));
+  vat_rate_bounds(sM - min2(sM, rem3(sS, sF, sB, d)));
+}
+
+fn reverse_charge(c: discounts.Customer, country: string) -> bool {
+  match c {
+    Business(v) => len(v) > 0 && country != "FR",
+    _ => false,
+  }
+}
+
+fn cat_net_of(o: Order, c: catalog.Category) -> int {
+  cat_acc(o.lines, len(o.lines), c, 0)
+}
+
+fn vat_full(o: Order) -> int {
+  if reverse_charge(o.customer, o.country) { 0 }
+  else {
+    vat_lines(
+      cat_net_of(o, catalog.Standard),
+      cat_net_of(o, catalog.Food),
+      cat_net_of(o, catalog.Book),
+      cat_net_of(o, catalog.Medicine),
+      discount_of(o))
+    + vat200(shipping_of(o))
+  }
+}
+
+fn total_of(o: Order) -> int { net_of_order(o) + shipping_of(o) + vat_full(o) }
+
+// ---------- facts about a valid order ----------
+
+// the sums fit in i64, and the shipping and VAT are not negative
+lemma order_bounds(o: Order)
+  requires first_error(o) == ""
+  ensures 0 <= subtotal_of(o) && subtotal_of(o) <= 1000000000000000
+  ensures 0 <= weight_acc(o.lines, len(o.lines), 0) && weight_acc(o.lines, len(o.lines), 0) <= 10000000000000
+  ensures 0 <= shipping_of(o) && shipping_of(o) <= 10000000000000
+  ensures 0 <= vat_full(o) && vat_full(o) <= 5000000000000000
+{
+  subtotal_bounds(o.lines, len(o.lines), 0);
+  weight_bounds(o.lines, len(o.lines), 0);
+  cat_bounds(o.lines, len(o.lines), catalog.Standard, 0);
+  cat_bounds(o.lines, len(o.lines), catalog.Food, 0);
+  cat_bounds(o.lines, len(o.lines), catalog.Book, 0);
+  cat_bounds(o.lines, len(o.lines), catalog.Medicine, 0);
+  ship_fee_bounds(weight_acc(o.lines, len(o.lines), 0));
+  vat_lines_bounds(cat_net_of(o, catalog.Standard), cat_net_of(o, catalog.Food),
+                   cat_net_of(o, catalog.Book), cat_net_of(o, catalog.Medicine), discount_of(o));
+  vat_rate_bounds(shipping_of(o));
+}
+
+// the discount is not negative and at most 30% of the subtotal
+lemma cust_disc_bounds(c: discounts.Customer, s: int)
+  requires 0 <= s
+  ensures 0 <= s * cust_pct(c, s) / 100 && s * cust_pct(c, s) / 100 <= s
+{
+  cust_pct_range(c, s);
+  pct_bounds(s, cust_pct(c, s));
+}
+
+lemma discount_facts(o: Order)
+  requires first_error(o) == ""
+  ensures 0 <= cust_disc_of(o) && cust_disc_of(o) <= subtotal_of(o)
+  ensures 0 <= coupon_disc_of(o)
+  ensures 0 <= discount_of(o) && discount_of(o) <= subtotal_of(o) * 30 / 100
+  ensures net_of_order(o) >= 0
+{
+  subtotal_bounds(o.lines, len(o.lines), 0);
+  cust_disc_bounds(o.customer, subtotal_of(o));
+  pct_bounds(subtotal_of(o), 30);
+  coupon_range(o.coupon, subtotal_of(o) - cust_disc_of(o));
+}
+
+// ---------- the entry point ----------
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Ok(i) => first_error(o) == ""
+      && i.subtotal == subtotal_of(o)
+      && i.discount == discount_of(o)
+      && i.net == net_of_order(o)
+      && i.shipping == shipping_of(o)
+      && i.vat == vat_full(o)
+      && i.total == total_of(o)
+      && i.net == i.subtotal - i.discount
+      && i.total == i.net + i.shipping + i.vat
+      && i.discount >= 0
+      && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+    Err(m) => first_error(o) != "" && m == first_error(o),
+  }
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+{
+  if first_error(o) != "" {
+    option.Err(first_error(o))
+  } else {
+    order_bounds(o);
+    discount_facts(o);
+    option.Ok(Invoice(
+      to_i64(subtotal_of(o)),
+      to_i64(discount_of(o)),
+      to_i64(net_of_order(o)),
+      to_i64(shipping_of(o)),
+      to_i64(vat_full(o)),
+      to_i64(total_of(o))))
+  }
+}

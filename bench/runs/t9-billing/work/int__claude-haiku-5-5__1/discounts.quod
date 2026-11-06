@@ -1,0 +1,5 @@
+// Customers and coupons.
+
+enum Customer { Guest, Member(int), Business(string) }
+
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }

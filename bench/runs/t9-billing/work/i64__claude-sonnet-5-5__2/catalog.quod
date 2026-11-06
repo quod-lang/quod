@@ -1,0 +1,72 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn vol_pct(l: Line) -> int {
+  if l.category == Book { 0 } else { if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } } }
+}
+
+fn mul(a: int, b: int) -> int { a * b }
+
+fn gross(l: Line) -> int { mul(l.qty, l.unit_cents) }
+
+fn line_net(l: Line) -> int {
+  gross(l) - gross(l) * vol_pct(l) / 100
+}
+
+lemma line_net_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000 && gross(l) <= 1000000000000
+{
+  assert l.qty * l.unit_cents <= 1000000000000;
+  assert gross(l) >= 0;
+}
+
+fn all_ok(lines: seq<Line>, n: int) -> bool
+  requires 0 <= n && n <= len(lines)
+  decreases n
+{
+  if n == 0 { true } else { all_ok(lines, n - 1) && line_ok(lines[n - 1]) }
+}
+
+fn cat_net(lines: seq<Line>, n: int, c: Category) -> int
+  requires 0 <= n && n <= len(lines)
+  decreases n
+{
+  if n == 0 { 0 } else {
+    cat_net(lines, n - 1, c) + (if lines[n - 1].category == c { line_net(lines[n - 1]) } else { 0 })
+  }
+}
+
+fn weight(lines: seq<Line>, n: int) -> int
+  requires 0 <= n && n <= len(lines)
+  decreases n
+{
+  if n == 0 { 0 } else { weight(lines, n - 1) + mul(lines[n - 1].qty, lines[n - 1].grams) }
+}
+
+lemma cat_bound(lines: seq<Line>, n: int, c: Category)
+  requires 0 <= n && n <= len(lines) && all_ok(lines, n)
+  ensures 0 <= cat_net(lines, n, c) && cat_net(lines, n, c) <= n * 1000000000000
+  decreases n
+{
+  if n > 0 {
+    cat_bound(lines, n - 1, c);
+    line_net_bounds(lines[n - 1]);
+  }
+}
+
+lemma weight_bound(lines: seq<Line>, n: int)
+  requires 0 <= n && n <= len(lines) && all_ok(lines, n)
+  ensures 0 <= weight(lines, n) && weight(lines, n) <= n * 10000000000
+  decreases n
+{
+  if n > 0 {
+    weight_bound(lines, n - 1);
+    assert lines[n - 1].qty * lines[n - 1].grams <= 10000000000;
+    assert lines[n - 1].qty * lines[n - 1].grams >= 0;
+  }
+}

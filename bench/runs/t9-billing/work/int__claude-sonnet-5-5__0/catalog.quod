@@ -1,0 +1,63 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn valid_from(ls: seq<Line>, i: nat) -> bool
+  requires i <= len(ls)
+  decreases len(ls) - i
+{
+  if i == len(ls) { true } else if !line_ok(ls[i]) { false } else { valid_from(ls, i + 1) }
+}
+
+fn pos(x: int) -> int {
+  if x < 0 { 0 } else { x }
+}
+
+fn vol_percent(l: Line) -> int {
+  if l.category == Book { 0 } else if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 }
+}
+
+fn line_net(l: Line) -> int {
+  pos(l.qty * l.unit_cents - l.qty * l.unit_cents * vol_percent(l) / 100)
+}
+
+fn cat_net(ls: seq<Line>, i: nat, acc: int, c: Category) -> int
+  requires i <= len(ls)
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc } else if ls[i].category == c { cat_net(ls, i + 1, acc + line_net(ls[i]), c) } else { cat_net(ls, i + 1, acc, c) }
+}
+
+fn weight(ls: seq<Line>, i: nat, acc: int) -> int
+  requires i <= len(ls)
+  decreases len(ls) - i
+{
+  if i == len(ls) { acc } else { weight(ls, i + 1, acc + pos(ls[i].qty * ls[i].grams)) }
+}
+
+lemma cat_net_ge(ls: seq<Line>, i: nat, acc: int, c: Category)
+  requires i <= len(ls) && acc >= 0
+  ensures cat_net(ls, i, acc, c) >= acc
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    if ls[i].category == c {
+      cat_net_ge(ls, i + 1, acc + line_net(ls[i]), c);
+    } else {
+      cat_net_ge(ls, i + 1, acc, c);
+    }
+  }
+}
+
+lemma weight_ge(ls: seq<Line>, i: nat, acc: int)
+  requires i <= len(ls) && acc >= 0
+  ensures weight(ls, i, acc) >= acc
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    weight_ge(ls, i + 1, acc + pos(ls[i].qty * ls[i].grams));
+  }
+}

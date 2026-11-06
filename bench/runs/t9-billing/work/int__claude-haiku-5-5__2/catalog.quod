@@ -1,0 +1,117 @@
+// catalog.quod: the lines of an order and what they add up to.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+// What the billing needs from the lines of an order, summed.
+struct Sums {
+  net: int,        // sum of the nets of the lines
+  weight: int,     // sum of qty * grams
+  standard: int,   // sum of the nets of the Standard lines
+  food: int,       // sum of the nets of the Food lines
+  book: int,       // sum of the nets of the Book lines
+  medicine: int,   // sum of the nets of the Medicine lines
+  bad: int,        // number of invalid lines
+}
+
+fn gross(l: Line) -> int {
+  l.qty * l.unit_cents
+}
+
+// 10% from 100, 5% from 10, none below; Book lines never get one.
+fn volume_percent(l: Line) -> int {
+  if l.category == Book {
+    0
+  } else {
+    if l.qty >= 100 { 10 } else { if l.qty >= 10 { 5 } else { 0 } }
+  }
+}
+
+fn line_net(l: Line) -> int {
+  gross(l) - gross(l) * volume_percent(l) / 100
+}
+
+fn bad_line(l: Line) -> bool {
+  !(1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000)
+}
+
+fn no_sums() -> Sums {
+  Sums(0, 0, 0, 0, 0, 0, 0)
+}
+
+fn add_sums(a: Sums, b: Sums) -> Sums {
+  Sums(a.net + b.net, a.weight + b.weight, a.standard + b.standard, a.food + b.food,
+    a.book + b.book, a.medicine + b.medicine, a.bad + b.bad)
+}
+
+fn contribution(l: Line) -> Sums {
+  Sums(line_net(l), l.qty * l.grams,
+    if l.category == Standard { line_net(l) } else { 0 },
+    if l.category == Food { line_net(l) } else { 0 },
+    if l.category == Book { line_net(l) } else { 0 },
+    if l.category == Medicine { line_net(l) } else { 0 },
+    if bad_line(l) { 1 } else { 0 })
+}
+
+// The sums over the first n lines (the specification).
+fn sums_upto(ls: seq<Line>, n: nat) -> Sums
+  requires n <= len(ls)
+  decreases n
+{
+  if n == 0 { no_sums() } else { add_sums(sums_upto(ls, n - 1), contribution(ls[n - 1])) }
+}
+
+// The sums over all the lines: the specification, read by recursion.
+fn sums(ls: seq<Line>) -> Sums run_by sums_loop {
+  sums_upto(ls, len(ls))
+}
+
+// The same sums, computed by a loop.
+fn sums_loop(ls: seq<Line>) -> Sums
+  ensures result == sums(ls)
+{
+  let mut acc = no_sums();
+  let mut i: nat = 0;
+  while i < len(ls)
+    invariant i <= len(ls)
+    invariant acc == sums_upto(ls, i)
+    decreases len(ls) - i
+  {
+    acc = add_sums(acc, contribution(ls[i]));
+    i = i + 1;
+  }
+  acc
+}
+
+// A line that is not bad has nonnegative amounts.
+lemma contribution_ok(l: Line)
+  ensures contribution(l).bad >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).net >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).weight >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).standard >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).food >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).book >= 0
+  ensures contribution(l).bad == 0 ==> contribution(l).medicine >= 0
+{
+}
+
+// Over the first n lines, the bad count is nonnegative, and when it is 0 every amount is.
+lemma sums_ok(ls: seq<Line>, n: nat)
+  requires n <= len(ls)
+  ensures sums_upto(ls, n).bad >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).net >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).weight >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).standard >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).food >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).book >= 0
+  ensures sums_upto(ls, n).bad == 0 ==> sums_upto(ls, n).medicine >= 0
+  decreases n
+{
+  if n > 0 {
+    sums_ok(ls, n - 1);
+    contribution_ok(ls[n - 1]);
+  }
+}

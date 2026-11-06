@@ -1,0 +1,129 @@
+// discounts.quod: customers, coupons, shipping and VAT rules.
+
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+// A customer whose years are not negative, and a coupon in range, are the valid ones.
+fn customer_ok(c: Customer) -> bool
+  ensures result == match c {
+    Member(years) => years >= 0,
+    _ => true,
+  }
+{
+  match c {
+    Guest => true,
+    Member(years) => years >= 0,
+    Business(_) => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool
+  ensures result == match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+{
+  match c {
+    NoCoupon => true,
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    FreeShipping => true,
+  }
+}
+
+// The customer discount of a subtotal, in cents (rounded down).
+fn customer_discount(c: Customer, subtotal: int) -> int
+  ensures subtotal >= 0 ==> 0 <= result && result <= subtotal
+  ensures result == match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+{
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+// The subtotal from which shipping is free, for this customer.
+fn free_threshold(c: Customer) -> int
+  ensures result == match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+{
+  match c {
+    Guest => 10000,
+    Member(_) => 5000,
+    Business(_) => 10000,
+  }
+}
+
+// The coupon discount on an amount (non-negative); a fixed coupon is never more than the amount.
+fn coupon_discount(c: Coupon, amount: int) -> int
+  ensures (amount >= 0 && coupon_ok(c)) ==> 0 <= result && result <= amount
+  ensures result == match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+{
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn has_free_shipping(c: Coupon) -> bool
+  ensures result == (c == FreeShipping)
+{
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+// Shipping for a total weight in grams, when it is not free.
+fn weight_shipping(g: int) -> int
+  ensures (g == 0 ==> result == 0)
+    && (g != 0 && g <= 1000 ==> result == 490)
+    && (1000 < g && g <= 5000 ==> result == 690)
+    && (g > 5000 ==> result == 990 + 100 * ((g - 5000 + 999) / 1000))
+{
+  if g == 0 {
+    0
+  } else if g <= 1000 {
+    490
+  } else if g <= 5000 {
+    690
+  } else {
+    990 + 100 * ((g - 5000 + 999) / 1000)
+  }
+}
+
+// Reverse charge: no VAT for a business with a VAT number, outside France.
+fn reverse_charge(c: Customer, country: string) -> bool
+  ensures result == match c {
+    Business(number) => len(number) > 0 && country != "FR",
+    _ => false,
+  }
+{
+  match c {
+    Business(number) => len(number) > 0 && country != "FR",
+    _ => false,
+  }
+}
+
+// VAT of a base, at a rate per thousand, rounded down after adding one half.
+fn vat_of(base: int, rate: int) -> int
+  ensures 1000 * result <= base * rate + 500 && base * rate + 500 < 1000 * result + 1000
+  ensures (0 <= base && 0 <= rate && rate <= 200) ==> 0 <= result && result <= base
+{
+  (base * rate + 500) / 1000
+}

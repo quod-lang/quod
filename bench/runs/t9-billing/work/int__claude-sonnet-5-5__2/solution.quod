@@ -1,0 +1,128 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+private fn error_of(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" }
+  else if len(o.lines) > 1000 { "too many lines" }
+  else if !catalog.valid_all(o.lines) { "bad line" }
+  else if !discounts.valid_customer(o.customer) { "bad customer" }
+  else if !discounts.valid_coupon(o.coupon) { "bad coupon" }
+  else { "" }
+}
+
+private fn total_discount(o: Order, sub: int) -> int {
+  if discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub)) < sub * 30 / 100
+  { discounts.customer_discount(o.customer, sub)
+      + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub)) }
+  else { sub * 30 / 100 }
+}
+
+private fn shipping_of(o: Order, net: int) -> int {
+  if o.coupon == discounts.FreeShipping
+     || net >= (match o.customer { Member(_) => 5000, _ => 10000 }) { 0 }
+  else if catalog.weight(o.lines) == 0 { 0 }
+  else if catalog.weight(o.lines) <= 1000 { 490 }
+  else if catalog.weight(o.lines) <= 5000 { 690 }
+  else { 990 + 100 * ((catalog.weight(o.lines) - 5000 + 999) / 1000) }
+}
+
+private fn vat_of(base: int, rate: int) -> int {
+  (base * rate + 500) / 1000
+}
+
+private fn take(d: int, n: int) -> int { if d < n { d } else { n } }
+
+private fn vat_total(o: Order, d: int, shipping: int) -> int {
+  if (match o.customer { Business(n) => len(n) > 0 && o.country != "FR", _ => false }) { 0 }
+  else {
+    vat_of(catalog.cat_net(o.lines, catalog.Standard) - take(d, catalog.cat_net(o.lines, catalog.Standard)), 200)
+    + vat_of(catalog.cat_net(o.lines, catalog.Food)
+        - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard)), catalog.cat_net(o.lines, catalog.Food)), 55)
+    + vat_of(catalog.cat_net(o.lines, catalog.Book)
+        - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard))
+                 - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard)), catalog.cat_net(o.lines, catalog.Food)),
+               catalog.cat_net(o.lines, catalog.Book)), 55)
+    + vat_of(catalog.cat_net(o.lines, catalog.Medicine)
+        - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard))
+                 - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard)), catalog.cat_net(o.lines, catalog.Food))
+                 - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard))
+                          - take(d - take(d, catalog.cat_net(o.lines, catalog.Standard)), catalog.cat_net(o.lines, catalog.Food)),
+                        catalog.cat_net(o.lines, catalog.Book)),
+               catalog.cat_net(o.lines, catalog.Medicine)), 21)
+    + vat_of(shipping, 200)
+  }
+}
+
+private fn invoice_of(o: Order) -> Invoice {
+  Invoice(catalog.sum_net(o.lines),
+    total_discount(o, catalog.sum_net(o.lines)),
+    catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines)),
+    shipping_of(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines))),
+    vat_total(o, total_discount(o, catalog.sum_net(o.lines)),
+      shipping_of(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines)))),
+    catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines))
+      + shipping_of(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines)))
+      + vat_total(o, total_discount(o, catalog.sum_net(o.lines)),
+          shipping_of(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines)))))
+}
+
+private fn compute(o: Order) -> option.Result<Invoice, string> {
+  if error_of(o) == "" { option.Ok(invoice_of(o)) } else { option.Err(error_of(o)) }
+}
+
+lemma discount_bounds(o: Order, sub: int)
+  requires sub >= 0 && discounts.valid_coupon(o.coupon)
+  ensures total_discount(o, sub) >= 0 && total_discount(o, sub) <= sub * 30 / 100
+{
+  discounts.customer_discount_bounds(o.customer, sub);
+  discounts.coupon_discount_bounds(o.coupon, sub - discounts.customer_discount(o.customer, sub));
+}
+
+lemma shipping_nonneg(o: Order, net: int)
+  requires catalog.valid_all(o.lines)
+  ensures shipping_of(o, net) >= 0
+{
+  catalog.weight_nonneg(o.lines);
+}
+
+lemma vat_total_nonneg(o: Order, d: int, shipping: int)
+  requires catalog.valid_all(o.lines) && d >= 0 && shipping >= 0
+  ensures vat_total(o, d, shipping) >= 0
+{
+  catalog.cat_net_nonneg(o.lines, catalog.Standard);
+  catalog.cat_net_nonneg(o.lines, catalog.Food);
+  catalog.cat_net_nonneg(o.lines, catalog.Book);
+  catalog.cat_net_nonneg(o.lines, catalog.Medicine);
+}
+
+lemma invoice_props(o: Order)
+  requires catalog.valid_all(o.lines) && discounts.valid_coupon(o.coupon)
+  ensures invoice_of(o).net == invoice_of(o).subtotal - invoice_of(o).discount
+    && invoice_of(o).total == invoice_of(o).net + invoice_of(o).shipping + invoice_of(o).vat
+    && invoice_of(o).discount >= 0 && invoice_of(o).discount <= invoice_of(o).subtotal * 30 / 100
+    && invoice_of(o).total >= 0
+{
+  catalog.sum_net_nonneg(o.lines);
+  discount_bounds(o, catalog.sum_net(o.lines));
+  shipping_nonneg(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines)));
+  vat_total_nonneg(o, total_discount(o, catalog.sum_net(o.lines)),
+    shipping_of(o, catalog.sum_net(o.lines) - total_discount(o, catalog.sum_net(o.lines))));
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+    Err(_) => true,
+  }
+  ensures result == compute(o)
+{
+  if error_of(o) == "" { invoice_props(o); }
+  compute(o)
+}

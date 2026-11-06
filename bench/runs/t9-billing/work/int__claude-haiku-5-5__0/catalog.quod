@@ -1,0 +1,38 @@
+// The lines of an order and what each one costs. Amounts in cents, divisions round down.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: int, unit_cents: int, grams: int }
+
+// A line is in range: quantity 1..10000, unit price 0..100000000, weight 0..1000000 grams.
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+// The volume discount of a line, in percent: none for a book.
+fn volume_percent(l: Line) -> int {
+  match l.category {
+    Book => 0,
+    Standard => tier_percent(l.qty),
+    Food => tier_percent(l.qty),
+    Medicine => tier_percent(l.qty),
+  }
+}
+
+fn tier_percent(qty: int) -> int {
+  if qty >= 100 { 10 } else if qty >= 10 { 5 } else { 0 }
+}
+
+// The net amount of a line: gross - gross * percent / 100.
+fn line_net(l: Line) -> int {
+  l.qty * l.unit_cents - l.qty * l.unit_cents * volume_percent(l) / 100
+}
+
+// A line in range has a net that is not negative.
+lemma net_bounds(l: Line)
+  ensures line_ok(l) ==> 0 <= line_net(l)
+{
+  if line_ok(l) {
+    assert l.qty * l.unit_cents >= 0;
+  }
+}

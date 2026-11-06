@@ -1,0 +1,31 @@
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }
+
+fn customer_disc(c: Customer, sub: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_disc(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn customer_ok(c: Customer) -> bool {
+  match c { Member(y) => y >= 0, _ => true }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}

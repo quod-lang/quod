@@ -1,0 +1,66 @@
+enum Customer { Guest, Member(int), Business(string) }
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+fn customer_ok(c: Customer) -> bool {
+  match c {
+    Member(y) => y >= 0,
+    _ => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+fn customer_discount(c: Customer, sub: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_discount(c: Coupon, amount: int) -> int {
+  match c {
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    _ => 0,
+  }
+}
+
+fn free_shipping(c: Coupon) -> bool {
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+fn threshold(c: Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c {
+    Business(v) => len(v) > 0 && country != "FR",
+    _ => false,
+  }
+}
+
+lemma customer_discount_bounds(c: Customer, sub: int)
+  requires sub >= 0
+  ensures 0 <= customer_discount(c, sub) && customer_discount(c, sub) <= sub
+{
+}
+
+lemma coupon_discount_bounds(c: Coupon, amount: int)
+  requires amount >= 0 && coupon_ok(c)
+  ensures 0 <= coupon_discount(c, amount) && coupon_discount(c, amount) <= amount
+{
+}

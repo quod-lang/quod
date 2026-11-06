@@ -41,3 +41,8 @@ bench/runs/t8-features/work/*/agent_stderr.txt
 bench/runs/t8-features/work/*/.mcp.json
 bench/runs/t8-features/work/*/_py/
 bench/runs/t8-features.log
+bench/runs/t9-billing/work/*/agent_stdout.jsonl
+bench/runs/t9-billing/work/*/agent_stderr.txt
+bench/runs/t9-billing/work/*/.mcp.json
+bench/runs/t9-billing/work/*/_py/
+bench/runs/t9-billing.log

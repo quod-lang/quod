@@ -1,0 +1,177 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+// The sum of the nets of the lines from i on, added to acc.
+fn sum_net(lines: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) { acc } else { sum_net(lines, i + 1, acc + catalog.line_net(lines[i])) }
+}
+
+// The total weight of the lines from i on, added to acc.
+fn sum_weight(lines: seq<catalog.Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) { acc } else { sum_weight(lines, i + 1, acc + lines[i].qty * lines[i].grams) }
+}
+
+// The sum of the nets of the lines of category c from i on, added to acc.
+fn sum_category(lines: seq<catalog.Line>, i: int, c: catalog.Category, acc: int) -> int
+  requires 0 <= i && i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) {
+    acc
+  } else if lines[i].category == c {
+    sum_category(lines, i + 1, c, acc + catalog.line_net(lines[i]))
+  } else {
+    sum_category(lines, i + 1, c, acc)
+  }
+}
+
+// Every line from i on is in range.
+fn lines_ok(lines: seq<catalog.Line>, i: int) -> bool
+  requires 0 <= i && i <= len(lines)
+  decreases len(lines) - i
+{
+  if i == len(lines) {
+    true
+  } else if !catalog.line_ok(lines[i]) {
+    false
+  } else {
+    lines_ok(lines, i + 1)
+  }
+}
+
+// With the lines in range, the sum of the nets from i on, added to acc, is at least acc.
+lemma nets_nonneg(lines: seq<catalog.Line>, i: int, acc: int)
+  requires 0 <= i && i <= len(lines)
+  ensures lines_ok(lines, i) ==> sum_net(lines, i, acc) >= acc
+  decreases len(lines) - i
+{
+  if i < len(lines) {
+    catalog.net_bounds(lines[i]);
+    nets_nonneg(lines, i + 1, acc + catalog.line_net(lines[i]));
+  }
+}
+
+fn smaller(a: int, b: int) -> int {
+  if a < b { a } else { b }
+}
+
+// What is left of d after taking up to x from it.
+fn remaining(d: int, x: int) -> int {
+  d - smaller(d, x)
+}
+
+// VAT of a base, in cents, with a rate in thousandths.
+fn vat_of(base: int, per_mille: int) -> int {
+  (base * per_mille + 500) / 1000
+}
+
+fn shipping_of(weight: int) -> int {
+  if weight == 0 {
+    0
+  } else if weight <= 1000 {
+    490
+  } else if weight <= 5000 {
+    690
+  } else {
+    990 + 100 * ((weight - 5000 + 999) / 1000)
+  }
+}
+
+fn coupon_of(o: Order, subtotal: int) -> int {
+  discounts.coupon_discount(o.coupon, subtotal - discounts.customer_discount(o.customer, subtotal))
+}
+
+// The discount of the order, at most 30% of the subtotal.
+fn discount_of(o: Order, subtotal: int) -> int {
+  smaller(discounts.customer_discount(o.customer, subtotal) + coupon_of(o, subtotal), subtotal * 30 / 100)
+}
+
+fn shipping_for(o: Order, subtotal: int, discount: int) -> int {
+  if discounts.is_free_shipping(o.coupon) || subtotal - discount >= discounts.free_shipping_threshold(o.customer) {
+    0
+  } else {
+    shipping_of(sum_weight(o.lines, 0, 0))
+  }
+}
+
+// The nets of the lines, by category.
+struct Nets { standard: int, food: int, book: int, medicine: int }
+
+fn nets_of(lines: seq<catalog.Line>) -> Nets {
+  Nets(sum_category(lines, 0, catalog.Standard, 0), sum_category(lines, 0, catalog.Food, 0),
+    sum_category(lines, 0, catalog.Book, 0), sum_category(lines, 0, catalog.Medicine, 0))
+}
+
+// VAT of the order: the discount is taken from Standard, then Food, Book and Medicine.
+// Each base is what is left of its category; the shipping is taxed at 20%.
+fn vat_for(n: Nets, discount: int, shipping: int, reverse: bool) -> int {
+  if reverse {
+    0
+  } else {
+    vat_of(n.standard - smaller(discount, n.standard), 200)
+      + vat_of(n.food - smaller(remaining(discount, n.standard), n.food), 55)
+      + vat_of(n.book - smaller(remaining(remaining(discount, n.standard), n.food), n.book), 55)
+      + vat_of(n.medicine - smaller(remaining(remaining(remaining(discount, n.standard), n.food), n.book), n.medicine), 21)
+      + vat_of(shipping, 200)
+  }
+}
+
+fn billed(subtotal: int, discount: int, shipping: int, vat: int) -> Invoice {
+  Invoice(subtotal, discount, subtotal - discount, shipping, vat, subtotal - discount + shipping + vat)
+}
+
+fn charged(o: Order, subtotal: int) -> Invoice {
+  charged_with(o, subtotal, discount_of(o, subtotal))
+}
+
+fn charged_with(o: Order, subtotal: int, discount: int) -> Invoice {
+  charged_shipped(o, subtotal, discount, shipping_for(o, subtotal, discount))
+}
+
+fn charged_shipped(o: Order, subtotal: int, discount: int, shipping: int) -> Invoice {
+  billed(subtotal, discount, shipping,
+    vat_for(nets_of(o.lines), discount, shipping, discounts.reverse_charge(o.customer, o.country)))
+}
+
+// The whole rule, as a model: what an order costs, or why it is refused.
+fn quote(o: Order) -> option.Result<Invoice, string> {
+  if len(o.lines) == 0 {
+    option.Err("empty order")
+  } else if len(o.lines) > 1000 {
+    option.Err("too many lines")
+  } else if !lines_ok(o.lines, 0) {
+    option.Err("bad line")
+  } else if !discounts.customer_ok(o.customer) {
+    option.Err("bad customer")
+  } else if !discounts.coupon_ok(o.coupon) {
+    option.Err("bad coupon")
+  } else {
+    option.Ok(charged(o, sum_net(o.lines, 0, 0)))
+  }
+}
+
+// The invoice of an order, or the message of the first rule it breaks.
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures result == quote(o)
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Ok(i) => i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && 0 <= i.discount && i.discount <= i.subtotal * 30 / 100
+      && 0 <= i.total,
+    Err(_) => true,
+  }
+{
+  nets_nonneg(o.lines, 0, 0);
+  quote(o)
+}

@@ -1,0 +1,189 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+private fn mn(a: int, b: int) -> int {
+  if a < b { a } else { b }
+}
+
+private fn weight_cost(g: int) -> int {
+  if g == 0 { 0 } else {
+    if g <= 1000 { 490 } else {
+      if g <= 5000 { 690 } else { 990 + 100 * ((g - 5000 + 999) / 1000) }
+    }
+  }
+}
+
+private fn vat_k(base: int, rate: int) -> int {
+  (base * rate + 500) / 1000
+}
+
+private fn vat_m(nm: int, d: int) -> int {
+  vat_k(nm - mn(d, nm), 21)
+}
+
+private fn vat_b(nb: int, nm: int, d: int) -> int {
+  vat_k(nb - mn(d, nb), 55) + vat_m(nm, d - mn(d, nb))
+}
+
+private fn vat_f(nf: int, nb: int, nm: int, d: int) -> int {
+  vat_k(nf - mn(d, nf), 55) + vat_b(nb, nm, d - mn(d, nf))
+}
+
+private fn vat_s(ns: int, nf: int, nb: int, nm: int, d: int) -> int {
+  vat_k(ns - mn(d, ns), 200) + vat_f(nf, nb, nm, d - mn(d, ns))
+}
+
+fn order_ok(o: Order) -> bool {
+  len(o.lines) >= 1 && len(o.lines) <= 1000 && catalog.lines_ok(o.lines, 0)
+    && discounts.customer_ok(o.customer) && discounts.coupon_ok(o.coupon)
+}
+
+fn error_msg(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" } else {
+    if len(o.lines) > 1000 { "too many lines" } else {
+      if !catalog.lines_ok(o.lines, 0) { "bad line" } else {
+        if !discounts.customer_ok(o.customer) { "bad customer" } else {
+          if !discounts.coupon_ok(o.coupon) { "bad coupon" } else { "" }
+        }
+      }
+    }
+  }
+}
+
+private fn vat_total(o: Order, disc: int, ship: int) -> int {
+  if discounts.reverse_charge(o.customer, o.country) { 0 } else {
+    vat_s(catalog.cat_acc(o.lines, 0, 0, catalog.Standard),
+          catalog.cat_acc(o.lines, 0, 0, catalog.Food),
+          catalog.cat_acc(o.lines, 0, 0, catalog.Book),
+          catalog.cat_acc(o.lines, 0, 0, catalog.Medicine), disc)
+      + vat_k(ship, 200)
+  }
+}
+
+private fn shipping_of(o: Order, net: int) -> int {
+  if discounts.free_shipping(o.coupon) || net >= discounts.threshold(o.customer) { 0 }
+  else { weight_cost(catalog.weight_acc(o.lines, 0, 0)) }
+}
+
+private fn discount_of(o: Order, sub: int) -> int {
+  mn(discounts.customer_discount(o.customer, sub)
+       + discounts.coupon_discount(o.coupon, sub - discounts.customer_discount(o.customer, sub)),
+     sub * 30 / 100)
+}
+
+private fn build(o: Order, sub: int) -> Invoice {
+  Invoice(sub, discount_of(o, sub), sub - discount_of(o, sub),
+    shipping_of(o, sub - discount_of(o, sub)),
+    vat_total(o, discount_of(o, sub), shipping_of(o, sub - discount_of(o, sub))),
+    sub - discount_of(o, sub) + shipping_of(o, sub - discount_of(o, sub))
+      + vat_total(o, discount_of(o, sub), shipping_of(o, sub - discount_of(o, sub))))
+}
+
+fn invoice(o: Order) -> Invoice {
+  build(o, catalog.sub_acc(o.lines, 0, 0))
+}
+
+private lemma vat_k_nn(base: int, rate: int)
+  requires base >= 0 && rate >= 0
+  ensures vat_k(base, rate) >= 0
+{
+  assert base * rate >= 0;
+}
+
+private lemma vat_m_nn(nm: int, d: int)
+  requires nm >= 0 && d >= 0
+  ensures vat_m(nm, d) >= 0
+{
+  vat_k_nn(nm - mn(d, nm), 21);
+}
+
+private lemma vat_b_nn(nb: int, nm: int, d: int)
+  requires nb >= 0 && nm >= 0 && d >= 0
+  ensures vat_b(nb, nm, d) >= 0
+{
+  vat_k_nn(nb - mn(d, nb), 55);
+  vat_m_nn(nm, d - mn(d, nb));
+}
+
+private lemma vat_f_nn(nf: int, nb: int, nm: int, d: int)
+  requires nf >= 0 && nb >= 0 && nm >= 0 && d >= 0
+  ensures vat_f(nf, nb, nm, d) >= 0
+{
+  vat_k_nn(nf - mn(d, nf), 55);
+  vat_b_nn(nb, nm, d - mn(d, nf));
+}
+
+private lemma vat_s_nn(ns: int, nf: int, nb: int, nm: int, d: int)
+  requires ns >= 0 && nf >= 0 && nb >= 0 && nm >= 0 && d >= 0
+  ensures vat_s(ns, nf, nb, nm, d) >= 0
+{
+  vat_k_nn(ns - mn(d, ns), 200);
+  vat_f_nn(nf, nb, nm, d - mn(d, ns));
+}
+
+private lemma vat_total_nn(o: Order, disc: int, ship: int)
+  requires order_ok(o) && disc >= 0 && ship >= 0
+  ensures vat_total(o, disc, ship) >= 0
+{
+  catalog.cat_nn(o.lines, 0, 0, catalog.Standard);
+  catalog.cat_nn(o.lines, 0, 0, catalog.Food);
+  catalog.cat_nn(o.lines, 0, 0, catalog.Book);
+  catalog.cat_nn(o.lines, 0, 0, catalog.Medicine);
+  vat_s_nn(catalog.cat_acc(o.lines, 0, 0, catalog.Standard),
+           catalog.cat_acc(o.lines, 0, 0, catalog.Food),
+           catalog.cat_acc(o.lines, 0, 0, catalog.Book),
+           catalog.cat_acc(o.lines, 0, 0, catalog.Medicine), disc);
+  vat_k_nn(ship, 200);
+}
+
+private lemma shipping_nn(o: Order, net: int)
+  requires order_ok(o)
+  ensures shipping_of(o, net) >= 0
+{
+  catalog.weight_nn(o.lines, 0, 0);
+}
+
+private lemma discount_props(o: Order, sub: int)
+  requires order_ok(o) && sub >= 0
+  ensures 0 <= discount_of(o, sub) && discount_of(o, sub) <= sub * 30 / 100
+{
+  discounts.customer_discount_bounds(o.customer, sub);
+  discounts.coupon_discount_bounds(o.coupon, sub - discounts.customer_discount(o.customer, sub));
+}
+
+lemma invoice_props(o: Order)
+  requires order_ok(o)
+  ensures invoice(o).total == invoice(o).net + invoice(o).shipping + invoice(o).vat
+    && invoice(o).net == invoice(o).subtotal - invoice(o).discount
+    && invoice(o).discount >= 0 && invoice(o).discount <= invoice(o).subtotal * 30 / 100
+    && invoice(o).total >= 0
+{
+  catalog.sub_nn(o.lines, 0, 0);
+  let sub = catalog.sub_acc(o.lines, 0, 0);
+  discount_props(o, sub);
+  let d = discount_of(o, sub);
+  assert d <= sub;
+  shipping_nn(o, sub - d);
+  vat_total_nn(o, d, shipping_of(o, sub - d));
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Err(m) => m == error_msg(o) && len(m) > 0,
+    Ok(i) => error_msg(o) == "" && i == invoice(o)
+      && i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+  }
+{
+  if len(error_msg(o)) > 0 {
+    option.Err(error_msg(o))
+  } else {
+    invoice_props(o);
+    option.Ok(invoice(o))
+  }
+}

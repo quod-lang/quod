@@ -1,0 +1,72 @@
+// The catalog: what a line of an order is, and what it costs.
+
+enum Category {
+  Standard,
+  Food,
+  Book,
+  Medicine,
+}
+
+struct Line {
+  sku: string,
+  category: Category,
+  qty: i32,
+  unit_cents: i32,
+  grams: i32,
+}
+
+// An i32 field, as a mathematical integer.
+fn wide(x: i32) -> int {
+  x
+}
+
+// A line is bad when one of its numbers is out of its range.
+fn bad_line(l: Line) -> bool {
+  l.qty < 1 || l.qty > 10000 || l.unit_cents < 0 || l.unit_cents > 100000000 || l.grams < 0 || l.grams > 1000000
+}
+
+fn gross(l: Line) -> int {
+  wide(l.qty) * wide(l.unit_cents)
+}
+
+// The volume discount of a line, in percent. Books never get one.
+fn volume_percent(l: Line) -> int {
+  if l.category == Book {
+    0
+  } else if l.qty >= 100 {
+    10
+  } else if l.qty >= 10 {
+    5
+  } else {
+    0
+  }
+}
+
+// The net of a line, in cents: its gross less its volume discount.
+fn line_net(l: Line) -> int {
+  gross(l) - gross(l) * volume_percent(l) / 100
+}
+
+// The weight of a line, in grams.
+fn line_weight(l: Line) -> int {
+  wide(l.qty) * wide(l.grams)
+}
+
+lemma gross_bound(l: Line)
+  requires !bad_line(l)
+  ensures 0 <= gross(l) && gross(l) <= 1000000000000
+{
+}
+
+lemma net_bound(l: Line)
+  requires !bad_line(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+{
+  gross_bound(l);
+}
+
+lemma weight_bound(l: Line)
+  requires !bad_line(l)
+  ensures 0 <= line_weight(l) && line_weight(l) <= 10000000000
+{
+}

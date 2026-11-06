@@ -1,0 +1,52 @@
+// catalog.quod: product categories and order lines, with the per-line rules.
+
+enum Category { Standard, Food, Book, Medicine }
+
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+// Widening is implicit: i32 to int.
+fn widen(x: i32) -> int {
+  x
+}
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+// Volume discount, in percent: none for books.
+fn volume_percent(l: Line) -> int {
+  if l.category == Book {
+    0
+  } else if l.qty >= 100 {
+    10
+  } else if l.qty >= 10 {
+    5
+  } else {
+    0
+  }
+}
+
+fn line_gross(l: Line) -> int {
+  widen(l.qty) * widen(l.unit_cents)
+}
+
+fn line_net(l: Line) -> int {
+  line_gross(l) - line_gross(l) * volume_percent(l) / 100
+}
+
+fn line_weight(l: Line) -> int {
+  widen(l.qty) * widen(l.grams)
+}
+
+// Bounds used to convert the sums to i64: a valid line nets at most 10^12
+// cents and weighs at most 10^10 grams.
+lemma line_bound(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+      && 0 <= line_weight(l) && line_weight(l) <= 10000000000
+{
+  assert 0 <= widen(l.qty) * widen(l.unit_cents) && widen(l.qty) * widen(l.unit_cents) <= 1000000000000;
+  assert 0 <= widen(l.qty) * widen(l.grams) && widen(l.qty) * widen(l.grams) <= 10000000000;
+}

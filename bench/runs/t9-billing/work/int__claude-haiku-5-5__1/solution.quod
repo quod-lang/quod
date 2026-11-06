@@ -1,0 +1,333 @@
+// The billing engine: validation, pricing, discounts, shipping and VAT.
+// All amounts are in cents; divisions round down.
+
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: int, discount: int, net: int, shipping: int, vat: int, total: int }
+
+// ---------- small helpers ----------
+
+fn min2(a: int, b: int) -> int
+  ensures result <= a && result <= b && (result == a || result == b)
+{
+  if a <= b { a } else { b }
+}
+
+// ---------- validation ----------
+
+fn line_ok(l: catalog.Line) -> bool {
+  1 <= l.qty && l.qty <= 10000
+    && 0 <= l.unit_cents && l.unit_cents <= 100000000
+    && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn all_lines_ok(ls: seq<catalog.Line>) -> bool
+  decreases len(ls)
+{
+  if len(ls) == 0 { true } else { line_ok(ls[0]) && all_lines_ok(ls[1..]) }
+}
+
+fn customer_ok(c: discounts.Customer) -> bool {
+  match c {
+    Member(years) => years >= 0,
+    _ => true,
+  }
+}
+
+fn coupon_ok(cp: discounts.Coupon) -> bool {
+  match cp {
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    _ => true,
+  }
+}
+
+// The message of the first rule broken, or "" when the order is valid.
+fn error_of(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" }
+  else if len(o.lines) > 1000 { "too many lines" }
+  else if !all_lines_ok(o.lines) { "bad line" }
+  else if !customer_ok(o.customer) { "bad customer" }
+  else if !coupon_ok(o.coupon) { "bad coupon" }
+  else { "" }
+}
+
+// ---------- lines ----------
+
+fn gross(l: catalog.Line) -> int {
+  l.qty * l.unit_cents
+}
+
+fn volume_percent(l: catalog.Line) -> int {
+  if l.category == catalog.Book { 0 }
+  else if l.qty >= 100 { 10 }
+  else if l.qty >= 10 { 5 }
+  else { 0 }
+}
+
+fn line_net(l: catalog.Line) -> int {
+  gross(l) - gross(l) * volume_percent(l) / 100
+}
+
+lemma line_net_nonneg(l: catalog.Line)
+  requires line_ok(l)
+  ensures line_net(l) >= 0
+{
+}
+
+// ---------- sums over the lines ----------
+
+// The sums are defined by recursion (one call per line), and run as loops in the code:
+// a recursion of up to 1000 lines would exceed the depth of Python's stack.
+fn sum_net(ls: seq<catalog.Line>) -> int
+  run_by sum_net_loop
+{
+  sum_net_def(ls)
+}
+
+fn sum_net_def(ls: seq<catalog.Line>) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 } else { line_net(ls[0]) + sum_net_def(ls[1..]) }
+}
+
+fn sum_net_loop(ls: seq<catalog.Line>) -> int
+  ensures result == sum_net(ls)
+{
+  let mut acc: int = 0;
+  let mut i: int = len(ls);
+  while i > 0
+    invariant 0 <= i && i <= len(ls) && acc == sum_net_def(ls[i..])
+    decreases i
+  {
+    i = i - 1;
+    assert ls[i..][0] == ls[i];
+    assert ls[i..][1..] == ls[i + 1..];
+    assert sum_net_def(ls[i..]) == line_net(ls[i]) + sum_net_def(ls[i + 1..]);
+    acc = line_net(ls[i]) + acc;
+  }
+  acc
+}
+
+lemma sum_net_nonneg(ls: seq<catalog.Line>)
+  requires all_lines_ok(ls)
+  ensures sum_net(ls) >= 0
+  decreases len(ls)
+{
+  if len(ls) > 0 {
+    line_net_nonneg(ls[0]);
+    sum_net_nonneg(ls[1..]);
+  }
+}
+
+fn cat_net(ls: seq<catalog.Line>, c: catalog.Category) -> int
+  run_by cat_net_loop
+{
+  cat_net_def(ls, c)
+}
+
+fn cat_net_def(ls: seq<catalog.Line>, c: catalog.Category) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 }
+  else { (if ls[0].category == c { line_net(ls[0]) } else { 0 }) + cat_net_def(ls[1..], c) }
+}
+
+fn cat_net_loop(ls: seq<catalog.Line>, c: catalog.Category) -> int
+  ensures result == cat_net(ls, c)
+{
+  let mut acc: int = 0;
+  let mut i: int = len(ls);
+  while i > 0
+    invariant 0 <= i && i <= len(ls) && acc == cat_net_def(ls[i..], c)
+    decreases i
+  {
+    i = i - 1;
+    assert ls[i..][0] == ls[i];
+    assert ls[i..][1..] == ls[i + 1..];
+    assert cat_net_def(ls[i..], c) == (if ls[i].category == c { line_net(ls[i]) } else { 0 }) + cat_net_def(ls[i + 1..], c);
+    acc = (if ls[i].category == c { line_net(ls[i]) } else { 0 }) + acc;
+  }
+  acc
+}
+
+fn sum_grams(ls: seq<catalog.Line>) -> int
+  run_by sum_grams_loop
+{
+  sum_grams_def(ls)
+}
+
+fn sum_grams_def(ls: seq<catalog.Line>) -> int
+  decreases len(ls)
+{
+  if len(ls) == 0 { 0 } else { ls[0].qty * ls[0].grams + sum_grams_def(ls[1..]) }
+}
+
+fn sum_grams_loop(ls: seq<catalog.Line>) -> int
+  ensures result == sum_grams(ls)
+{
+  let mut acc: int = 0;
+  let mut i: int = len(ls);
+  while i > 0
+    invariant 0 <= i && i <= len(ls) && acc == sum_grams_def(ls[i..])
+    decreases i
+  {
+    i = i - 1;
+    assert ls[i..][0] == ls[i];
+    assert ls[i..][1..] == ls[i + 1..];
+    assert sum_grams_def(ls[i..]) == ls[i].qty * ls[i].grams + sum_grams_def(ls[i + 1..]);
+    acc = ls[i].qty * ls[i].grams + acc;
+  }
+  acc
+}
+
+// ---------- customer and coupon discounts ----------
+
+fn customer_discount(c: discounts.Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+lemma customer_nonneg(c: discounts.Customer, subtotal: int)
+  requires subtotal >= 0
+  ensures customer_discount(c, subtotal) >= 0 && customer_discount(c, subtotal) <= subtotal
+{
+}
+
+fn coupon_discount(cp: discounts.Coupon, amount: int) -> int {
+  match cp {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => min2(v, amount),
+    FreeShipping => 0,
+  }
+}
+
+lemma coupon_nonneg(cp: discounts.Coupon, amount: int)
+  requires coupon_ok(cp) && amount >= 0
+  ensures coupon_discount(cp, amount) >= 0
+{
+}
+
+// ---------- the order ----------
+
+fn sub_of(o: Order) -> int {
+  sum_net(o.lines)
+}
+
+fn cust_of(o: Order) -> int {
+  customer_discount(o.customer, sub_of(o))
+}
+
+fn amount_of(o: Order) -> int {
+  sub_of(o) - cust_of(o)
+}
+
+fn disc_of(o: Order) -> int {
+  min2(cust_of(o) + coupon_discount(o.coupon, amount_of(o)), sub_of(o) * 30 / 100)
+}
+
+fn net_of(o: Order) -> int {
+  sub_of(o) - disc_of(o)
+}
+
+// ---------- shipping ----------
+
+fn is_free_shipping(cp: discounts.Coupon) -> bool {
+  match cp {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+fn threshold_of(c: discounts.Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}
+
+fn ship_of(o: Order) -> int {
+  if is_free_shipping(o.coupon) || net_of(o) >= threshold_of(o.customer) { 0 }
+  else if sum_grams(o.lines) == 0 { 0 }
+  else if sum_grams(o.lines) <= 1000 { 490 }
+  else if sum_grams(o.lines) <= 5000 { 690 }
+  else { 990 + 100 * ((sum_grams(o.lines) - 5000 + 999) / 1000) }
+}
+
+// ---------- VAT ----------
+
+// The discount taken from each category, in the order Standard, Food, Book, Medicine.
+fn std_take(o: Order) -> int {
+  min2(disc_of(o), cat_net(o.lines, catalog.Standard))
+}
+
+fn food_take(o: Order) -> int {
+  min2(disc_of(o) - std_take(o), cat_net(o.lines, catalog.Food))
+}
+
+fn book_take(o: Order) -> int {
+  min2(disc_of(o) - std_take(o) - food_take(o), cat_net(o.lines, catalog.Book))
+}
+
+fn med_take(o: Order) -> int {
+  min2(disc_of(o) - std_take(o) - food_take(o) - book_take(o), cat_net(o.lines, catalog.Medicine))
+}
+
+// Per thousand: 200, 55, 55 and 21 for the four rates.
+fn vat_of(base: int, rate: int) -> int {
+  (base * rate + 500) / 1000
+}
+
+fn reverse_charge(o: Order) -> bool {
+  match o.customer {
+    Business(v) => len(v) > 0 && o.country != "FR",
+    _ => false,
+  }
+}
+
+fn vat_of_order(o: Order) -> int {
+  if reverse_charge(o) { 0 }
+  else {
+    vat_of(cat_net(o.lines, catalog.Standard) - std_take(o), 200)
+      + vat_of(cat_net(o.lines, catalog.Food) - food_take(o), 55)
+      + vat_of(cat_net(o.lines, catalog.Book) - book_take(o), 55)
+      + vat_of(cat_net(o.lines, catalog.Medicine) - med_take(o), 21)
+      + vat_of(ship_of(o), 200)
+  }
+}
+
+fn total_of(o: Order) -> int {
+  net_of(o) + ship_of(o) + vat_of_order(o)
+}
+
+// ---------- the price ----------
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures match result {
+    Ok(i) => error_of(o) == ""
+      && i.subtotal == sub_of(o) && i.discount == disc_of(o) && i.net == net_of(o)
+      && i.shipping == ship_of(o) && i.vat == vat_of_order(o) && i.total == total_of(o)
+      && i.total == i.net + i.shipping + i.vat
+      && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100
+      && i.total >= 0,
+    Err(m) => error_of(o) != "" && m == error_of(o),
+  }
+{
+  if len(o.lines) == 0 { return option.Err("empty order"); }
+  if len(o.lines) > 1000 { return option.Err("too many lines"); }
+  if !all_lines_ok(o.lines) { return option.Err("bad line"); }
+  if !customer_ok(o.customer) { return option.Err("bad customer"); }
+  if !coupon_ok(o.coupon) { return option.Err("bad coupon"); }
+  sum_net_nonneg(o.lines);
+  customer_nonneg(o.customer, sub_of(o));
+  coupon_nonneg(o.coupon, amount_of(o));
+  option.Ok(Invoice(sub_of(o), disc_of(o), net_of(o), ship_of(o), vat_of_order(o), total_of(o)))
+}

@@ -1,0 +1,4 @@
+// The customer and the coupon of an order.
+
+enum Customer { Guest, Member(i32), Business(string) }
+enum Coupon { NoCoupon, Percent(i32), Fixed(i32), FreeShipping }

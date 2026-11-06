@@ -1,0 +1,40 @@
+enum Customer { Guest, Member(int), Business(string) }
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+fn valid_customer(c: Customer) -> bool {
+  match c { Guest => true, Member(y) => y >= 0, Business(_) => true }
+}
+
+fn valid_coupon(c: Coupon) -> bool {
+  match c { NoCoupon => true, Percent(p) => p >= 0 && p <= 50, Fixed(v) => v >= 0, FreeShipping => true }
+}
+
+fn customer_discount(c: Customer, sub: int) -> int {
+  match c {
+    Guest => 0,
+    Member(y) => if y >= 5 { sub * 5 / 100 } else { sub * 2 / 100 },
+    Business(_) => if sub >= 100000 { sub * 3 / 100 } else { 0 },
+  }
+}
+
+fn coupon_discount(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+lemma customer_discount_bounds(c: Customer, sub: int)
+  requires sub >= 0
+  ensures customer_discount(c, sub) >= 0 && customer_discount(c, sub) <= sub
+{
+}
+
+lemma coupon_discount_bounds(c: Coupon, amount: int)
+  requires amount >= 0 && valid_coupon(c)
+  ensures coupon_discount(c, amount) >= 0 && coupon_discount(c, amount) <= amount
+{
+  assert match c { Percent(p) => amount * p <= amount * 50, _ => true };
+}

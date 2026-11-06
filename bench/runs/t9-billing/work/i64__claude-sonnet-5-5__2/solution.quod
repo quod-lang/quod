@@ -1,0 +1,124 @@
+import catalog
+import discounts
+import option
+
+struct Order { lines: seq<catalog.Line>, customer: discounts.Customer, coupon: discounts.Coupon, country: string }
+struct Invoice { subtotal: i64, discount: i64, net: i64, shipping: i64, vat: i64, total: i64 }
+
+fn valid(o: Order) -> bool {
+  1 <= len(o.lines) && len(o.lines) <= 1000 && catalog.all_ok(o.lines, len(o.lines))
+    && discounts.cust_ok(o.customer) && discounts.coupon_ok(o.coupon)
+}
+
+fn verr(o: Order) -> string {
+  if len(o.lines) == 0 { "empty order" } else {
+    if len(o.lines) > 1000 { "too many lines" } else {
+      if !catalog.all_ok(o.lines, len(o.lines)) { "bad line" } else {
+        if !discounts.cust_ok(o.customer) { "bad customer" } else {
+          if !discounts.coupon_ok(o.coupon) { "bad coupon" } else { "" }
+        }
+      }
+    }
+  }
+}
+
+fn catn(o: Order, c: catalog.Category) -> int {
+  catalog.cat_net(o.lines, len(o.lines), c)
+}
+
+fn subt(o: Order) -> int {
+  catn(o, catalog.Standard) + catn(o, catalog.Food) + catn(o, catalog.Book) + catn(o, catalog.Medicine)
+}
+
+fn disc(o: Order) -> int {
+  discounts.discount(subt(o), o.customer, o.coupon)
+}
+
+fn wt(o: Order) -> int {
+  catalog.weight(o.lines, len(o.lines))
+}
+
+fn ship(o: Order) -> int {
+  discounts.shipping(subt(o) - disc(o), wt(o), o.customer, o.coupon)
+}
+
+fn vatv(o: Order) -> int {
+  discounts.vat_total(catn(o, catalog.Standard), catn(o, catalog.Food), catn(o, catalog.Book), catn(o, catalog.Medicine),
+    disc(o), ship(o), discounts.reverse_charge(o.customer, o.country))
+}
+
+lemma props(o: Order)
+  requires valid(o)
+  ensures 0 <= subt(o) && subt(o) <= 4000000000000000
+    && 0 <= disc(o) && disc(o) <= subt(o) * 30 / 100
+    && 0 <= ship(o) && ship(o) <= 2000000000000
+    && 0 <= vatv(o) && vatv(o) <= 5000000000000000 + 2000000000005
+{
+  catalog.cat_bound(o.lines, len(o.lines), catalog.Standard);
+  catalog.cat_bound(o.lines, len(o.lines), catalog.Food);
+  catalog.cat_bound(o.lines, len(o.lines), catalog.Book);
+  catalog.cat_bound(o.lines, len(o.lines), catalog.Medicine);
+  catalog.weight_bound(o.lines, len(o.lines));
+  discounts.discount_ok(subt(o), o.customer, o.coupon);
+  discounts.shipping_ok(subt(o) - disc(o), wt(o), o.customer, o.coupon);
+  discounts.vat_ok(catn(o, catalog.Standard), catn(o, catalog.Food), catn(o, catalog.Book), catn(o, catalog.Medicine),
+    disc(o), ship(o), discounts.reverse_charge(o.customer, o.country));
+}
+
+fn build(o: Order) -> Invoice
+  requires valid(o)
+  ensures result.subtotal == subt(o) && result.discount == disc(o)
+    && result.net == subt(o) - disc(o) && result.shipping == ship(o)
+    && result.vat == vatv(o) && result.total == subt(o) - disc(o) + ship(o) + vatv(o)
+{
+  props(o);
+  let mut i: int = 0;
+  let mut ns: int = 0;
+  let mut nf: int = 0;
+  let mut nb: int = 0;
+  let mut nm: int = 0;
+  while i < len(o.lines)
+    invariant 0 <= i && i <= len(o.lines)
+    invariant ns == catalog.cat_net(o.lines, i, catalog.Standard)
+    invariant nf == catalog.cat_net(o.lines, i, catalog.Food)
+    invariant nb == catalog.cat_net(o.lines, i, catalog.Book)
+    invariant nm == catalog.cat_net(o.lines, i, catalog.Medicine)
+    decreases len(o.lines) - i
+  {
+    let l: catalog.Line = o.lines[i];
+    let q: int = l.qty;
+    let u: int = l.unit_cents;
+    let gr: int = q * u;
+    let n: int = gr - gr * catalog.vol_pct(l) / 100;
+    assert n == catalog.line_net(l);
+    if l.category == catalog.Standard { ns = ns + n; }
+    if l.category == catalog.Food { nf = nf + n; }
+    if l.category == catalog.Book { nb = nb + n; }
+    if l.category == catalog.Medicine { nm = nm + n; }
+    i = i + 1;
+  }
+  let sub: int = ns + nf + nb + nm;
+  let d: int = discounts.discount(sub, o.customer, o.coupon);
+  let sh: int = discounts.shipping(sub - d, catalog.weight(o.lines, len(o.lines)), o.customer, o.coupon);
+  let v: int = discounts.vat_total(ns, nf, nb, nm, d, sh, discounts.reverse_charge(o.customer, o.country));
+  Invoice(to_i64(sub), to_i64(d), to_i64(sub - d), to_i64(sh), to_i64(v), to_i64(sub - d + sh + v))
+}
+
+fn price(o: Order) -> option.Result<Invoice, string>
+  ensures len(o.lines) == 0 ==> result == option.Err("empty order")
+  ensures match result {
+    Err(m) => m == verr(o) && !valid(o),
+    Ok(i) => valid(o) && i.subtotal == subt(o) && i.discount == disc(o)
+      && i.net == subt(o) - disc(o) && i.shipping == ship(o) && i.vat == vatv(o)
+      && i.total == i.net + i.shipping + i.vat && i.net == i.subtotal - i.discount
+      && i.discount >= 0 && i.discount <= i.subtotal * 30 / 100 && i.total >= 0,
+  }
+{
+  let e: string = verr(o);
+  if len(e) > 0 {
+    return option.Err(e);
+  }
+  props(o);
+  let i: Invoice = build(o);
+  option.Ok(i)
+}

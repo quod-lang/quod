@@ -284,12 +284,15 @@ def parse_events(stdout: str) -> dict[str, Any]:
             e = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(e, dict):  # the stream can hold a line of plain JSON text
+            continue
         if e.get("type") == "result":
             usage = e.get("usage") or {}
             m.update(turns=e.get("num_turns"), cost_usd=e.get("total_cost_usd"), agent_error=e.get("is_error"), result_text=str(e.get("result"))[:300],
-                     out_tokens=usage.get("output_tokens"))
+                     out_tokens=usage.get("output_tokens"), duration_secs=round((e.get("duration_ms") or 0) / 1000, 1))
             continue
-        content = (e.get("message") or {}).get("content")
+        message = e.get("message")  # a string in some system events
+        content = message.get("content") if isinstance(message, dict) else None
         for c in content if isinstance(content, list) else []:
             if not isinstance(c, dict):
                 continue

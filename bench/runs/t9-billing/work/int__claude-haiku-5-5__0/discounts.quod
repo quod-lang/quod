@@ -1,0 +1,72 @@
+// Who buys, and the coupon they give. Amounts in cents, divisions round down.
+
+enum Customer { Guest, Member(int), Business(string) }
+
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+// The customer and the coupon are in range.
+fn customer_ok(c: Customer) -> bool {
+  match c {
+    Guest => true,
+    Member(years) => years >= 0,
+    Business(_) => true,
+  }
+}
+
+fn coupon_ok(c: Coupon) -> bool {
+  match c {
+    NoCoupon => true,
+    Percent(p) => 0 <= p && p <= 50,
+    Fixed(v) => v >= 0,
+    FreeShipping => true,
+  }
+}
+
+// The percentage the customer gets off the subtotal.
+fn customer_percent(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { 5 } else { 2 },
+    Business(_) => if subtotal >= 100000 { 3 } else { 0 },
+  }
+}
+
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  subtotal * customer_percent(c, subtotal) / 100
+}
+
+// The coupon discount, on the amount left after the customer discount.
+fn coupon_discount(c: Coupon, base: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => base * p / 100,
+    Fixed(v) => if v < base { v } else { base },
+    FreeShipping => 0,
+  }
+}
+
+fn free_shipping_threshold(c: Customer) -> int {
+  match c {
+    Guest => 10000,
+    Member(_) => 5000,
+    Business(_) => 10000,
+  }
+}
+
+fn is_free_shipping(c: Coupon) -> bool {
+  match c {
+    NoCoupon => false,
+    Percent(_) => false,
+    Fixed(_) => false,
+    FreeShipping => true,
+  }
+}
+
+// Reverse charge: a business with a VAT number, when the country is not France.
+fn reverse_charge(c: Customer, country: string) -> bool {
+  match c {
+    Guest => false,
+    Member(_) => false,
+    Business(vat_number) => len(vat_number) > 0 && country != "FR",
+  }
+}

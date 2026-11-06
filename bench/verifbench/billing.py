@@ -451,6 +451,7 @@ def main() -> None:
     p.add_argument("--quod", default=None)
     p.add_argument("--selfcheck", type=Path)
     p.add_argument("--hidden", type=Path)
+    p.add_argument("--rescore", type=Path)
     a = p.parse_args()
     if a.hidden:
         print(json.dumps(hidden_python(a.hidden)))
@@ -458,6 +459,23 @@ def main() -> None:
     quod = a.quod or str(Path(__file__).resolve().parents[2] / "artifacts" / "aot-0.3.1" / "quod.exe")
     if a.selfcheck:
         print(json.dumps(evaluate(a.selfcheck, quod, "i64"), ensure_ascii=False, indent=1))
+        return
+    if a.rescore:
+        # the agents have run: score what is on disk, without running them again
+        path = a.rescore / "results.jsonl"
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        have = {(r["variant"], r["model"], r["trial"]) for r in rows}
+        for work in sorted((a.rescore / "work").iterdir()):
+            variant, model, trial = work.name.split("__")
+            m = parse_events((work / "agent_stdout.jsonl").read_text(encoding="utf-8", errors="replace"))
+            if (variant, model, int(trial)) in have:
+                for r in rows:
+                    if (r["variant"], r["model"], r["trial"]) == (variant, model, int(trial)):
+                        r.update(m)
+            else:
+                rows.append({"variant": variant, "model": model, "trial": int(trial), "secs": m.get("duration_secs"), "exit": 0 if m.get("agent_error") is False else None, "limit": False, "rescored": True, **m, **evaluate(work, quod, variant)})
+                print(work.name, "scored", flush=True)
+        path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
         return
     a.run.mkdir(parents=True, exist_ok=True)
     done = set()

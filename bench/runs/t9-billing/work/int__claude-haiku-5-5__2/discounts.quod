@@ -1,0 +1,54 @@
+// discounts.quod: who the customer is and what coupon they hold.
+
+enum Customer { Guest, Member(int), Business(string) }
+enum Coupon { NoCoupon, Percent(int), Fixed(int), FreeShipping }
+
+fn bad_customer(c: Customer) -> bool {
+  match c {
+    Guest => false,
+    Member(years) => years < 0,
+    Business(_) => false,
+  }
+}
+
+fn bad_coupon(c: Coupon) -> bool {
+  match c {
+    NoCoupon => false,
+    Percent(p) => p < 0 || p > 50,
+    Fixed(v) => v < 0,
+    FreeShipping => false,
+  }
+}
+
+// The customer discount, on the subtotal.
+fn customer_discount(c: Customer, subtotal: int) -> int {
+  match c {
+    Guest => 0,
+    Member(years) => if years >= 5 { subtotal * 5 / 100 } else { subtotal * 2 / 100 },
+    Business(_) => if subtotal >= 100000 { subtotal * 3 / 100 } else { 0 },
+  }
+}
+
+// The coupon discount, on the amount left after the customer discount.
+fn coupon_discount(c: Coupon, amount: int) -> int {
+  match c {
+    NoCoupon => 0,
+    Percent(p) => amount * p / 100,
+    Fixed(v) => if v < amount { v } else { amount },
+    FreeShipping => 0,
+  }
+}
+
+fn free_shipping_coupon(c: Coupon) -> bool {
+  match c {
+    FreeShipping => true,
+    _ => false,
+  }
+}
+
+fn free_shipping_threshold(c: Customer) -> int {
+  match c {
+    Member(_) => 5000,
+    _ => 10000,
+  }
+}

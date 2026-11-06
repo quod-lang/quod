@@ -1,0 +1,89 @@
+enum Category { Standard, Food, Book, Medicine }
+struct Line { sku: string, category: Category, qty: i32, unit_cents: i32, grams: i32 }
+
+fn w(x: i32) -> int { x }
+
+fn line_ok(l: Line) -> bool {
+  1 <= l.qty && l.qty <= 10000 && 0 <= l.unit_cents && l.unit_cents <= 100000000 && 0 <= l.grams && l.grams <= 1000000
+}
+
+fn gross(l: Line) -> int { w(l.qty) * w(l.unit_cents) }
+
+fn vol_pct(l: Line) -> int {
+  if l.category == Book { 0 } else if l.qty >= 100 { 10 } else if l.qty >= 10 { 5 } else { 0 }
+}
+
+fn line_net(l: Line) -> int { gross(l) - gross(l) * vol_pct(l) / 100 }
+
+lemma line_net_bounds(l: Line)
+  requires line_ok(l)
+  ensures 0 <= line_net(l) && line_net(l) <= 1000000000000
+{
+  assert 0 <= gross(l) && gross(l) <= 1000000000000;
+}
+
+fn all_ok(ls: seq<Line>, i: int) -> bool
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { true } else if !line_ok(ls[i]) { false } else { all_ok(ls, i + 1) }
+}
+
+fn net_sum(ls: seq<Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { net_sum(ls, i + 1, acc + line_net(ls[i])) }
+}
+
+lemma net_sum_bounds(ls: seq<Line>, i: int, acc: int)
+  requires 0 <= i && i <= len(ls) && acc >= 0 && all_ok(ls, i)
+  ensures acc <= net_sum(ls, i, acc) && net_sum(ls, i, acc) <= acc + (len(ls) - i) * 1000000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    line_net_bounds(ls[i]);
+    net_sum_bounds(ls, i + 1, acc + line_net(ls[i]));
+  }
+}
+
+fn cat_sum(ls: seq<Line>, i: int, c: Category, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else if ls[i].category == c {
+    cat_sum(ls, i + 1, c, acc + line_net(ls[i]))
+  } else {
+    cat_sum(ls, i + 1, c, acc)
+  }
+}
+
+lemma cat_sum_bounds(ls: seq<Line>, i: int, c: Category, acc: int)
+  requires 0 <= i && i <= len(ls) && acc >= 0 && all_ok(ls, i)
+  ensures acc <= cat_sum(ls, i, c, acc) && cat_sum(ls, i, c, acc) <= acc + (len(ls) - i) * 1000000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) {
+    line_net_bounds(ls[i]);
+    if ls[i].category == c {
+      cat_sum_bounds(ls, i + 1, c, acc + line_net(ls[i]));
+    } else {
+      cat_sum_bounds(ls, i + 1, c, acc);
+    }
+  }
+}
+
+fn wsum(ls: seq<Line>, i: int, acc: int) -> int
+  requires 0 <= i && i <= len(ls)
+  decreases len(ls) - i
+{
+  if i >= len(ls) { acc } else { wsum(ls, i + 1, acc + w(ls[i].qty) * w(ls[i].grams)) }
+}
+
+lemma wsum_bounds(ls: seq<Line>, i: int, acc: int)
+  requires 0 <= i && i <= len(ls) && acc >= 0 && all_ok(ls, i)
+  ensures acc <= wsum(ls, i, acc) && wsum(ls, i, acc) <= acc + (len(ls) - i) * 10000000000
+  decreases len(ls) - i
+{
+  if i < len(ls) { wsum_bounds(ls, i + 1, acc + w(ls[i].qty) * w(ls[i].grams)); }
+}
