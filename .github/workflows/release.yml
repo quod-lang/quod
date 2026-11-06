@@ -25,7 +25,7 @@ jobs:
           - os: ubuntu-22.04
             rid: linux-x64
             z3: x64-glibc-2.35
-          - os: macos-14
+          - os: macos-15
             rid: osx-arm64
             z3: arm64-osx-11.0
     runs-on: ${{ matrix.os }}
