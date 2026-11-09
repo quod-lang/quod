@@ -23,7 +23,7 @@ let private typedOf (src: string) =
 
 let rec private csLiteral (t: Ty) (v: Value) =
     match t, v with
-    | _, VInt n -> "new BigInteger(" + n.ToString() + ")"
+    | _, VInt n -> "(" + n.ToString() + "L)"
     | _, VBool b -> if b then "true" else "false"
     | TySeq e, VSeq xs -> "new " + csType e + "[] { " + (xs |> List.map (csLiteral e) |> String.concat ", ") + " }"
     | TyTuple ts, VTuple xs -> "(" + (List.map2 csLiteral ts xs |> String.concat ", ") + ")"
@@ -147,7 +147,8 @@ let private traps =
             + "fn nested_empty(xs: seq<seq<int>>) -> seq<seq<int>> { [[]] + xs }\n"
             + "fn len_of(xs: seq<int>) -> int { len(xs) }\n"
             + "fn empty_arg() -> int { len_of([]) }\n"
-            + "fn huge() -> int { 123456789012345678901234567890 }\n"
+            + "fn huge() -> int { 9223372036854775807 }\n"
+            + "fn beyond() -> int { huge() + 1 }\n"
             + "fn down(n: nat) -> int decreases n { if n == 0 { 0 } else { 1 + down(n - 1) } }\n"
             + "fn need(x: int) -> int requires x > 0 { x }\n"
             + "fn sorted_only(xs: seq<int>) -> int requires forall i in 0..len(xs) - 1: xs[i] <= xs[i + 1] { len(xs) }\n"
@@ -157,8 +158,8 @@ let private traps =
             + "fn nested_ints(xs: seq<(int, seq<int>)>) -> seq<(int, seq<int>)> { xs + xs[..1] }\n"
             + "fn search(xs: seq<int>, x: int) -> int { let mut i = 0; while i < len(xs) invariant 0 <= i && i <= len(xs) decreases len(xs) - i { if xs[i] == x { return i; } i = i + 1; } return -1; }\n"
          let checked' = "fn wrong(x: int) -> int ensures result > x { return x; }\nfn out_of_bounds(xs: seq<int>) -> int { return xs[3]; }\n"
-         let big n = "new BigInteger(" + string n + ")"
-         let arr (xs: int list) = "new BigInteger[] { " + (xs |> List.map big |> String.concat ", ") + " }"
+         let big n = "(" + string n + "L)"
+         let arr (xs: int list) = "new long[] { " + (xs |> List.map big |> String.concat ", ") + " }"
          buildAndRun "net10.0"
              [ generated 0 unchecked' Set.empty false
                generated 1 checked' (set [ "wrong"; "out_of_bounds" ]) false
@@ -167,12 +168,13 @@ let private traps =
                "        Case(\"scopes\", () => T0.P.Scopes(true));"
                "        Case(\"lambda then let\", () => T2.P.ForallThenLet(" + arr [ 1 ] + "));"
                "        Case(\"empty tuples\", () => T0.P.EmptyTuples());"
-               "        Case(\"nested empty\", () => T0.P.NestedEmpty(new System.Collections.Generic.IReadOnlyList<BigInteger>[] { " + arr [ 1 ] + " }));"
+               "        Case(\"nested empty\", () => T0.P.NestedEmpty(new System.Collections.Generic.IReadOnlyList<long>[] { " + arr [ 1 ] + " }));"
                "        Case(\"empty arg\", () => T0.P.EmptyArg());"
                "        Case(\"huge\", () => T0.P.Huge());"
+               "        Case(\"beyond\", () => T0.P.Beyond());"
                "        Case(\"deep\", () => T0.P.Down(" + big 100000000 + "));"
                "        Case(\"requires\", () => T0.P.Need(" + big -1 + "));"
-               "        Case(\"null\", () => T0.P.LenOf((IReadOnlyList<BigInteger>)null));"
+               "        Case(\"null\", () => T0.P.LenOf((IReadOnlyList<long>)null));"
                "        Case(\"null ints\", () => T0.P.LenOf((IReadOnlyList<int>)null));"
                "        Case(\"ints\", () => T0.P.LenOf(new int[] { 1, 2, 3 }));"
                "        Case(\"negative nat\", () => T0.P.Back(" + big -5 + "));"
@@ -195,7 +197,9 @@ let private traps =
 [<InlineData("empty tuples", "[]")>]
 [<InlineData("nested empty", "[[], [1]]")>]
 [<InlineData("empty arg", "0")>]
-[<InlineData("huge", "123456789012345678901234567890")>]
+[<InlineData("huge", "9223372036854775807")>]
+// a long in checked: the proved result, or an exception, where Python is exact
+[<InlineData("beyond", "!OverflowException")>]
 [<InlineData("deep", "!InsufficientExecutionStackException")>]
 [<InlineData("requires", "!ArgumentException")>]
 [<InlineData("null", "!ArgumentNullException")>]
@@ -232,16 +236,18 @@ let ``the calling project can turn on the quantified requires with a symbol`` ()
 let ``a check at the boundary reads as C#, without a double negation`` () =
     match generate "p.quod" (typedOf "fn f(b: int) -> int requires b != 0 { 1 / b }") Set.empty defaultOptions with
     | Ok code ->
-        Assert.Contains("if ((b == BigInteger.Zero)) throw new ArgumentException", code)
+        Assert.Contains("if ((b == 0L)) throw new ArgumentException", code)
         Assert.DoesNotContain("!(!", code)
     | Result.Error why -> failwith why
 
 [<Fact>]
-let ``constants are named, not rebuilt at each use`` () =
+let ``an int is a long, computed in checked`` () =
     match generate "p.quod" (typedOf "fn f(x: int) -> int ensures result == x + 2 { x + 2 }") Set.empty defaultOptions with
     | Ok code ->
-        Assert.Contains("private static readonly BigInteger _quod_2", code)
-        Assert.Contains("(x + _quod_2)", code)
+        Assert.DoesNotContain("BigInteger", code)
+        Assert.DoesNotContain("System.Numerics", code)
+        Assert.Contains("public static long F(long x)", code)
+        Assert.Contains("return checked(x + 2L);", code)
     | Result.Error why -> failwith why
 
 [<Fact>]
@@ -255,7 +261,7 @@ let ``a function named like its file does not name the class`` () =
     match generate "rotate.quod" (typedOf "fn rotate() -> int { 1 }") Set.empty defaultOptions with
     | Ok code ->
         Assert.Contains("class RotateModule", code)
-        Assert.Contains("public static BigInteger Rotate()", code)
+        Assert.Contains("public static long Rotate()", code)
     | Result.Error why -> failwith why
 
 [<Fact>]

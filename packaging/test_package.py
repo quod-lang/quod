@@ -39,8 +39,8 @@ class Program
 {
     static void Main()
     {
-        Console.WriteLine(App.Rules.Rules.Clamp(new BigInteger(12), new BigInteger(0), new BigInteger(10)));
-        try { App.Rules.Rules.Clamp(new BigInteger(1), new BigInteger(5), new BigInteger(0)); }
+        Console.WriteLine(App.Rules.Rules.Clamp(12, 0, 10));
+        try { App.Rules.Rules.Clamp(1, 5, 0); }
         catch (ArgumentException) { Console.WriteLine("refused"); }
     }
 }

@@ -142,8 +142,8 @@ let ``csharp: a class per module, a private function has no public method`` () =
     Assert.Contains("Lib.Quad(", g.Code)
     let text = g.Imported |> List.find (fun (m, _) -> m = "lib") |> snd
     Assert.Contains("public static class Lib", text)
-    Assert.Contains("public static BigInteger Quad(", text)
-    Assert.DoesNotContain("public static BigInteger Twice(", text)
+    Assert.Contains("public static long Quad(", text)
+    Assert.DoesNotContain("public static long Twice(", text)
 
 [<Fact>]
 let ``the generated modules run, in python`` () =
@@ -549,7 +549,7 @@ let ``csharp: with runtime checks, what a type promises is computed without boun
         | Checked(typed, r) ->
             match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r true with
             | Ok g ->
-                Assert.Contains("_quod_fit32((new BigInteger(x) * new BigInteger(1000)))", g.Code)
+                Assert.Contains("_quod_fit32(checked((long)x * (long)1000))", g.Code)
                 Assert.Contains("_quod_fit_nat(", g.Code)
                 Assert.Contains("_quod_fit_char(", g.Code)
             | Result.Error why -> failwith why
@@ -563,7 +563,7 @@ let ``csharp: a generic struct has the name of its copy`` () =
             match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
             | Ok g ->
                 Assert.Contains("public sealed class Box_int : IEquatable<Box_int>", g.Code)
-                Assert.Contains("public Box_int(BigInteger v)", g.Code)
+                Assert.Contains("public Box_int(long v)", g.Code)
             | Result.Error why -> failwith why
         | other -> failwithf "%A" other)
 
