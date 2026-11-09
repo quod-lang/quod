@@ -66,7 +66,8 @@ let private dataShort (name: string) = (shortName name).Replace("__", "_")
 
 let rec csType (t: Ty) =
     match t with
-    | TyInt | TyNat | TyError -> "BigInteger"
+    // a long, computed in checked: what is proved, or an OverflowException, never a wrong value
+    | TyInt | TyNat | TyError -> "long"
     | TyBool -> "bool"
     // inside, a scalar value: C#'s char is a UTF-16 unit, and half an emoji is not a character
     | TyChar | TyI32 -> "int"
@@ -223,27 +224,26 @@ let private helpers =
 "
       // in a function checked at run time: without a proof, nothing else says what a type promises
       "fit",
-      "private static int _quod_fit32(BigInteger v)
+      "private static int _quod_fit32(long v)
         {
             if (v < int.MinValue || v > int.MaxValue) throw new QuodContractException(\"the value \" + v + \" does not fit in i32 (not proved by quod: checked at run time)\");
             return (int)v;
         }
 
-        private static long _quod_fit64(BigInteger v)
+        private static long _quod_fit64(long v)
         {
-            if (v < long.MinValue || v > long.MaxValue) throw new QuodContractException(\"the value \" + v + \" does not fit in i64 (not proved by quod: checked at run time)\");
-            return (long)v;
-        }
-
-        private static BigInteger _quod_fit_nat(BigInteger v)
-        {
-            if (v.Sign < 0) throw new QuodContractException(\"the value \" + v + \" is not a nat (not proved by quod: checked at run time)\");
             return v;
         }
 
-        private static int _quod_fit_char(BigInteger v)
+        private static long _quod_fit_nat(long v)
         {
-            if (v.Sign < 0 || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF)) throw new QuodContractException(\"the value \" + v + \" is not a Unicode scalar value (not proved by quod: checked at run time)\");
+            if (v < 0) throw new QuodContractException(\"the value \" + v + \" is not a nat (not proved by quod: checked at run time)\");
+            return v;
+        }
+
+        private static int _quod_fit_char(long v)
+        {
+            if (v < 0 || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF)) throw new QuodContractException(\"the value \" + v + \" is not a Unicode scalar value (not proved by quod: checked at run time)\");
             return (int)v;
         }"
       "with", "private static R _quod_with<T, R>(T x, Func<T, R> f) { return f(x); }"
@@ -280,7 +280,7 @@ let private helpers =
             return r;
         }"
       "slice",
-      "private static IReadOnlyList<T> _quod_slice<T>(IReadOnlyList<T> xs, BigInteger lo, BigInteger hi)
+      "private static IReadOnlyList<T> _quod_slice<T>(IReadOnlyList<T> xs, long lo, long hi)
         {
             if (lo < 0 || lo > hi || hi > xs.Count) throw new IndexOutOfRangeException(\"slice \" + lo + \"..\" + hi + \" out of bounds\");
             var r = new T[(int)(hi - lo)];
@@ -289,27 +289,28 @@ let private helpers =
         }"
       "mod",
       "// Euclidean division, as in Quod and SMT-LIB: the remainder is always >= 0.
-        private static BigInteger _quod_mod(BigInteger a, BigInteger b)
+        private static long _quod_mod(long a, long b)
         {
-            BigInteger r = BigInteger.Remainder(a, b);
-            return r.Sign < 0 ? r + BigInteger.Abs(b) : r;
+            if (b == -1) return 0;
+            long r = a % b;
+            return r < 0 ? checked(r + Math.Abs(b)) : r;
         }"
-      "div", "private static BigInteger _quod_div(BigInteger a, BigInteger b) { return BigInteger.Divide(a - _quod_mod(a, b), b); }"
+      "div", "private static long _quod_div(long a, long b) { return checked((a - _quod_mod(a, b)) / b); }"
       // C# truncates, and Quod's division is Euclidean. int.MinValue % -1 throws in .NET, though its result is 0.
       "mod32", "private static int _quod_mod32(int a, int b) { if (b == -1) return 0; int r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
       "div32", "private static int _quod_div32(int a, int b) { if (b == -1) return -a; int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "mod64", "private static long _quod_mod64(long a, long b) { if (b == -1) return 0; long r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
       "div64", "private static long _quod_div64(long a, long b) { if (b == -1) return -a; long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "all",
-      "private static bool _quod_all(BigInteger lo, BigInteger hi, Func<BigInteger, bool> f)
+      "private static bool _quod_all(long lo, long hi, Func<long, bool> f)
         {
-            for (BigInteger i = lo; i < hi; i = i + 1) if (!f(i)) return false;
+            for (long i = lo; i < hi; i = i + 1) if (!f(i)) return false;
             return true;
         }"
       "any",
-      "private static bool _quod_any(BigInteger lo, BigInteger hi, Func<BigInteger, bool> f)
+      "private static bool _quod_any(long lo, long hi, Func<long, bool> f)
         {
-            for (BigInteger i = lo; i < hi; i = i + 1) if (f(i)) return true;
+            for (long i = lo; i < hi; i = i + 1) if (f(i)) return true;
             return false;
         }"
       "every",
@@ -363,14 +364,11 @@ type private Gen(checks: Set<string>) =
     /// Is the function being generated checked at run time (--runtime-checks)?
     member val Checking = false with get, set
 
-    /// The integer constants of the class: `BigInteger.One` or `_quod_2`, not `new BigInteger(2)` at each use.
+    /// An integer literal: a long. One beyond it does not compile, and says so.
     member _.Constant(n: BigInteger) =
-        if n.IsZero then "BigInteger.Zero"
-        elif n.IsOne then "BigInteger.One"
-        else
-            let name = "_quod_" + (if n.Sign < 0 then "minus_" else "") + BigInteger.Abs(n).ToString()
-            constants.[n] <- name
-            name
+        if n = BigInteger Int64.MinValue then "long.MinValue"
+        elif n.Sign < 0 then "(" + n.ToString() + "L)"
+        else n.ToString() + "L"
 
     member _.ConstantFields() : string list =
         [ for KeyValue(n, name) in constants ->
@@ -466,12 +464,12 @@ type private Gen(checks: Set<string>) =
         | ETuple xs ->
             let parts = match ty with TyTuple ts when ts.Length = xs.Length -> ts | _ -> xs |> List.map (fun x -> x.Ty)
             "(" + (List.map2 (fun x t -> g.Expr(x, t)) xs parts |> String.concat ", ") + ")"
-        | EIndex(s, i) -> g.Expr(s, TySeq ty) + "[(int)" + g.Expr(i, TyInt) + "]"
+        | EIndex(s, i) -> g.Expr(s, TySeq ty) + "[checked((int)" + g.Expr(i, TyInt) + ")]"
         | ESlice(s, lo, hi) ->
             let sv = g.Expr(s, ty)
             g.Help "slice" + "<" + csType elem + ">(" + sv + ", "
-            + (lo |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue "BigInteger.Zero") + ", "
-            + (hi |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue ("new BigInteger(" + sv + ".Count)")) + ")"
+            + (lo |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue "0L") + ", "
+            + (hi |> Option.map (fun x -> g.Expr(x, TyInt)) |> Option.defaultValue ("(long)" + sv + ".Count")) + ")"
         | EProj(t, k) -> g.Expr(t, t.Ty) + ".Item" + string (k + 1)
         | ECons(k, xs) ->
             match e.Ty with
@@ -511,28 +509,31 @@ type private Gen(checks: Set<string>) =
                     text <- g.Help "with" + "(" + g.Expr(s, s.Ty) + ", " + m + " => " + chain arms + ")")
                 text
             | _ -> failwith "a match on no data type"
-        | ELen s -> "new BigInteger(" + g.Expr(s, s.Ty) + ".Count)"
+        | ELen s -> "(long)" + g.Expr(s, s.Ty) + ".Count"
         | ECall(f, args) -> g.Call(f, args)
         // computed without bounds: C# would wrap, in silence, a value that no proof says fits
         | ENeg _ | EArith _ when g.Checking && isBounded e.Ty ->
             g.Help "fit" |> ignore
             (if e.Ty = TyI32 then "_quod_fit32(" else "_quod_fit64(") + g.Expr({ e with Ty = TyInt }, TyInt) + ")"
-        | ENeg x when isBounded x.Ty && not (isBounded e.Ty) -> "(-new BigInteger(" + g.Expr(x, x.Ty) + "))"
-        | ENeg x -> "(-" + g.Expr(x, TyInt) + ")"
+        | ENeg x when isBounded x.Ty && not (isBounded e.Ty) -> "checked(-(long)" + g.Expr(x, x.Ty) + ")"
+        | ENeg x when isBounded e.Ty -> "(-" + g.Expr(x, TyInt) + ")"
+        | ENeg x -> "checked(-" + g.Expr(x, TyInt) + ")"
         | ENot { Kind = EEq(a, b) } when (match shape (merge (shape a.Ty) (shape b.Ty)) with TyInt | TyBool -> true | _ -> false) ->
             "(" + g.Expr(a, a.Ty) + " != " + g.Expr(b, b.Ty) + ")"
         | ENot x -> "(!" + g.Expr(x, TyBool) + ")"
         | EArith(op, a, b) ->
             // an operation in int on bounded operands (a contract) must not be computed in C#'s int
-            let wide (o: TExpr) = if isBounded o.Ty && not (isBounded e.Ty) then "new BigInteger(" + g.Expr(o, o.Ty) + ")" else g.Expr(o, TyInt)
+            let wide (o: TExpr) = if isBounded o.Ty && not (isBounded e.Ty) then "(long)" + g.Expr(o, o.Ty) else g.Expr(o, TyInt)
+            // in long, checked: an overflow throws, where a BigInteger would have been exact
+            let chk (text: string) = if isBounded e.Ty then text else "checked" + text
             let x, y = wide a, wide b
             let euclid (name: string) =
                 let name = match e.Ty with TyI32 -> name + "32" | TyI64 -> name + "64" | _ -> name
                 g.Help name + "(" + x + ", " + y + ")"
             match op with
-            | OAdd -> "(" + x + " + " + y + ")"
-            | OSub -> "(" + x + " - " + y + ")"
-            | OMul -> "(" + x + " * " + y + ")"
+            | OAdd -> chk ("(" + x + " + " + y + ")")
+            | OSub -> chk ("(" + x + " - " + y + ")")
+            | OMul -> chk ("(" + x + " * " + y + ")")
             | ODiv -> euclid "div"
             | OMod -> euclid "mod"
         | EConcat(a, b) ->
@@ -569,9 +570,9 @@ type private Gen(checks: Set<string>) =
         | EConvert x when g.Checking && e.Ty <> TyNat ->
             let name = match e.Ty with TyChar -> "_char(" | TyI32 -> "32(" | _ -> "64("
             g.Help "fit" + name + g.Expr(x, TyInt) + ")"
-        | EConvert x when e.Ty = TyChar || e.Ty = TyI32 -> "((int)" + g.Expr(x, TyInt) + ")"
+        | EConvert x when e.Ty = TyChar || e.Ty = TyI32 -> "checked((int)" + g.Expr(x, TyInt) + ")"
         | EConvert x when e.Ty = TyI64 -> "((long)" + g.Expr(x, TyInt) + ")"
-        | EConvert x -> "new BigInteger(" + g.Expr(x, TyChar) + ")"
+        | EConvert x -> "((long)" + g.Expr(x, TyChar) + ")"
 
     /// The parameter types of the program, for arguments that do not know theirs (`f([])`).
     member val Signatures: Map<string, TFn> = Map.empty with get, set
@@ -606,7 +607,7 @@ type private Gen(checks: Set<string>) =
     /// only when `deep`: it costs a pass over it, like a quantified requires.
     member g.NatTest(t: Ty, term: string, deep: bool, depth: int) : string option =
         match t with
-        | TyNat -> Some("(" + term + ".Sign >= 0)")
+        | TyNat -> Some("(" + term + " >= 0)")
         | TySeq e when deep ->
             let x = "_quod_n" + string depth
             g.NatTest(e, x, deep, depth + 1)
@@ -715,11 +716,11 @@ let rec private narrowType (narrow: string) (t: Ty) =
     | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
     | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
 
-/// A value of the narrow type as Quod's. Exact, since int and long fit in a BigInteger. `depth` names
+/// A value of the narrow type as Quod's: an int as a long. `depth` names
 /// the lambdas apart.
 let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
     match t with
-    | TyInt | TyNat | TyError -> "new BigInteger(" + term + ")"
+    | TyInt | TyNat | TyError -> "(long)" + term
     | TyBool | TyChar | TyI32 | TyI64 | TyData _ -> term
     | TySeq e ->
         let x = "_quod_x" + string depth
@@ -871,10 +872,10 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 g.Help "with" |> ignore
             sb.Append(body).Append("return ").Append(if guarded then exposed f.Ret impl 0 else impl).Append(";\n")
               .Append(indent).Append("}\n\n") |> ignore
-            // a real caller has a List<int>, not an IReadOnlyList<BigInteger>: the same method for
-            // its integers, without a copy (review of 0.1.4). The result stays a BigInteger.
+            // a real caller may have a List<int>, not an IReadOnlyList<long>: the same method for
+            // its integers, without a copy (review of 0.1.4). The result stays a long.
             if not text' && f.Params |> List.exists (fun p -> hasIntegerList p.Ty) then
-                for narrow in [ "int"; "long" ] do
+                for narrow in [ "int" ] do
                     let narrowed = f.Params |> List.map (fun p -> narrowType narrow p.Ty + " " + csName p.Name) |> String.concat ", "
                     g.Help "view" |> ignore
                     sb.Append(indent).Append("/// <summary>The same for a list of ").Append(narrow).Append(": it is not copied. See the method above.</summary>\n")
@@ -1001,7 +1002,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         if not lemmas.IsEmpty then
             out.Append("// Lemmas are proofs, not code, and are not generated: ").Append(String.Join(", ", lemmas)).Append("\n") |> ignore
         out.Append("#pragma warning disable\n")
-           .Append("using System;\nusing System.Collections.Generic;\nusing System.Numerics;\nusing System.Runtime.CompilerServices;\n\n")
+           .Append("using System;\nusing System.Collections.Generic;\nusing System.Runtime.CompilerServices;\n\n")
            .Append("namespace ").Append(options.Namespace).Append("\n{\n")
            .Append("    public static class ").Append(classNameOf sourceFile publicNames (prog.Types |> List.map (fun d -> dataShort d.DataName))).Append("\n    {\n") |> ignore
         if not checks.IsEmpty then
