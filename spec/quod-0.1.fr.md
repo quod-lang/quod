@@ -166,7 +166,7 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **Ce qui élargit est implicite et exact :** `i32` vers `i64`, vers `int`. Ce qui rétrécit s'écrit, et doit être prouvé : `to_i32(x)`, `to_i64(x)`. Un littéral prend le type que son contexte attend, s'il tient.
 - Sous une séquence ou un tuple, il n'y a pas de conversion : une `seq<i32>` n'est pas une `seq<int>`.
 - Une opération entre un entier borné et un `int` ou un `nat` se fait en `int`. `len(xs)` reste un `nat`, sans borne : `to_i32(len(xs))` demande `requires len(xs) <= 2147483647`, contrôlé à la frontière publique.
-- **Pour C#, préférez `i32` et `i64`.** Le `int` et le `nat` de Quod sont des entiers mathématiques, que C# ne peut tenir que dans un `BigInteger` : `int` en Quod n'est pas `int` en C#. `i32` est le `int` de C#, et `i64` son `long`.
+- **Pour C#, préférez `i32` et `i64`.** Le `int` et le `nat` de Quod sont des entiers mathématiques ; en C# ce sont un `long`, calculé en `checked` : au-delà d'environ 9,2e18 une opération lève `OverflowException`, jamais un résultat faux, mais la preuve ne l'avait pas prévu. Avec `i32` et `i64`, le vérificateur prouve qu'aucune opération ne sort des bornes (`discount * net` est refusé tant que `net` n'est pas borné). `i32` est le `int` de C#, et `i64` son `long`.
 - `/` et `%` sont euclidiens, comme pour `int`, dans tous les backends.
 - En Python, un paramètre est contrôlé contre ses bornes à la frontière publique ; les éléments d'une liste seulement avec `--check-requires all`, ce que dit la docstring. En C#, ce sont des `int` et des `long`. Un `struct` ou un cas contrôle tout ce qu'il contient à sa construction, en profondeur.
 
@@ -212,7 +212,7 @@ fn free_slot(a: (int, int), b: (int, int)) -> bool
 ```
 
 - Une fonction d'un autre module s'appelle toujours par son nom complet, `intervals.disjoint`. Une fonction du même module s'appelle par son nom court. Il n'y a ni alias ni import partiel.
-- `private fn` ou `private lemma` ne s'appelle que depuis son module, et n'a pas de nom public dans le code généré. Tout le reste est public. Un `ensures` public peut mentionner une fonction privée de son module. **Rendez privée une fonction auxiliaire**, sauf si un autre module ou un appelant en a besoin : ce qui est public est l'API du code généré, et en C# une fonction auxiliaire sur `int` y montre un `BigInteger`.
+- `private fn` ou `private lemma` ne s'appelle que depuis son module, et n'a pas de nom public dans le code généré. Tout le reste est public. Un `ensures` public peut mentionner une fonction privée de son module. **Rendez privée une fonction auxiliaire**, sauf si un autre module ou un appelant en a besoin : ce qui est public est l'API du code généré, et c'est ce qu'un appelant voit.
 - Une preuve voit une fonction importée comme une fonction locale : une fonction à corps d'expression par sa définition, une fonction à instructions par son contrat seul.
 - `quod check` et `quod build` vérifient le fichier et tout ce qu'il importe, à chaque fois. Une erreur dans un module importé est rapportée dans ce fichier, et refuse le programme. Un cycle d'imports est une erreur.
 - Dans le serveur MCP, un programme donné en `source` trouve ses imports dans le répertoire du serveur.
@@ -443,17 +443,17 @@ déplié, est classé `restated`.
 
 - Une classe par fichier Quod (`--namespace`, `Quod.Generated` par défaut), dans `Nom.g.cs`. Le code reste
   dans C# 7.3 et la bibliothèque standard, pour .NET Framework 4.7.2 comme pour .NET Core et suivants. Un
-  projet .NET Framework référence `System.Numerics`.
+  projet .NET Framework n'a pas de référence de plus pour les entiers.
 - Chaque fonction donne une méthode publique en PascalCase et une implémentation privée `_quod_f_nom`, que le
   code Quod appelle. Les lemmes ne sont pas générés. Deux fonctions de même nom public sont refusées.
-- `int` et `nat` sont `BigInteger`, `bool` est `bool`, `seq<T>` est `IReadOnlyList<T>` (sans copie à l'entrée),
+- `int` et `nat` sont `long`, calculés en `checked` (un dépassement lève `OverflowException` ; `i64` le fait prouver impossible), `bool` est `bool`, `seq<T>` est `IReadOnlyList<T>` (sans copie à l'entrée),
   les tuples sont des `ValueTuple`. L'égalité est structurelle ; `/` et `%` sont euclidiens.
 - **Un appelant C# ne prouve rien.** Une méthode publique vérifie `null` pour ses séquences, ses `requires`
   sans quantificateur ni appel, et qu'un paramètre `nat` est `>= 0` (`ArgumentException`). Une liste de `nat` compte comme quantifiée. Les autres restent à la charge de l'appelant, et son
   commentaire le dit ; `--check-requires all` les vérifie aussi, à leur coût. Les appels entre fonctions Quod ne
   vérifient rien.
 - Une méthode avec une liste d'entiers a deux formes de plus, pour `int` et `long` : la liste est vue comme celle de
-  Quod, sans copie. Le résultat reste un `BigInteger`. Définir `QUOD_CHECK_REQUIRES` dans le projet appelant vérifie
+  Quod, sans copie. Définir `QUOD_CHECK_REQUIRES` dans le projet appelant vérifie
   aussi les `requires` quantifiés.
 - Une fonction récursive appelle `EnsureSufficientExecutionStack` : une récursion trop profonde lève une
   exception au lieu de mettre fin au processus.

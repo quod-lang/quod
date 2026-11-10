@@ -163,7 +163,7 @@ fn midpoint(lo: i32, hi: i32) -> i32
 - **What widens is implicit and exact:** `i32` to `i64`, to `int`. What narrows is written, and must be proved: `to_i32(x)`, `to_i64(x)`. A literal takes the type its context wants, if it fits.
 - Under a sequence or a tuple there is no conversion: a `seq<i32>` is not a `seq<int>`.
 - An operation between a bounded integer and an `int` or a `nat` is in `int`. `len(xs)` stays a `nat`, with no bound: `to_i32(len(xs))` needs `requires len(xs) <= 2147483647`, which is checked at the public boundary.
-- **For C#, prefer `i32` and `i64`.** Quod's `int` and `nat` are mathematical integers, which C# can only hold in a `BigInteger`: `int` in Quod is not `int` in C#. `i32` is C#'s `int` and `i64` its `long`.
+- **For C#, prefer `i32` and `i64`.** Quod's `int` and `nat` are mathematical integers; in C# they are a `long`, computed in `checked`: beyond about 9.2e18 an operation raises `OverflowException`, never a wrong result, but the proof did not foresee it. `i32` is C#'s `int` and `i64` its `long`, and there the verifier proves that no operation leaves the bounds (`discount * net` is refused until `net` is bounded).
 - `/` and `%` are Euclidean, as for `int`, in every backend.
 - In Python, a parameter is checked against its bounds at the public boundary; the elements of a list only with `--check-requires all`, which the docstring says. In C#, they are `int` and `long`. A struct or a case checks all it holds when it is built, in depth.
 
@@ -209,7 +209,7 @@ fn free_slot(a: (int, int), b: (int, int)) -> bool
 ```
 
 - A function of another module is always called by its full name, `intervals.disjoint`. A function of the same module is called by its short name. There is no alias and no partial import.
-- `private fn` or `private lemma` is called from its own module only, and has no public name in the generated code. Everything else is public. A public `ensures` may mention a private function of its module. **Make a helper private** unless another module or a caller needs it: what is public is the API of the generated code, and in C# a helper over `int` shows a `BigInteger` there.
+- `private fn` or `private lemma` is called from its own module only, and has no public name in the generated code. Everything else is public. A public `ensures` may mention a private function of its module. **Make a helper private** unless another module or a caller needs it: what is public is the API of the generated code, and it is the API a caller sees.
 - A proof sees an imported function as it sees a local one: an expression function by its definition, a statement function by its contract only.
 - `quod check` and `quod build` verify the file and all it imports, every time. An error in an imported module is reported in that file, and refuses the program. A cycle of imports is an error.
 - In the MCP server, a program given as `source` finds its imports in the directory of the server.
@@ -428,17 +428,16 @@ of time is not proved: the function's definition stays unknown to the solver.
 
 - One class per Quod file (`--namespace`, `Quod.Generated` by default), in `Name.g.cs`. The code stays
   within C# 7.3 and the standard library, for .NET Framework 4.7.2 as for .NET Core and later. A project
-  on .NET Framework references `System.Numerics`.
+  on .NET Framework needs no extra reference for integers.
 - Each function is a public method in PascalCase and a private implementation `_quod_f_name`, which
   Quod code calls. Lemmas are not generated. Two functions with the same public name are refused.
-- `int` and `nat` are `BigInteger`, `bool` is `bool`, `seq<T>` is `IReadOnlyList<T>` (not copied on entry),
+- `int` and `nat` are `long`, computed in `checked` (an overflow raises `OverflowException`; use `i64` to have it proved impossible), `bool` is `bool`, `seq<T>` is `IReadOnlyList<T>` (not copied on entry),
   tuples are `ValueTuple`. Equality is structural; `/` and `%` are Euclidean.
 - **A C# caller proves nothing.** A public method checks `null` for its sequences, its `requires` without
   quantifier or call, and that a `nat` parameter is `>= 0` (`ArgumentException`). A list of `nat` counts as quantified. The others stay the caller's duty, and its comment says so;
   `--check-requires all` checks them too, at their cost, and so does defining `QUOD_CHECK_REQUIRES` in the calling
   project. Calls between Quod functions check nothing.
 - A method with a list of integers has two more forms, for `int` and `long`: the list is seen as Quod's, not copied.
-  The result stays a `BigInteger`.
 - A recursive function calls `EnsureSufficientExecutionStack`: too deep a recursion raises an exception
   instead of ending the process.
 - With `--runtime-checks`, unproved contracts and what a type promises raise `QuodContractException` (an operation on `i32` or `i64` is computed without bounds, then checked), and the bounds of a list always raise.
