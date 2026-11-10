@@ -5,8 +5,8 @@
 *Quod erat demonstrandum*: a programming language designed to be **written by AI agents** and
 **checked by machines**. The program comes with its proof.
 
-> **Status: Quod 0.1, young but real.** The compiler checks types, proves contracts with Z3,
-> checks that every contract determines its result, and compiles to Python. An AI agent wrote
+> **Status: Quod 0.4, young but real.** The compiler checks types, proves contracts with Z3,
+> checks that every contract determines its result, and compiles to Python and to C#. An AI agent wrote
 > the six VerifBench tasks in Quod from the language reference alone, and all six pass the hidden
 > tests. [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
 
@@ -158,9 +158,10 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    check Quod as a tool ([docs/mcp.md](docs/mcp.md)).
 2. **Quod 0.2** ([released](https://github.com/quod-lang/quod/releases/latest)): a C# backend and an MSBuild package, to deliver proved functions into existing .NET code bases, and a more reliable dialogue with the solver.
 3. **Quod 0.3** ([released](https://github.com/quod-lang/quod/releases/latest)): modules, characters and strings with a standard library in Quod, `i32` and `i64`, structs, enums, `match` and generics.
-4. **Quod 0.4**: capabilities (no ambient authority: a function touches the console, files or
+4. **Quod 0.4** ([released](https://github.com/quod-lang/quod/releases/latest)): C# integers as a checked `long`, limits counted in solver operations instead of time. What this line announced before (capabilities, sealed contracts, maps and sets, general refinement types) moves to 0.5.
+5. **Quod 0.5**: capabilities (no ambient authority: a function touches the console, files or
    the network only through a capability it receives), sealed contracts, maps and sets, general refinement types.
-5. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
+6. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
 
 Development happens in the open. If you write Dafny, or let agents write code you need to trust,
 issues and discussions are very welcome.

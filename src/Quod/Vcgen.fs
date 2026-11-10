@@ -571,6 +571,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// agent waits for `quod check` as a whole, N obligations at 2T + 5 s each add up).
     let clock = Diagnostics.Stopwatch.StartNew()
     let mutable skippedHere = 0
+    /// The limit of the last check was cut to what the budget had left: an answer that is not
+    /// conclusive then says nothing about the proof (the review of 0.4.0: it depended on the load).
+    let mutable cutByBudget = false
     let mutable skipped = 0
     /// The sort of each integer or boolean constant (to declare it again elsewhere), and a second
     /// z3 process without the axioms of the program, started when first needed (see Isolated).
@@ -606,7 +609,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     member v.BudgetedCheck(check: unit -> CheckResult) : CheckResult =
         match v.Remaining with
         | Some r when r < z3.DefaultTimeout ->
-            z3.SetTimeout(max 1 r)
+            cutByBudget <- true
+            z3.SetTimeout(max 1 r, true)
             let answer = check ()
             z3.SetTimeout z3.DefaultTimeout
             answer
@@ -678,7 +682,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             // try after a quick "unknown" of the shared session (test of 0.1.2: a hard obligation
             // cost 2 x timeout + 1 s, so fewer functions fitted in a budget)
             let limit = min a.DefaultTimeout (defaultArg v.Remaining Int32.MaxValue)
-            a.SetTimeout(max 1 limit)
+            let tight = limit < a.DefaultTimeout
+            if tight then cutByBudget <- true
+            a.SetTimeout(max 1 limit, tight)
             let answer = a.Check()
             a.SetTimeout a.DefaultTimeout
             let outcome =
@@ -1063,6 +1069,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | _, Some r when r <= 0 -> None
             | _, Some r -> Some(min r z3.DefaultTimeout)
             | _, None -> Some z3.DefaultTimeout
+        cutByBudget <- false
         beforeSolver (o.Label + ", solver, up to " + string ((min z3.DefaultTimeout (defaultArg v.Remaining Int32.MaxValue)) / 1000) + " s")
         let answer, isolatedCex =
             match v.Isolated(st, o, true) with
@@ -1078,6 +1085,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         afterSolver ()
         match answer with
         | Unsat -> proved <- proved + 1
+        | Unknown _ when cutByBudget ->
+            skippedHere <- skippedHere + 1
+            skipped <- skipped + 1
         | Sat when isolatedCex.IsSome -> v.ReportModel(o, fst isolatedCex.Value, snd isolatedCex.Value)
         // from the second process: no candidate model to read in the shared session
         | Unknown why when isolatedCex.IsSome ->

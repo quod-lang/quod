@@ -27,6 +27,8 @@ Lines are those of the three files, comments and blank lines included. Time is t
 
 **`i64` has a cost here, which T8 could not see.** Failed proofs: 38 against 7 over 6 runs each, and medians of 396 s against 216 s for Haiku, 231 s against 147 s for Sonnet. The cost in money hardly moves. All of them got there, and they needed the bound of a sum, a lemma by induction, which the `int` variant does not. 3 runs per cell: read this as a direction.
 
+**Reserve on times (review of 0.4.0).** The times are those of the agent, measured with runs three at a time on one machine, and 0.3.1's limits were wall time: a proof that fails or passes can depend on the load. Read the medians as an order of magnitude, not as a measure; the counts of failed proofs and the verdicts are not affected in the same way, but they too come from 3 runs per cell.
+
 ## What this does not show
 
 - **The rules were kept linear on purpose.** The discount is taken category by category, where a real invoice might share it in proportion. I chose that while designing the task, to avoid products of variables, which are the hard case for the solver. **The ceiling was not reached,** and this avoided what is most likely to reach it.

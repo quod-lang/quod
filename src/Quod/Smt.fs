@@ -100,21 +100,23 @@ let private valuesLimitMs = 5000
 /// A limit is a count of z3's operations (rlimit), not a time: the same file gets the same
 /// verdict on a loaded machine (review of 0.3.2: a published solution failed 5 builds of 5 run at
 /// once). A "millisecond" of limit is 4000 operations, what z3 4.12.1 did in one on the machine
-/// that measured it. The time limit stays, 4 times wider, against a check that would never end.
+/// that measured it. The time limit stays, 16 times wider (4 in 0.4.0: a loaded machine still crossed it, review of 0.4.0), against a check that would never end.
 /// QUOD_RLIMIT_PER_MS changes it, to calibrate: on 106 programs, 1000 lost 4 proofs that the time limit
 /// gave, and 4000 lost none (it gained one, which the time limit gave up on).
 let rlimitPerMs =
     match Environment.GetEnvironmentVariable "QUOD_RLIMIT_PER_MS" with
     | null | "" -> 4000L
     | v -> int64 v
-let private wallFactor = 4L
+let private wallFactor = 16L
 
-let limitCommands (ms: int) =
+let limitCommandsWith (ms: int) (factor: int64) =
     [ "(set-option :rlimit " + string (int64 ms * rlimitPerMs) + ")"
-      "(set-option :timeout " + string (min (int64 Int32.MaxValue) (int64 ms * wallFactor)) + ")" ]
+      "(set-option :timeout " + string (min (int64 Int32.MaxValue) (int64 ms * factor)) + ")" ]
+
+let limitCommands (ms: int) = limitCommandsWith ms wallFactor
 
 /// How long to wait for an answer before the process is taken as hung.
-let private waitMs (ms: int) = int (min (int64 Int32.MaxValue) (2L * wallFactor * int64 ms + 5000L))
+let private waitMsWith (ms: int) (factor: int64) = int (min (int64 Int32.MaxValue) (2L * factor * int64 ms + 5000L))
 
 type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Threading.CancellationToken) =
     let psi = ProcessStartInfo(z3Path, "-in -smt2")
@@ -196,6 +198,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
 
     /// The time limit of the checks, as last set (milliseconds).
     let mutable currentTimeout = timeoutMs
+    let mutable currentFactor = wallFactor
 
     /// z3 does not always keep its own time limit: with quantifiers, a check sometimes runs on
     /// for many minutes (a mutant of rle_encode ran over 15). Past twice the limit plus 5 s, the
@@ -214,7 +217,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
 
     let readFirstLine () : string option =
         let t = output.ReadLineAsync()
-        if t.Wait(waitMs currentTimeout) then Some t.Result
+        if t.Wait(waitMsWith currentTimeout currentFactor) then Some t.Result
         elif cancelled then raise (SmtFailure "cancelled")
         else
             replaceProcess t
@@ -290,9 +293,11 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
         s.Send "(set-logic ALL)"
 
     /// Change the time limit of the following checks (milliseconds).
-    member s.SetTimeout(ms: int) =
+    /// `tight`: the wall-clock limit is the time itself, not 16 times it (what the budget of the check has left).
+    member s.SetTimeout(ms: int, ?tight: bool) =
         currentTimeout <- ms
-        for c in limitCommands ms do s.Send c
+        currentFactor <- (if defaultArg tight false then 1L else wallFactor)
+        for c in limitCommandsWith ms currentFactor do s.Send c
 
     /// The time limit given at start, to restore after a temporary change.
     member _.DefaultTimeout = timeoutMs
@@ -335,7 +340,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
                 raw "(reset)"
                 for frame in frames do
                     for command in frame do raw command
-                for c in limitCommands ms do raw c
+                for c in limitCommandsWith ms currentFactor do raw c
                 raw "(check-sat)"
                 dirty <- true
                 let saved = currentTimeout

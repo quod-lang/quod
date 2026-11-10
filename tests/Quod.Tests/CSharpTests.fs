@@ -251,6 +251,28 @@ let ``an int is a long, computed in checked`` () =
     | Result.Error why -> failwith why
 
 [<Fact>]
+let ``a literal beyond long is refused with a message of Quod`` () =
+    match generate "p.quod" (typedOf "fn f() -> int { 9223372036854775808 }") Set.empty defaultOptions with
+    | Result.Error why -> Assert.Contains("does not fit a long", why)
+    | Ok _ -> failwith "generated"
+
+[<Fact>]
+let ``the Euclidean division and remainder do not throw where the result fits a long`` () =
+    let src = "fn m(a: int, b: int) -> int requires b != 0 { a % b }
+fn d(a: int, b: int) -> int requires b != 0 { a / b }"
+    let min' = "(-9223372036854775807L - 1L)"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"mod\", () => T0.P.M(-1L, " + min' + "));"
+              "        Case(\"div min\", () => T0.P.D(" + min' + ", 3L));"
+              "        Case(\"div by min\", () => T0.P.D(-7L, " + min' + "));"
+              "        Case(\"div minus one\", () => T0.P.D(" + min' + ", -1L));" ]
+    Assert.Equal("9223372036854775807", got.["mod"])
+    Assert.Equal("-3074457345618258603", got.["div min"])
+    Assert.Equal("1", got.["div by min"])
+    Assert.Equal("!OverflowException", got.["div minus one"])
+
+[<Fact>]
 let ``two functions with the same public name are refused`` () =
     match generate "p.quod" (typedOf "fn foo_bar() -> int { 1 } fn fooBar() -> int { 2 }") Set.empty defaultOptions with
     | Result.Error why -> Assert.Contains("FooBar", why)

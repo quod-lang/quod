@@ -4,6 +4,8 @@
 
 The same task and scoring, with one rule changed before any run ([billing.py](../../verifbench/billing.py)): the share of a category is `discount * category_net / subtotal`, and its base is `category_net - share`. Haiku and Sonnet, through MCP with `--require-contracts`, on the released Quod 0.3.1, 2026-11-06. Variants `i64` and `int`, 3 runs each: 12 runs, 4.14 USD. No usage limit, no restart. The hidden tests saw all of 9 wrong rules tried on this one.
 
+> **Reserve on times (review of 0.4.0).** The "Time" column is the agent's, with runs three at a time, under wall-time limits that depended on the load (0.4.0 counts solver operations instead). Read it as an order of magnitude.
+
 ## Result
 
 **12 of 12 verified. 12 of 12 pass all 436 orders. 6 of 6 pass all 235 in C# on .NET Framework 4.7.2. 12 of 12 give the client its 4 properties.** No contract left undecided at the end.

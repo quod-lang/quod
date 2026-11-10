@@ -4,6 +4,9 @@
 /// a C# caller proves nothing. Design: docs/design/backend-csharp.fr.md.
 module Quod.CodegenCSharp
 
+/// The program cannot be built for C#, and why (a message of Quod).
+exception Refused of string
+
 open System
 open System.Collections.Generic
 open System.Numerics
@@ -293,14 +296,14 @@ let private helpers =
         {
             if (b == -1) return 0;
             long r = a % b;
-            return r < 0 ? checked(r + Math.Abs(b)) : r;
+            return r >= 0 ? r : (b < 0 ? r - b : r + b);
         }"
-      "div", "private static long _quod_div(long a, long b) { return checked((a - _quod_mod(a, b)) / b); }"
+      "div", "private static long _quod_div(long a, long b) { if (b == -1) return checked(-a); long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       // C# truncates, and Quod's division is Euclidean. int.MinValue % -1 throws in .NET, though its result is 0.
       "mod32", "private static int _quod_mod32(int a, int b) { if (b == -1) return 0; int r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
-      "div32", "private static int _quod_div32(int a, int b) { if (b == -1) return -a; int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
+      "div32", "private static int _quod_div32(int a, int b) { if (b == -1) return checked(-a); int q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "mod64", "private static long _quod_mod64(long a, long b) { if (b == -1) return 0; long r = a % b; return r >= 0 ? r : (b < 0 ? r - b : r + b); }"
-      "div64", "private static long _quod_div64(long a, long b) { if (b == -1) return -a; long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
+      "div64", "private static long _quod_div64(long a, long b) { if (b == -1) return checked(-a); long q = a / b; return a % b >= 0 ? q : (b < 0 ? q + 1 : q - 1); }"
       "all",
       "private static bool _quod_all(long lo, long hi, Func<long, bool> f)
         {
@@ -349,7 +352,6 @@ let private helpers =
 
 type private Gen(checks: Set<string>) =
     let used = HashSet<string>() // helpers
-    let constants = SortedDictionary<BigInteger, string>()
     let eqs = Dictionary<Ty, string>()
     let eqOrder = ResizeArray<Ty>()
     /// Names and types in scope. C# refuses `if c { let x = 1; } let x = 1;`, which Quod accepts:
@@ -364,18 +366,13 @@ type private Gen(checks: Set<string>) =
     /// Is the function being generated checked at run time (--runtime-checks)?
     member val Checking = false with get, set
 
-    /// An integer literal: a long. One beyond it does not compile, and says so.
+    /// An integer literal: a long. One beyond it is refused with a message of Quod, not of the C# compiler.
     member _.Constant(n: BigInteger) =
-        if n = BigInteger Int64.MinValue then "long.MinValue"
+        if n > BigInteger Int64.MaxValue || n < BigInteger Int64.MinValue then
+            raise (Refused("the literal " + n.ToString() + " does not fit a long, which is what Quod's int is in C#: use a smaller one, or build for Python"))
+        elif n = BigInteger Int64.MinValue then "long.MinValue"
         elif n.Sign < 0 then "(" + n.ToString() + "L)"
         else n.ToString() + "L"
-
-    member _.ConstantFields() : string list =
-        [ for KeyValue(n, name) in constants ->
-              let value =
-                  if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then "new BigInteger(" + n.ToString() + ")"
-                  else "BigInteger.Parse(\"" + n.ToString() + "\")"
-              "private static readonly BigInteger " + name + " = " + value + ";" ]
 
     member _.Reset() =
         names <- Map.empty
@@ -782,6 +779,10 @@ let rec generate (sourceFile: string) (prog: TProgram) (checks: Set<string>) (op
 
 /// The same, for one module (`prog`) of a flattened program (`whole`), whose other modules it calls.
 and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
+    try generateInner sourceFile prog whole checks options
+    with Refused why -> Result.Error("not built: " + why)
+
+and private generateInner (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: Set<string>) (options: Options) : Result<string, string> =
     let fns = prog.Fns |> List.filter (fun f -> not f.IsLemma)
     // a function `level` and a type `Level` are natural in Quod, and C# cannot hold both in a class
     let methodIn (types: DataDecl list) (name: string) =
@@ -902,7 +903,7 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
                 for narrow in [ "int" ] do
                     let narrowed = f.Params |> List.map (fun p -> narrowType narrow p.Ty + " " + csName p.Name) |> String.concat ", "
                     g.Help "view" |> ignore
-                    sb.Append(indent).Append("/// <summary>The same for a list of ").Append(narrow).Append(": it is not copied. See the method above.</summary>\n")
+                    sb.Append(indent).Append("/// <summary>The same for a list of ").Append(narrow).Append(": the elements are widened to long when read. See the method above.</summary>\n")
                       .Append(indent).Append("public static ").Append(csType f.Ret).Append(' ').Append(methodOf f.Name).Append('(').Append(narrowed).Append(")\n")
                       .Append(indent).Append("{\n")
                       .Append(body).Append("return ").Append(methodOf f.Name).Append('(')
@@ -1032,9 +1033,6 @@ and generateIn (sourceFile: string) (prog: TProgram) (whole: TProgram) (checks: 
         if not checks.IsEmpty then
             out.Append("        public sealed class QuodContractException : Exception\n        {\n")
                .Append("            public QuodContractException(string message) : base(message) { }\n        }\n\n") |> ignore
-        let constantFields = g.ConstantFields()
-        if not constantFields.IsEmpty then
-            out.Append(indent).Append(String.Join("\n" + indent, constantFields)).Append("\n\n") |> ignore
         out.Append(dataText).Append(sb) |> ignore
         for h in helperText @ eqFunctions do
             out.Append(indent).Append(h).Append("\n\n") |> ignore

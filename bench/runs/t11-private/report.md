@@ -2,6 +2,8 @@
 
 **Question.** In [T9](../t9-billing/report.md), no agent wrote `private fn`, and the C# they generated had 19 to 30 public methods with a `BigInteger`, helpers that no caller needs. One sentence was added to the reference, and nothing else changed: "Make a helper private unless another module or a caller needs it". Do agents follow it?
 
+> **Since 0.4.0** the generated C# has no `BigInteger`: the counts of public methods with a `BigInteger` below describe 0.3.2.
+
 The `i64` variant of the T9 task and its scoring, Haiku and Sonnet, 3 runs each, 6 runs, 2.26 USD, through MCP with `--require-contracts`, on a build of 0.3.2, 2026-11-06.
 
 ## Result
