@@ -17,7 +17,7 @@ let private usage =
     + "options:\n"
     + "  --json              diagnostics as JSON\n"
     + "  --z3 PATH           the z3 executable (default: next to quod, $QUOD_Z3, then PATH)\n"
-    + "  --timeout SECONDS   time limit per proof obligation (default 10)\n"
+    + "  --timeout SECONDS   limit per proof obligation, in solver operations: 4000 per ms (default 10)\n"
     + "  --budget SECONDS    time limit of the whole check (default 300, 60 for mcp, 0 for none): the obligations\n"
     + "                      left when it is used up are reported as not attempted\n"
     + "  --require-contracts a function without a contract, or a 'loose' that accepts every result, is an\n"

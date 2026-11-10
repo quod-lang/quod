@@ -387,7 +387,7 @@ quod contract fichier.quod cas.json --function NOM   # évalue un contrat sur de
 
 `z3` est cherché à côté de `quod`, puis dans `QUOD_Z3`, puis dans le `PATH`.
 
-`--timeout` limite chaque essai du solveur sur une obligation de preuve (10 s par défaut ; une
+`--timeout` limite chaque essai du solveur sur une obligation de preuve (10 s par défaut). La limite est un nombre d'opérations du solveur, 4000 par milliseconde, et non un temps : une machine chargée ou plus lente donne le même verdict, seulement plus tard (une
 obligation n'a droit à un second essai, sur un solveur neuf, que si le premier a abandonné vite,
 pas après un dépassement de temps) ; `--budget` limite la
 vérification entière (300 s par défaut, 0 pour aucune limite), car un agent l'attend en entier

@@ -97,6 +97,25 @@ let findZ3 (explicitPath: string option) : string option =
 [<Literal>]
 let private valuesLimitMs = 5000
 
+/// A limit is a count of z3's operations (rlimit), not a time: the same file gets the same
+/// verdict on a loaded machine (review of 0.3.2: a published solution failed 5 builds of 5 run at
+/// once). A "millisecond" of limit is 4000 operations, what z3 4.12.1 did in one on the machine
+/// that measured it. The time limit stays, 4 times wider, against a check that would never end.
+/// QUOD_RLIMIT_PER_MS changes it, to calibrate: on 106 programs, 1000 lost 4 proofs that the time limit
+/// gave, and 4000 lost none (it gained one, which the time limit gave up on).
+let rlimitPerMs =
+    match Environment.GetEnvironmentVariable "QUOD_RLIMIT_PER_MS" with
+    | null | "" -> 4000L
+    | v -> int64 v
+let private wallFactor = 4L
+
+let limitCommands (ms: int) =
+    [ "(set-option :rlimit " + string (int64 ms * rlimitPerMs) + ")"
+      "(set-option :timeout " + string (min (int64 Int32.MaxValue) (int64 ms * wallFactor)) + ")" ]
+
+/// How long to wait for an answer before the process is taken as hung.
+let private waitMs (ms: int) = int (min (int64 Int32.MaxValue) (2L * wallFactor * int64 ms + 5000L))
+
 type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Threading.CancellationToken) =
     let psi = ProcessStartInfo(z3Path, "-in -smt2")
     do
@@ -195,7 +214,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
 
     let readFirstLine () : string option =
         let t = output.ReadLineAsync()
-        if t.Wait(2 * currentTimeout + 5000) then Some t.Result
+        if t.Wait(waitMs currentTimeout) then Some t.Result
         elif cancelled then raise (SmtFailure "cancelled")
         else
             replaceProcess t
@@ -240,7 +259,8 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
                 raw "(get-info :reason-unknown)"
                 input.Flush()
                 let r = readAnswer ()
-                Unknown(if r.Contains "timeout" || r.Contains "canceled" then "timeout" else r)
+                // the limit of operations reached is the time limit of a fixed machine
+                Unknown(if r.Contains "timeout" || r.Contains "canceled" || r.Contains "resource limit" then "timeout" else r)
             | other -> raise (SmtFailure("unexpected answer from z3: " + other))
         log |> Option.iter (fun w -> w.WriteLine("; answer: " + (match result with Sat -> "sat" | Unsat -> "unsat" | Unknown why -> "unknown " + why)))
         timedOut <- (result = Unknown "timeout")
@@ -266,13 +286,13 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
         // instantiation). A failing check then answers "unknown" quickly, with a candidate
         // model, instead of searching for an exact model until the time limit.
         s.Send "(set-option :smt.mbqi false)"
-        s.Send("(set-option :timeout " + string timeoutMs + ")")
+        for c in limitCommands timeoutMs do s.Send c
         s.Send "(set-logic ALL)"
 
     /// Change the time limit of the following checks (milliseconds).
     member s.SetTimeout(ms: int) =
         currentTimeout <- ms
-        s.Send("(set-option :timeout " + string ms + ")")
+        for c in limitCommands ms do s.Send c
 
     /// The time limit given at start, to restore after a temporary change.
     member _.DefaultTimeout = timeoutMs
@@ -315,7 +335,7 @@ type Session(z3Path: string, timeoutMs: int, log: TextWriter option, cancel: Thr
                 raw "(reset)"
                 for frame in frames do
                     for command in frame do raw command
-                raw ("(set-option :timeout " + string ms + ")")
+                for c in limitCommands ms do raw c
                 raw "(check-sat)"
                 dirty <- true
                 let saved = currentTimeout

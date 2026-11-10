@@ -379,7 +379,7 @@ quod contract file.quod cases.json --function NAME   # evaluate a contract on gi
 
 `z3` is looked up next to `quod`, then in `QUOD_Z3`, then on `PATH`.
 
-`--timeout` limits each try of the solver on a proof obligation (10 s by default; an obligation
+`--timeout` limits each try of the solver on a proof obligation (10 s by default). The limit is a count of the solver's operations, 4000 per millisecond, not a time: a loaded or slower machine gives the same verdict, only later (an obligation
 gets a second try, on a fresh solver, only when the first gave up quickly, not after a timeout); `--budget` limits the whole check
 (300 s by default, 0 for none), since an agent waits for the whole of it before going on.
 Functions are checked in the order of the file. The obligations left when the budget is used
