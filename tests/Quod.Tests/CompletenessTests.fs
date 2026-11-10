@@ -109,7 +109,7 @@ let ``a weak contract of a statement function over tuples is caught (Haiku's mer
              + "{ let r: seq<(int, int)> = []; return r; }")
     Assert.True(w.ContainsKey "iv")
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``duplicates without loose: the witness of a statement binary search`` () =
     let w =
         assertUnderspecified

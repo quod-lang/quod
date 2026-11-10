@@ -171,7 +171,7 @@ let private strProgram =
     + "fn again(s: string) -> string\n  ensures result == strings.join(parts(s), \"; \")\n{\n  strings.join(parts(s), \"; \")\n}\n\n"
     + "fn plus_one(s: string) -> string\n  requires strings.is_int(s)\n  ensures result == strings.int_to_string(strings.parse_int(s) + 1)\n{\n  strings.int_to_string(strings.parse_int(s) + 1)\n}\n"
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``the standard library is found, proved with the program, and runs`` () =
     withFiles [ "main", strProgram ] (fun dir outcome ->
         match outcome with
@@ -343,7 +343,7 @@ let ``types go across modules`` () =
             | Checked(_, r) -> Assert.Empty(errorsOf r)
             | other -> failwithf "%A" other)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``a tail call does not grow the stack`` () =
     let src = "import strings\n\nfn t(s: string) -> string\n  ensures result == strings.trim(s)\n{\n  strings.trim(s)\n}\n\nfn n(s: string, c: char) -> nat\n  ensures result == len(strings.split(s, c))\n{\n  len(strings.split(s, c))\n}\n\nfn d(s: string) -> bool\n  ensures result == strings.all_digits(s)\n{\n  strings.all_digits(s)\n}\n\nfn j(xs: seq<string>) -> nat\n  ensures result == len(strings.join(xs, \",\"))\n{\n  len(strings.join(xs, \",\"))\n}\n"
     withFiles [ "main", src ] (fun dir outcome ->
@@ -397,7 +397,7 @@ let private notVerified (src: string) =
         | Rejected _ -> ()
         | other -> failwithf "%A" other)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``the length of a term that does not exist has no bound`` () =
     notVerified "fn wrong(xs: seq<bool>) -> bool\n  ensures !result\n{\n  let k: i32 = 0;\n  assert len(xs + xs) >= k;\n  len(xs) > 1073741823\n}\n"
     // through a lemma, a parameter or a string: nothing is assumed of a length any more

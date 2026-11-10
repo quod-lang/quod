@@ -49,7 +49,7 @@ let ``the examples verify`` () =
     for f in Directory.GetFiles(up (DirectoryInfo AppContext.BaseDirectory), "*.quod") do
         assertProved (File.ReadAllText f)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``the VerifBench solutions written in Quod verify`` () =
     let rec up (d: DirectoryInfo) =
         if Directory.Exists(Path.Combine(d.FullName, "bench", "quod")) then Path.Combine(d.FullName, "bench", "quod")
@@ -130,7 +130,7 @@ let ``if statements merge their branches`` () =
     assertProved
         "fn abs(x: int) -> int ensures result >= 0 ensures result == x || result == -x { let mut r = x; if x < 0 { r = -x; } return r; }"
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``sequences: concatenation, equality, quantifiers`` () =
     assertProved "fn f(a: seq<int>, b: seq<int>) -> seq<int> ensures len(result) == len(a) + len(b) { a + b }"
     assertProved "fn f(x: int) -> seq<int> ensures result == [x] + [] { [x] }"
@@ -158,7 +158,7 @@ let ``quantified facts carry over sequence operations (reverse by a loop)`` () =
     assertProved (reverse "r + [xs[len(xs) - 1 - i]]" "xs[len(xs) - 1 - j]")
     assertProved (reverse "[xs[i]] + r" "xs[i - 1 - j]")
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``a run-length step keeps a quantified property of the prefix`` () =
     assertProved
         ("fn step(r: seq<(int, nat)>, x: int) -> seq<(int, nat)> requires forall i in 0..len(r): r[i].1 >= 1 ensures forall i in 0..len(result): result[i].1 >= 1 "
@@ -243,7 +243,7 @@ let ``an unconfirmed counterexample shows the loop state the solver assumed`` ()
     Assert.Contains("The solver assumed", d.Message)
     Assert.Matches("s = -\\d+", d.Message)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``an exists that the solver cannot prove gets the witness rule`` () =
     let d =
         verify
@@ -257,7 +257,7 @@ let ``an exists that the solver cannot prove gets the witness rule`` () =
     Assert.Equal("inconclusive", d.Status)
     Assert.Contains("give the solver its witness", d.Message)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``an inconclusive proof gives the solver's reason`` () =
     // a^3 + b^3 = c^3 has no solution in positive integers: nonlinear, beyond the solver
     let ds =
@@ -315,7 +315,7 @@ let ``sequences as long as a constant of the program are run: requires len(xs) =
              + "  if xs[2] > xs[3] { return xs[0] + xs[8] - 2000; } return xs[0] + xs[8]; }")
     Assert.Equal(Some "run", d.Evidence)
 
-[<Fact>]
+[<Fact; Trait("Category", "Slow")>]
 let ``when no run breaks an obligation, the message names the branches no run took`` () =
     // a^3 + b^3 = c^3 has no solution in positive integers: the branch is never taken, and the
     // solver cannot prove that it is not
