@@ -737,6 +737,30 @@ let private moduleClasses (whole: TProgram) : Map<string, string> =
         m, classNameOf m names types)
     |> Map.ofList
 
+/// Why two files of a program cannot both be generated: they would give one class, or one file
+/// (`a_b` and `aB` are both `AB`; the second overwrote the first, in silence: review of 0.3.2). A file
+/// system that ignores case counts too: `ab` and `AB` are one file there.
+let collision (file: string) (whole: TProgram) : string option =
+    let view = Codegen.moduleView None whole
+    let methods =
+        view.Fns
+        |> List.filter (fun f -> not f.IsLemma && not f.IsPrivate)
+        |> List.map (fun f -> let m = pascal f.Name in if view.Types |> List.exists (fun d -> dataShort d.DataName = m) then m + "Of" else m)
+    let root = IO.Path.GetFileNameWithoutExtension file
+    let files =
+        (root, classNameOf file methods (view.Types |> List.map (fun d -> dataShort d.DataName)), outputFile file)
+        :: [ for KeyValue(m, cls) in moduleClasses whole -> m, cls, outputFile (m + ".quod") ]
+    let clash (key: string * string * string -> string) (what: string) =
+        files
+        |> List.groupBy (fun x -> (key x).ToLowerInvariant())
+        |> List.tryFind (fun (_, g) -> g.Length > 1)
+        |> Option.map (fun (_, g) ->
+            "not built: " + (g |> List.map (fun (m, _, _) -> "'" + m + "'") |> String.concat " and ")
+            + " would both be the C# " + what + " '" + (let _, c, f = g.Head in if what = "class" then c else f) + "': rename one")
+    match clash (fun (_, c, _) -> c) "class" with
+    | Some why -> Some why
+    | None -> clash (fun (_, _, f) -> f) "file"
+
 /// Set while the modules of a file are generated.
 let setRootClass (file: string) (whole: TProgram) =
     let view = Codegen.moduleView None whole

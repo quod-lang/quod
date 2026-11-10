@@ -602,3 +602,26 @@ let ``a literal in the cases of a match takes the bounded type its context wants
     let src = "enum C { A, B(nat), D }\n\nfn p(c: C) -> i32\n  ensures result == match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, D => 30 }\n{\n  match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, D => 30 }\n}\n\nfn q(c: C, x: i32) -> i32\n  requires 0 <= x <= 100\n  ensures result == x - x * p(c) / 100\n{\n  let k: i32 = match c { A => 0, B(y) => if y >= 5 { 10 } else { 5 }, _ => 30 };\n  x - x * k / 100\n}\n"
     Assert.Equal("90 0 70", pythonOf src "import main; print(main.q(main.B(5), 100), main.q(main.A(), 0), main.q(main.D(), 100))" false)
     typeError "enum C { A, B }\n\nfn p(c: C) -> i32\n  ensures result == 3000000000\n{\n  match c { A => 3000000000, B => 1 }\n}\n" "does not fit in i32"
+
+[<Fact>]
+let ``two modules that would be one C# class or one file are refused`` () =
+    let files = [ "a_b", "fn f() -> int\n  ensures result == 1\n{\n  1\n}\n"; "aB", "fn f() -> int\n  ensures result == 2\n{\n  2\n}\n"; "main", "import a_b\nimport aB\n\nfn one() -> int\n  ensures result == 1\n{\n  a_b.f()\n}\n\nfn two() -> int\n  ensures result == 2\n{\n  aB.f()\n}\n" ]
+    withFiles files (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> Assert.Contains("would both be the C# class 'AB'", why)
+            | Ok _ -> failwith "built"
+            // Python keeps them apart: a_b.py and aB.py
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Ok _ -> ()
+            | Result.Error why -> failwith why
+        | other -> failwithf "%A" other)
+    let money = [ "money", "struct Money { cents: i64 }\n"; "money_module", "fn zero() -> int\n  ensures result == 0\n{\n  0\n}\n"; "main", "import money\nimport money_module\n\nfn z(m: money.Money) -> int\n  ensures result == 0\n{\n  money_module.zero()\n}\n" ]
+    withFiles money (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (CSharp { Namespace = "N"; CheckAllRequires = false }) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> Assert.Contains("would both be the C# class 'MoneyModule'", why)
+            | Ok _ -> failwith "built"
+        | other -> failwithf "%A" other)

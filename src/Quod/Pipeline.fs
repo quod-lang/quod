@@ -172,13 +172,25 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
          | CSharp _ -> CodegenCSharp.setRootClass file typed
          | _ -> ())
         use _reset = { new IDisposable with member _.Dispose() = CodegenCSharp.clearRootClass () }
-        one None file
-        |> Result.bind (fun code ->
-            let imported =
-                Codegen.importedModules typed
-                |> List.map (fun m -> m, one (Some m) (m + ".quod"))
-            match imported |> List.tryPick (fun (_, r) -> match r with Result.Error why -> Some why | Ok _ -> None) with
-            | Some why -> Result.Error why
-            | None ->
-                let others = imported |> List.map (fun (m, r) -> m, (match r with Ok c -> c | Result.Error _ -> ""))
-                Ok { Code = code; Imported = others; Unproved = unproved })
+        // two modules that would be one file: the second would overwrite the first (review of 0.3.2)
+        let collision =
+            match target with
+            | CSharp _ -> CodegenCSharp.collision file typed
+            | Python _ ->
+                (IO.Path.GetFileNameWithoutExtension file) :: Codegen.importedModules typed
+                |> List.groupBy (fun m -> m.ToLowerInvariant())
+                |> List.tryFind (fun (_, g) -> g.Length > 1)
+                |> Option.map (fun (_, g) -> "not built: " + (g |> List.map (fun m -> "'" + m + "'") |> String.concat " and ") + " would be one Python file where case is ignored (Windows, macOS): rename one")
+        match collision with
+        | Some why -> Result.Error why
+        | None ->
+            one None file
+            |> Result.bind (fun code ->
+                let imported =
+                    Codegen.importedModules typed
+                    |> List.map (fun m -> m, one (Some m) (m + ".quod"))
+                match imported |> List.tryPick (fun (_, r) -> match r with Result.Error why -> Some why | Ok _ -> None) with
+                | Some why -> Result.Error why
+                | None ->
+                    let others = imported |> List.map (fun (m, r) -> m, (match r with Ok c -> c | Result.Error _ -> ""))
+                    Ok { Code = code; Imported = others; Unproved = unproved })
