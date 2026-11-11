@@ -625,3 +625,48 @@ let ``two modules that would be one C# class or one file are refused`` () =
             | Result.Error why -> Assert.Contains("would both be the C# class 'MoneyModule'", why)
             | Ok _ -> failwith "built"
         | other -> failwithf "%A" other)
+
+let private mapsProgram =
+    "import maps\n\n"
+    + "fn tally(ws: seq<string>) -> map<string, nat>\n"
+    + "  ensures forall w in keys(result): exists i in 0..len(ws): ws[i] == w\n"
+    + "  ensures forall i in 0..len(ws): ws[i] in result\n"
+    + "  loose (a, b) => keys(a) == keys(b)\n"
+    + "{\n"
+    + "  let mut m: map<string, nat> = map_of([]);\n"
+    + "  let mut i = 0;\n"
+    + "  while i < len(ws)\n"
+    + "    invariant 0 <= i && i <= len(ws)\n"
+    + "    invariant forall j in 0..i: ws[j] in m\n"
+    + "    invariant forall w in keys(m): exists j in 0..i: ws[j] == w\n"
+    + "    decreases len(ws) - i\n"
+    + "  {\n"
+    + "    m = maps.count_up(m, ws[i]);\n"
+    + "    i = i + 1;\n"
+    + "  }\n"
+    + "  return m;\n"
+    + "}\n\n"
+    + "fn both(a: map<int, int>, b: map<int, int>, k: int) -> int\n"
+    + "  ensures result == (if k in b { b[k] } else { if k in a { a[k] } else { -1 } })\n"
+    + "{ maps.get_or(maps.merge(a, b), k, -1) }\n"
+
+[<Fact>]
+let ``the maps library is proved with the program and runs`` () =
+    withFiles [ "main", mapsProgram ] (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                File.WriteAllText(Path.Combine(dir, "main.py"), g.Code)
+                for m, text in g.Imported do File.WriteAllText(Path.Combine(dir, m + ".py"), text)
+                let psi = Diagnostics.ProcessStartInfo("python", "-c \"import main; print(sorted(main.tally(['a', 'b', 'a']).items())); print(main.both({1: 10, 2: 20}, {2: 22}, 2)); print(main.both({1: 10}, {2: 22}, 1)); print(main.both({}, {}, 5))\"")
+                psi.WorkingDirectory <- dir
+                psi.RedirectStandardOutput <- true
+                psi.UseShellExecute <- false
+                use p = Diagnostics.Process.Start psi
+                let out = p.StandardOutput.ReadToEnd().Replace("\r\n", "\n").Trim()
+                p.WaitForExit()
+                Assert.Equal("[('a', 2), ('b', 1)]\n22\n10\n-1", out)
+        | other -> failwithf "%A" other)

@@ -119,6 +119,8 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             if env.ContainsKey n then env
             else env.Add(n, typeExprOf (match actual with TyNat -> TyInt | t -> t))
         | TSeq p, TySeq a -> c.Unify(p, a, names, env)
+        | TMap(pk, pv), TyMap(k, v) -> c.Unify(pv, v, names, c.Unify(pk, k, names, env))
+        | TSet p, TySet a -> c.Unify(p, a, names, env)
         | TTuple ps, TyTuple xs when ps.Length = xs.Length -> List.fold2 (fun e p x -> c.Unify(p, x, names, e)) env ps xs
         | TNamed(n, args), TyData d when d.Origin = n && args.Length = d.TypeArgs.Length ->
             List.fold2 (fun e p x -> c.Unify(p, x, names, e)) env args d.TypeArgs

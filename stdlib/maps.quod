@@ -1,0 +1,40 @@
+// Dictionaries, written in Quod and proved with each program that imports them.
+
+// The value of a key, or `other` if the key is not there.
+fn get_or<K, V>(m: map<K, V>, k: K, other: V) -> V
+  ensures result == (if k in m { m[k] } else { other })
+{
+  if k in m { m[k] } else { other }
+}
+
+// One more for a key: 1 if it was not there.
+fn count_up<K>(m: map<K, nat>, k: K) -> map<K, nat>
+  ensures k in result
+  ensures result[k] == (if k in m { m[k] + 1 } else { 1 })
+  ensures forall j in keys(result): j == k || j in m
+  ensures forall j in keys(m): j != k ==> j in result && result[j] == m[j]
+{
+  put(m, k, if k in m { m[k] + 1 } else { 1 })
+}
+
+// The entries of both; for a key that is in both, the value of `b`.
+fn merge<K, V>(a: map<K, V>, b: map<K, V>) -> map<K, V>
+  ensures forall k in keys(result): k in a || k in b
+  ensures forall k in keys(b): k in result && result[k] == b[k]
+  ensures forall k in keys(a): !(k in b) ==> k in result && result[k] == a[k]
+{
+  let ks = sorted_keys(b);
+  let mut m = a;
+  let mut i = 0;
+  while i < len(ks)
+    invariant 0 <= i && i <= len(ks)
+    invariant forall k in keys(m): k in a || k in b
+    invariant forall j in 0..i: ks[j] in m && m[ks[j]] == b[ks[j]]
+    invariant forall k in keys(a): (forall j in 0..i: ks[j] != k) ==> k in m && m[k] == a[k]
+    decreases len(ks) - i
+  {
+    m = put(m, ks[i], b[ks[i]]);
+    i = i + 1;
+  }
+  return m;
+}

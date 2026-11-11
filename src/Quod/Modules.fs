@@ -127,6 +127,8 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                 let rec ty (t: TypeExpr) =
                     match t with
                     | TSeq e -> TSeq(ty e)
+                    | TMap(k, v) -> TMap(ty k, ty v)
+                    | TSet e -> TSet(ty e)
                     | TTuple ts -> TTuple(List.map ty ts)
                     | TNamed(n, args) when typeNames.Contains n -> TNamed(flat n, List.map ty args)
                     | TNamed(n, args) -> TNamed(n, List.map ty args)
@@ -145,6 +147,8 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                 let rec ty (t: TypeExpr) =
                     match t with
                     | TSeq e -> TSeq(ty e)
+                    | TMap(k, v) -> TMap(ty k, ty v)
+                    | TSet e -> TSet(ty e)
                     | TTuple ts -> TTuple(List.map ty ts)
                     | TNamed(n, args) when typeNames.Contains n -> TNamed(flat n, List.map ty args)
                     | TNamed(n, args) -> TNamed(n, List.map ty args)
@@ -168,7 +172,7 @@ let load (file: string) (src: string) : Result<Loaded, Diagnostic list> =
                             | Some _ -> callee
                         | None, g when locals.Contains g -> flat g
                         | None, g when constructors.Contains g -> flat g
-                        | None, ("code" | "char_of" | "to_i32" | "to_i64") -> callee // built in, unless the module defines it
+                        | None, ("code" | "char_of" | "to_i32" | "to_i64" | "map_of" | "set_of" | "put" | "remove" | "add" | "keys" | "union" | "inter" | "diff" | "subset" | "sorted" | "sorted_keys") -> callee // built in, unless the module defines it
                         | None, g ->
                             let elsewhere = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Fns |> List.exists (fun x -> x.Name = g && not x.IsPrivate))
                             let caseIn = program.Imports |> List.map fst |> List.filter (fun m -> byName.[m].Types |> List.exists (fun t -> t.TypeCases |> List.exists (fun (c, _) -> c = g)))
