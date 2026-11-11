@@ -51,8 +51,10 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 ```
 $ quod check binary_search.quod
-verified: 29 proof obligation(s) proved; 1 of 1 contract(s) determine their result; contracts: 1 by properties; loose: binary_search
+verified: 34 proof obligation(s) proved; 2 of 2 contract(s) determine their result; contracts: 2 by properties; loose: binary_search (xs = [5, 5], target = 5: 0 or 1)
 ```
+
+(The file also holds two small helpers, `sum` and `max_of`, hence "2 of 2". The witness after `loose` shows what the freedom is: two results the contract accepts, here 0 or 1.)
 
 Every index, every invariant, termination and the postconditions are proved. And the contract
 is **complete**: two different results cannot both satisfy it, except where `loose` declares the
@@ -78,7 +80,7 @@ For `x = 0` in `[-1, 0]`, both `0` (the right answer) and `-1` satisfy the contr
 "`result == x` when `x` is already in range".
 
 `quod build file.quod --target python` then generates a Python module: proved contracts become
-documentation, not run-time checks. `--target csharp` generates C# 7.3 (so .NET Framework 4.7.2 as well
+documentation, not run-time checks. `--target csharp` generates C# 7.3 (to build it with a .NET project, see [Quod.Build](packaging/Quod.Build/README.md)) (so .NET Framework 4.7.2 as well
 as .NET): Quod's `int` is a `long` computed in `checked`, and an overflow throws instead of returning a wrong
 result (`i32` and `i64` have their bounds proved).
 
@@ -91,7 +93,7 @@ result (`i32` and `i64` have their bounds proved).
 
 ## What is here
 
-| Folder | Content |
+| Folder of this repository | Content |
 |---|---|
 | [src/Quod/](src/Quod/) | The compiler, in **F#**, shipped as a **Native AOT** binary (no .NET needed to run it): parser, type checker, verifier (Z3 through SMT-LIB), completeness check, Python and C# backends, MCP server |
 | [tests/](tests/) | The compiler's tests (xUnit), among them a differential test of the generated Python against the evaluator |
@@ -104,7 +106,7 @@ result (`i32` and `i64` have their bounds proved).
 
 [Download the package for your system](https://github.com/quod-lang/quod/releases/latest) (Windows x64, Linux x64,
 macOS on Apple silicon), unpack it, and run `quod` from that folder: z3 is next to it, nothing else
-to install. On macOS the binaries are not signed: run `xattr -d com.apple.quarantine quod z3` in
+to install. `quod` is not on your `PATH`: from the unpacked folder, run `./quod` (`.\quod` in PowerShell), or add the folder to your `PATH`. The `examples/` below are in this repository (`git clone` it), not in the package. On macOS the binaries are not signed: run `xattr -d com.apple.quarantine quod z3` in
 the folder first.
 
 ```bash

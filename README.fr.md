@@ -52,8 +52,10 @@ fn binary_search(xs: seq<int>, target: int) -> int
 
 ```
 $ quod check binary_search.quod
-verified: 29 proof obligation(s) proved; 1 of 1 contract(s) determine their result; contracts: 1 by properties; loose: binary_search
+verified: 34 proof obligation(s) proved; 2 of 2 contract(s) determine their result; contracts: 2 by properties; loose: binary_search (xs = [5, 5], target = 5: 0 or 1)
 ```
+
+(Le fichier contient aussi deux petites fonctions, `sum` et `max_of`, d'où « 2 of 2 ». Le témoin après `loose` montre ce qu'est la liberté : deux résultats que le contrat accepte, ici 0 ou 1.)
 
 Chaque indice, chaque invariant, la terminaison et les postconditions sont prouvés. Et le contrat
 est **complet** : deux résultats différents ne peuvent pas le satisfaire tous les deux, sauf là où
@@ -81,7 +83,7 @@ manque « `result == x` quand `x` est déjà dans l'intervalle ».
 
 `quod build fichier.quod --target python` produit ensuite un module Python : les contrats prouvés
 deviennent de la documentation, pas des vérifications à l'exécution.
-`--target csharp` produit du C# 7.3 (donc .NET Framework 4.7.2 comme .NET) : le `int` de Quod est un `long`
+`--target csharp` produit du C# 7.3 (donc .NET Framework 4.7.2 comme .NET ; pour le construire avec un projet .NET, voir [Quod.Build](packaging/Quod.Build/README.md)) : le `int` de Quod est un `long`
 calculé en `checked`, et un dépassement lève une exception au lieu de rendre un résultat faux (`i32` et
 `i64` ont leurs bornes prouvées).
 
@@ -94,7 +96,7 @@ calculé en `checked`, et un dépassement lève une exception au lieu de rendre 
 
 ## Contenu
 
-| Dossier | Contenu |
+| Dossier de ce dépôt | Contenu |
 |---|---|
 | [src/Quod/](src/Quod/) | Le compilateur, en **F#**, livré comme binaire **Native AOT** (pas besoin de .NET pour l'utiliser) : analyse, typage, vérification (Z3 en SMT-LIB), contrôle de complétude, génération Python et C#, serveur MCP |
 | [tests/](tests/) | Les tests du compilateur (xUnit), dont un test différentiel du Python généré contre l'évaluateur |
@@ -107,7 +109,7 @@ calculé en `checked`, et un dépassement lève une exception au lieu de rendre 
 
 [Télécharger le paquet de votre système](https://github.com/quod-lang/quod/releases/latest) (Windows x64, Linux x64, macOS
 sur puce Apple), le décompresser, et lancer `quod` depuis ce dossier : z3 est à côté, rien d'autre
-à installer. Sous macOS, les binaires ne sont pas signés : lancer d'abord
+à installer. `quod` n'est pas dans votre `PATH` : depuis le dossier décompressé, lancez `./quod` (`.\quod` dans PowerShell), ou ajoutez le dossier à votre `PATH`. Les `examples/` ci-dessous sont dans ce dépôt (`git clone`), pas dans le paquet. Sous macOS, les binaires ne sont pas signés : lancer d'abord
 `xattr -d com.apple.quarantine quod z3` dans le dossier.
 
 ```bash
