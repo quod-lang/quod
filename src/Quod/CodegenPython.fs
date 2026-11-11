@@ -43,6 +43,7 @@ _quod_builtin_divmod = divmod
 _quod_ValueError = ValueError
 _quod_IndexError = IndexError
 _quod_KeyError = KeyError
+_quod_set = set
 _quod_dict = dict
 _quod_frozenset = frozenset
 _quod_TypeError = TypeError
@@ -404,6 +405,17 @@ type private Gen(checks: Set<string>, local: Set<string>) =
             match tail.Kind with
             | ESeq [ x ] -> line (pyName n + ".append(" + g.Expr x + ")")
             | _ -> line (pyName n + ".extend(" + g.Expr tail + ")")
+        // a map or a set of its own, changed in place: a new dict or set in a loop would be quadratic
+        | SAssign(n, { Kind = ECol(Put, [ { Kind = EVar n2 }; k; x ]) }) when n2 = n && inPlace.Contains n ->
+            line (pyName n + "[" + g.Expr k + "] = " + g.Expr x)
+        | SAssign(n, { Kind = ECol(MapRemove, [ { Kind = EVar n2 }; k ]) }) when n2 = n && inPlace.Contains n ->
+            line (pyName n + ".pop(" + g.Expr k + ", None)")
+        | SAssign(n, { Kind = ECol(SetAdd, [ { Kind = EVar n2 }; x ]) }) when n2 = n && inPlace.Contains n ->
+            line (pyName n + ".add(" + g.Expr x + ")")
+        | SAssign(n, { Kind = ECol(SetRemove, [ { Kind = EVar n2 }; x ]) }) when n2 = n && inPlace.Contains n ->
+            line (pyName n + ".discard(" + g.Expr x + ")")
+        | SLet(_, n, TySet _, v) | SAssign(n, v) when inPlace.Contains n && (match v.Ty with TySet _ -> true | _ -> false) ->
+            line (pyName n + " = _quod_set(" + g.Expr v + ")")
         | SLet(_, n, _, v) | SAssign(n, v) -> line (pyName n + " = " + g.Expr v)
         | SIf(c, a, b) ->
             line ("if " + g.Expr c + ":")

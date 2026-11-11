@@ -369,6 +369,8 @@ let private helpers =
             foreach (var p in items) r[p.Key] = p.Value;
             return r;
         }"
+      "mcopy",
+      "private static Dictionary<K, V> _quod_mcopy<K, V>(IReadOnlyDictionary<K, V> m) { var r = new Dictionary<K, V>(); foreach (var p in m) r[p.Key] = p.Value; return r; }"
       "sadd",
       "private static HashSet<T> _quod_sadd<T>(HashSet<T> s, T x) { var r = new HashSet<T>(s); r.Add(x); return r; }"
       "sremove",
@@ -535,6 +537,18 @@ type private Gen(checks: Set<string>) =
         | Diff, [ a; b ] -> g.Help "sdiff" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
         | Subset, [ a; b ] -> g.Expr(a, a.Ty) + ".IsSubsetOf(" + g.Expr(b, a.Ty) + ")"
         | _ -> failwith "internal: an operation on a map or a set that does not fit"
+
+    /// A key as a collection holds it: a string is a C# string.
+    member g.Key(kt: Ty, x: TExpr) =
+        let text = g.Expr(x, kt)
+        if kt = TySeq TyChar then g.Help "text" + "(" + text + ")" else text
+
+    /// A new, changeable map or set holding what `term` holds.
+    member g.CopyOf(t: Ty, term: string) =
+        match t with
+        | TyMap(k, v) -> g.Help "mcopy" + "<" + keyCs k csType + ", " + csType v + ">(" + term + ")"
+        | TySet e -> "new HashSet<" + keyCs e csType + ">(" + term + ")"
+        | _ -> term
 
     member g.EqFunctions() : string list =
         [ for t in eqOrder do
@@ -784,6 +798,9 @@ type private Gen(checks: Set<string>) =
         let elemOf t = match t with TySeq e -> e | _ -> TyInt
         match s.Kind with
         | SLet(_, n, _, _) when isLemmaBinding n -> () // a proof step: erased
+        | SLet(_, n, ty, v) when inPlace.Contains n && (match ty with TyMap _ | TySet _ -> true | _ -> false) ->
+            let name = g.Bind(n, ty)
+            line ((match ty with TyMap(k, x) -> "Dictionary<" + keyCs k csType + ", " + csType x + ">" | _ -> csType ty) + " " + name + " = " + g.CopyOf(ty, g.Expr(v, ty)) + ";")
         | SLet(_, n, ty, v) when inPlace.Contains n ->
             let value = g.Expr(v, ty)
             let name = g.Bind(n, ty)
@@ -792,6 +809,21 @@ type private Gen(checks: Set<string>) =
             let value = g.Expr(v, ty)
             let name = g.Bind(n, ty)
             line (csType ty + " " + name + " = " + value + ";")
+        // a map or a set of its own, changed in place (a local of the concrete type, built by a copy)
+        | SAssign(n, { Kind = ECol(Put, [ { Kind = EVar n2 }; k; x ]) }) when n2 = n && inPlace.Contains n ->
+            let kt, vt = (match types.[n] with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
+            line (g.Name n + "[" + g.Key(kt, k) + "] = " + g.Expr(x, vt) + ";")
+        | SAssign(n, { Kind = ECol(MapRemove, [ { Kind = EVar n2 }; k ]) }) when n2 = n && inPlace.Contains n ->
+            let kt = (match types.[n] with TyMap(a, _) -> a | _ -> TyInt)
+            line (g.Name n + ".Remove(" + g.Key(kt, k) + ");")
+        | SAssign(n, { Kind = ECol(SetAdd, [ { Kind = EVar n2 }; x ]) }) when n2 = n && inPlace.Contains n ->
+            let kt = (match types.[n] with TySet a -> a | _ -> TyInt)
+            line (g.Name n + ".Add(" + g.Key(kt, x) + ");")
+        | SAssign(n, { Kind = ECol(SetRemove, [ { Kind = EVar n2 }; x ]) }) when n2 = n && inPlace.Contains n ->
+            let kt = (match types.[n] with TySet a -> a | _ -> TyInt)
+            line (g.Name n + ".Remove(" + g.Key(kt, x) + ");")
+        | SAssign(n, v) when inPlace.Contains n && (match types.[n] with TyMap _ | TySet _ -> true | _ -> false) ->
+            line (g.Name n + " = " + g.CopyOf(types.[n], g.Expr(v, types.[n])) + ";")
         | SAssign(n, { Kind = EConcat({ Kind = EVar n2 }, tail) }) when n2 = n && inPlace.Contains n ->
             match tail.Kind with
             | ESeq [ x ] -> line (g.Name n + ".Add(" + g.Expr(x, elemOf types.[n]) + ");")

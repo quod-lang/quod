@@ -8,6 +8,8 @@ open Quod.Typed
 let rec fresh (e: TExpr) =
     match e.Kind with
     | ESeq _ | EConcat _ | ESlice _ -> true
+    // a map or a set that an operation just made: a new one, which nothing else refers to
+    | ECol((MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Union | Inter | Diff), _) -> true
     | EIf(_, a, b) -> fresh a && fresh b
     | _ -> false
 
@@ -29,13 +31,17 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
         | EConvert a -> inner a
         | EIndex(s, i) -> reads s; inner i
         | ESlice(s, lo, hi) -> reads s; Option.iter inner lo; Option.iter inner hi
-        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter inner xs
+        // a map or a set read, or copied into a new one, is not kept; what is put into one is
+        | ECol(Put, [ m; k; x ]) -> reads m; inner k; inner x
+        | ECol((MapOf | SetOf), xs) -> List.iter inner xs
+        | ECol(_, xs) -> List.iter reads xs
+        | EQuantIn(_, _, c, b) -> reads c; inner b
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter inner xs
         | EProj(x, _) | EField(x, _, _) | ENeg x | ENot x | EToNat x -> inner x
         | EMatch(x, arms) -> inner x; arms |> List.iter (fun (_, _, b) -> inner b)
         | EArith(_, a, b) | ECmp(_, a, b) | ELogic(_, a, b) -> inner a; inner b
         | EIf(c, a, b) -> inner c; inner a; inner b
         | EQuant(_, _, lo, hi, b) -> inner lo; inner hi; inner b
-        | EQuantIn(_, _, a, b) -> inner a; inner b
         | EInt _ | EBool _ | EResult -> ()
     let rec walk (ss: TStmt list) =
         for s in ss do
@@ -43,7 +49,7 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
             | SLet(_, n, _, _) when isLemmaBinding n -> () // erased
             | SLet(isMut, n, ty, v) ->
                 (match ty with
-                 | TySeq _ when isMut && fresh v -> candidates.Add n |> ignore
+                 | TySeq _ | TyMap _ | TySet _ when isMut && fresh v -> candidates.Add n |> ignore
                  | _ -> shared.Add n |> ignore) // another variable of that name: leave both alone
                 uses false v
             | SAssign(n, v) ->
