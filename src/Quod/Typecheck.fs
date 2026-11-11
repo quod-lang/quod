@@ -42,6 +42,8 @@ let rec private tySuffix (t: Ty) =
     match t with
     | TySeq TyChar -> "string"
     | TySeq e -> "seq__" + tySuffix e
+    | TyMap(k, v) -> "map__" + tySuffix k + "__" + tySuffix v
+    | TySet e -> "set__" + tySuffix e
     | TyTuple ts -> "tuple" + string ts.Length + "__" + (ts |> List.map tySuffix |> String.concat "__")
     | TyData d -> d.DataName.Replace(".", "__")
     | t -> tyText t
@@ -56,12 +58,16 @@ let rec private typeExprOf (t: Ty) : TypeExpr =
     | TyI32 -> TI32
     | TyI64 -> TI64
     | TySeq e -> TSeq(typeExprOf e)
+    | TyMap(k, v) -> TMap(typeExprOf k, typeExprOf v)
+    | TySet e -> TSet(typeExprOf e)
     | TyTuple ts -> TTuple(List.map typeExprOf ts)
     | TyData d -> TNamed(d.DataName, [])
 
 let rec private substType (env: Map<string, TypeExpr>) (t: TypeExpr) : TypeExpr =
     match t with
     | TSeq e -> TSeq(substType env e)
+    | TMap(k, v) -> TMap(substType env k, substType env v)
+    | TSet e -> TSet(substType env e)
     | TTuple ts -> TTuple(List.map (substType env) ts)
     | TNamed(n, []) when env.ContainsKey n -> env.[n]
     | TNamed(n, args) -> TNamed(n, List.map (substType env) args)
@@ -79,6 +85,8 @@ let rec private substStmt (env: Map<string, TypeExpr>) (s: Stmt) : Stmt =
 
 type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeDecl list) =
     let errors = ResizeArray<Diagnostic>()
+    /// Where to report a key type that is not ordered: the place that wrote the type.
+    let mutable keySpan: Span = { Start = { Line = 1; Col = 1 }; End = { Line = 1; Col = 1 } }
     let mutable fns = initialFns
     /// The copies of generic functions still to check: each with the name of its generic.
     let pending = Queue<FnDecl * string>()
@@ -193,9 +201,30 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
     /// A type of the syntax. A struct or an enum is resolved once. It cannot hold itself.
     member c.Ty(t: TypeExpr) : Ty = c.TyWithin(t, [])
 
+    /// Where the types written next are reported if their keys are not ordered.
+    member _.KeyAt(span: Span) = keySpan <- span
+
+    member c.CheckKeyAt(t: Ty, span: Span) =
+        let saved = keySpan
+        keySpan <- span
+        c.CheckKey t
+        keySpan <- saved
+
+    member c.CheckKey(t: Ty) =
+        if not (isKeyType t) then
+            c.Error(keySpan, "", "the keys of a map, and the elements of a set, must be of an ordered type (int, nat, i32, i64, char, bool or string); '" + tyText t + "' is not one")
+
     member private c.TyWithin(t: TypeExpr, within: string list) : Ty =
         match t with
         | TSeq e -> TySeq(c.TyWithin(e, within))
+        | TMap(k, v) ->
+            let tk = c.TyWithin(k, within)
+            c.CheckKey tk
+            TyMap(tk, c.TyWithin(v, within))
+        | TSet e ->
+            let te = c.TyWithin(e, within)
+            c.CheckKey te
+            TySet te
         | TTuple ts -> TyTuple(ts |> List.map (fun x -> c.TyWithin(x, within)))
         | TNamed(n, args) when (match declared.TryFind n with Some d -> not d.Generics.IsEmpty | None -> false) ->
             let d = declared.[n]
@@ -227,6 +256,7 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
                     c.Error(d.TypeSpan, "", "the type '" + n + "' holds itself: recursive types are not in Quod 0.3, since a value must be copied as it is")
                     TyError
                 | Some d ->
+                    keySpan <- d.TypeSpan
                     let cases =
                         d.TypeCases |> List.map (fun (name, fields) ->
                             { CaseName = name; Fields = fields |> List.map (fun (f, ft) -> f, c.TyWithin(ft, n :: within)) })
@@ -296,6 +326,8 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             | x, y when x = y -> true
             | TyNat, TyInt -> true
             | TySeq x, TySeq y -> fits x y
+            | TyMap(k, x), TyMap(k', y) when k = k' -> fits x y
+            | TySet x, TySet y when x = y -> true
             | TyTuple xs, TyTuple ys when xs.Length = ys.Length -> List.forall2 fits xs ys
             | _ -> false
         // `[]` where a string is expected is the empty string: the generators must know it
@@ -501,6 +533,11 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             mk (ETuple typed) (TyTuple(typed |> List.map (fun t -> t.Ty)))
         | Index(s, i) ->
             let ts = c.Expr(s, ctx, None)
+            match ts.Ty with
+            | TyMap(kt, vt) ->
+                let tk = c.Coerce(c.Expr(i, ctx, Some kt), kt, ctx.FnName, "the key")
+                mk (ECol(Get, [ ts; tk ])) vt
+            | _ ->
             let ti = c.Expr(i, ctx, None)
             c.ExpectInt(ti, ctx, "an index")
             match ts.Ty with
@@ -538,13 +575,106 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             | [ a ] ->
                 let ta = c.Expr(a, ctx, None)
                 match ta.Ty with
-                | TySeq _ | TyError -> mk (ELen ta) TyNat
+                | TySeq _ | TyMap _ | TySet _ | TyError -> mk (ELen ta) TyNat
                 | t ->
-                    c.Error(a.Span, ctx.FnName, "len() needs a sequence, this is a " + tyText t)
+                    c.Error(a.Span, ctx.FnName, "len() needs a sequence, a map or a set, this is a " + tyText t)
                     fail ()
             | _ ->
                 c.Error(e.Span, ctx.FnName, "len() takes exactly one argument")
                 fail ()
+        | Call(("map_of" | "set_of") as name, [ a ]) when not (fns.ContainsKey name) ->
+            let hint =
+                match name, expected with
+                | "map_of", Some(TyMap(k, v)) -> Some(TySeq(TyTuple [ k; v ]))
+                | "set_of", Some(TySet t) -> Some(TySeq t)
+                | _ -> None
+            let ta = c.Expr(a, ctx, hint)
+            let ta = match hint with Some h -> c.Coerce(ta, h, ctx.FnName, "the argument of " + name) | None -> ta
+            (match ta.Kind with
+             | ESeq _ | EBool _ -> ()
+             | _ when ta.Ty = TyError -> ()
+             | _ -> c.Error(a.Span, ctx.FnName, name + "() takes a list written in place, as in " + name + (if name = "map_of" then "([(1, 2), (3, 4)])" else "([1, 2, 3])") + ": build a bigger " + (if name = "map_of" then "map" else "set") + " with " + (if name = "map_of" then "put" else "add") + ", for instance in a loop"))
+            match name, ta.Ty with
+            | "map_of", TySeq(TyTuple [ k; v ]) ->
+                c.CheckKeyAt(k, e.Span)
+                mk (ECol(MapOf, [ ta ])) (TyMap(k, v))
+            | "set_of", TySeq t ->
+                c.CheckKeyAt(t, e.Span)
+                mk (ECol(SetOf, [ ta ])) (TySet t)
+            | _, TyError -> fail ()
+            | _, t ->
+                c.Error(a.Span, ctx.FnName, name + "() takes a sequence of " + (if name = "map_of" then "(key, value) pairs" else "elements") + ", this is a " + tyText t)
+                fail ()
+        | Call("put", [ m; k; v ]) when not (fns.ContainsKey "put") ->
+            let tm = c.Expr(m, ctx, expected)
+            match tm.Ty with
+            | TyMap(kt, vt) ->
+                let tk = c.Coerce(c.Expr(k, ctx, Some kt), kt, ctx.FnName, "the key")
+                let tv = c.Coerce(c.Expr(v, ctx, Some vt), vt, ctx.FnName, "the value")
+                mk (ECol(Put, [ tm; tk; tv ])) tm.Ty
+            | TyError -> fail ()
+            | t ->
+                c.Error(m.Span, ctx.FnName, "put() needs a map, this is a " + tyText t)
+                fail ()
+        | Call(("remove" | "add") as name, [ s; x ]) when not (fns.ContainsKey name) ->
+            let ts = c.Expr(s, ctx, expected)
+            match name, ts.Ty with
+            | "remove", TyMap(kt, _) ->
+                mk (ECol(MapRemove, [ ts; c.Coerce(c.Expr(x, ctx, Some kt), kt, ctx.FnName, "the key") ])) ts.Ty
+            | "remove", TySet t ->
+                mk (ECol(SetRemove, [ ts; c.Coerce(c.Expr(x, ctx, Some t), t, ctx.FnName, "the element") ])) ts.Ty
+            | "add", TySet t ->
+                mk (ECol(SetAdd, [ ts; c.Coerce(c.Expr(x, ctx, Some t), t, ctx.FnName, "the element") ])) ts.Ty
+            | _, TyError -> fail ()
+            | _, t ->
+                c.Error(s.Span, ctx.FnName, name + "() needs " + (if name = "add" then "a set" else "a map or a set") + ", this is a " + tyText t)
+                fail ()
+        | Call("keys", [ m ]) when not (fns.ContainsKey "keys") ->
+            let tm = c.Expr(m, ctx, None)
+            match tm.Ty with
+            | TyMap(kt, _) -> mk (ECol(Keys, [ tm ])) (TySet kt)
+            | TyError -> fail ()
+            | t ->
+                c.Error(m.Span, ctx.FnName, "keys() needs a map, this is a " + tyText t)
+                fail ()
+        | Call(("union" | "inter" | "diff" | "subset") as name, [ a; b ]) when not (fns.ContainsKey name) ->
+            let ta = c.Expr(a, ctx, expected)
+            match ta.Ty with
+            | TySet t ->
+                let tb = c.Coerce(c.Expr(b, ctx, Some ta.Ty), ta.Ty, ctx.FnName, "the second set")
+                let op = (match name with "union" -> Union | "inter" -> Inter | "diff" -> Diff | _ -> Subset)
+                mk (ECol(op, [ ta; tb ])) (if name = "subset" then TyBool else ta.Ty)
+            | TyError -> fail ()
+            | t ->
+                c.Error(a.Span, ctx.FnName, name + "() needs sets, this is a " + tyText t)
+                fail ()
+        | Member(k, col) ->
+            let tc = c.Expr(col, ctx, None)
+            match tc.Ty with
+            | TyMap(kt, _) | TySet kt ->
+                let tk = c.Coerce(c.Expr(k, ctx, Some kt), kt, ctx.FnName, "the key")
+                mk (ECol(Has, [ tc; tk ])) TyBool
+            | TyError -> fail ()
+            | t ->
+                c.Error(col.Span, ctx.FnName, "'in' needs a map or a set, this is a " + tyText t)
+                fail ()
+        | QuantIn(q, v, col, body) ->
+            if not ctx.InSpec then
+                c.Error(e.Span, ctx.FnName, "quantifiers can only be used in contracts and assertions")
+            let tc = c.Expr(col, ctx, None)
+            let et =
+                match tc.Ty with
+                | TySet t -> t
+                | TyError -> TyError
+                | t ->
+                    c.Error(col.Span, ctx.FnName, "a quantifier over elements needs a set (for a map, 'keys(m)'), this is a " + tyText t)
+                    TyError
+            c.Push()
+            c.Declare(v, { Ty = et; IsMutable = false; What = "bound variable" }, e.Span, ctx.FnName)
+            let tbody = c.Expr(body, ctx, None)
+            c.Pop()
+            c.ExpectBool(tbody, ctx, "the body of a quantifier")
+            mk (EQuantIn(q, v, tc, tbody)) TyBool
         | Call("code", [ a ]) when not (fns.ContainsKey "code") ->
             let ta = c.Expr(a, ctx, None)
             match ta.Ty with
@@ -706,7 +836,7 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             let mk k : TStmt = { Kind = k; Span = s.Span }
             match s.Kind with
             | Let(isMut, name, ty, value) ->
-                let declared = ty |> Option.map c.Ty
+                let declared = ty |> Option.map (fun t -> c.KeyAt s.Span; c.Ty t)
                 let tv = c.Expr(value, code, declared)
                 let vty, tv =
                     match declared with
@@ -781,11 +911,13 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
 
     member c.Function(f: FnDecl, cycle: int option) : TFn =
         let recursive = cycle.IsSome
+        c.KeyAt f.Span
         let ret = c.Ty f.Ret
         lemmaCalls <- 0
         c.Push()
         let ps =
             f.Params |> List.map (fun p ->
+                c.KeyAt p.Span
                 let t = c.Ty p.Type
                 c.Declare(p.Name, { Ty = t; IsMutable = false; What = "parameter" }, p.Span, f.Name)
                 { Name = p.Name; Ty = t; Span = p.Span })
@@ -837,6 +969,8 @@ let rec private callsExpr (acc: HashSet<string>) (e: Expr) =
     | Binary(_, a, b) -> go a; go b
     | IfExpr(a, b, c) -> go a; go b; go c
     | Quant(_, _, a, b, c) -> go a; go b; go c
+    | Member(a, b) -> go a; go b
+    | QuantIn(_, _, a, b) -> go a; go b
     | IntLit _ | BoolLit _ | CharLit _ | StrLit _ | Var _ | Result -> ()
     | Field(a, _) -> go a
     | Match(a, arms) -> go a; arms |> List.iter (fun x -> go x.Body)

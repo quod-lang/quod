@@ -101,6 +101,20 @@ type private Parser(file: string, toks: Token[]) =
         | TkIdent "char" -> p.Next() |> ignore; TChar
         | TkIdent "i32" -> p.Next() |> ignore; TI32
         | TkIdent "i64" -> p.Next() |> ignore; TI64
+        | TkIdent "map" when (p.PeekAt 1).Kind = TkSymbol "<" ->
+            p.Next() |> ignore
+            p.Sym "<"
+            let k = p.Type()
+            p.Sym ","
+            let v = p.Type()
+            p.Sym ">"
+            TMap(k, v)
+        | TkIdent "set" when (p.PeekAt 1).Kind = TkSymbol "<" ->
+            p.Next() |> ignore
+            p.Sym "<"
+            let t = p.Type()
+            p.Sym ">"
+            TSet t
         | TkIdent name when name <> "string" ->
             p.Next() |> ignore
             // `module.Type`
@@ -188,6 +202,10 @@ type private Parser(file: string, toks: Token[]) =
     member p.Comparison() : Expr =
         let start = p.Peek.Span.Start
         let first = p.Additive()
+        if p.IsKw "in" then
+            p.Next() |> ignore
+            p.Mk(Member(first, p.Additive()), start)
+        else
         let cmpOp () =
             match p.Peek.Kind with
             | TkSymbol "==" -> Some Eq | TkSymbol "!=" -> Some Ne
@@ -362,11 +380,16 @@ type private Parser(file: string, toks: Token[]) =
             let v = p.Ident "a bound variable after the quantifier"
             p.Kw "in"
             let lo = p.Additive()
-            p.Sym ".."
-            let hi = p.Additive()
-            p.Sym ":"
-            let body = p.Expr()
-            p.Mk(Quant(q, v, lo, hi, body), start)
+            if p.IsSym ".." then
+                p.Next() |> ignore
+                let hi = p.Additive()
+                p.Sym ":"
+                let body = p.Expr()
+                p.Mk(Quant(q, v, lo, hi, body), start)
+            else
+                p.Sym ":"
+                let body = p.Expr()
+                p.Mk(QuantIn(q, v, lo, body), start)
         | _ -> p.FailHere "an expression"
 
     /// `if c { a } else { b }` in expression position: both branches are single expressions.

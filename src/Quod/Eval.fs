@@ -16,6 +16,9 @@ type Value =
     | VData of string * Value list
     | VSeq of Value list
     | VTuple of Value list
+    /// A map and a set: entries in ascending order of key, without duplicates, so that equal values are equal terms.
+    | VMap of (Value * Value) list
+    | VSet of Value list
 
 /// Raised when a value cannot be computed: an index out of bounds, a division by zero, a call
 /// to a statement function, a quantifier over a huge range. The caller then confirms nothing.
@@ -67,6 +70,31 @@ let withBigStack (work: unit -> 'a) : 'a =
 let private charText (c: int) =
     if c < 32 || c = 127 then "\\u{" + c.ToString "X" + "}" else Char.ConvertFromUtf32 c
 
+/// The order of keys: numbers, chars and booleans by value, strings (sequences) one element after the other.
+let rec compareValue (a: Value) (b: Value) : int =
+    match a, b with
+    | VInt x, VInt y -> compare x y
+    | VChar x, VChar y -> compare x y
+    | VBool x, VBool y -> compare x y
+    | VSeq xs, VSeq ys ->
+        let rec go (xs: Value list) (ys: Value list) =
+            match xs, ys with
+            | [], [] -> 0
+            | [], _ -> -1
+            | _, [] -> 1
+            | x :: xt, y :: yt -> (match compareValue x y with 0 -> go xt yt | c -> c)
+        go xs ys
+    | _ -> 0
+
+let putEntry (entries: (Value * Value) list) (k: Value) (v: Value) =
+    let before = entries |> List.filter (fun (k', _) -> compareValue k' k < 0)
+    let after = entries |> List.filter (fun (k', _) -> compareValue k' k > 0)
+    before @ [ k, v ] @ after
+
+let addElement (items: Value list) (x: Value) =
+    if items |> List.exists (fun y -> compareValue x y = 0) then items
+    else (x :: items) |> List.sortWith compareValue
+
 let rec valueText (v: Value) =
     match v with
     | VInt n -> n.ToString()
@@ -78,6 +106,8 @@ let rec valueText (v: Value) =
         "\"" + (xs |> List.map (function VChar c -> charText c | _ -> "") |> String.concat "") + "\""
     | VSeq xs -> "[" + (xs |> List.map valueText |> String.concat ", ") + "]"
     | VTuple xs -> "(" + (xs |> List.map valueText |> String.concat ", ") + ")"
+    | VMap entries -> "{" + (entries |> List.map (fun (k, x) -> valueText k + ": " + valueText x) |> String.concat ", ") + "}"
+    | VSet xs -> "{" + (xs |> List.map valueText |> String.concat ", ") + "}"
 
 /// Evaluates expressions and runs functions. In checking mode, what would be an evaluation
 /// error is a broken obligation (Violation): an index out of bounds, a division by zero, a
@@ -153,7 +183,19 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
             match go t with
             | VTuple xs -> xs.[k]
             | _ -> raise (CannotEvaluate "not a tuple")
-        | ELen s -> VInt(BigInteger (asSeq s).Length)
+        | ELen s ->
+            match go s with
+            | VSeq xs | VSet xs -> VInt(BigInteger xs.Length)
+            | VMap entries -> VInt(BigInteger entries.Length)
+            | _ -> raise (CannotEvaluate "not a sequence, a map or a set")
+        | ECol(op, args) -> ev.Collection(e, op, args, env)
+        | EQuantIn(q, name, col, body) ->
+            let items = match go col with VSet xs -> xs | _ -> raise (CannotEvaluate "not a set")
+            if BigInteger items.Length > maxRange then raise (CannotEvaluate "a quantifier over too many values")
+            let test x = (match ev.Expr(body, env.Add(name, x)) with VBool b -> b | _ -> raise (CannotEvaluate "not a bool"))
+            match q with
+            | Syntax.Forall -> VBool(Seq.forall test items)
+            | Syntax.Exists -> VBool(Seq.exists test items)
         | ECall(name, args) ->
             let f = fns.[name]
             let values = args |> List.map go
@@ -257,7 +299,45 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         | TyBool, VBool _ -> true
         | TySeq e, VSeq xs -> xs |> List.forall (fun x -> ev.Fits(e, x))
         | TyTuple ts, VTuple xs when ts.Length = xs.Length -> List.forall2 (fun t x -> ev.Fits(t, x)) ts xs
+        | TyMap(kt, vt), VMap entries -> entries |> List.forall (fun (k, x) -> ev.Fits(kt, k) && ev.Fits(vt, x))
+        | TySet t, VSet xs -> xs |> List.forall (fun x -> ev.Fits(t, x))
         | _ -> false
+
+    /// An operation on a map or a set. A read of a key that is not there is a broken obligation.
+    member private ev.Collection(e: TExpr, op: ColOp, args: TExpr list, env: Map<string, Value>) : Value =
+        let go x = ev.Expr(x, env)
+        let entries x = match go x with VMap m -> m | _ -> raise (CannotEvaluate "not a map")
+        let items x = match go x with VSet s -> s | _ -> raise (CannotEvaluate "not a set")
+        match op, args with
+        | MapOf, [ s ] ->
+            match go s with
+            | VSeq pairs -> VMap(pairs |> List.fold (fun m p -> match p with VTuple [ k; v ] -> putEntry m k v | _ -> raise (CannotEvaluate "not a pair")) [])
+            | _ -> raise (CannotEvaluate "not a sequence")
+        | SetOf, [ s ] ->
+            match go s with
+            | VSeq xs -> VSet(xs |> List.fold addElement [])
+            | _ -> raise (CannotEvaluate "not a sequence")
+        | Put, [ m; k; v ] -> VMap(putEntry (entries m) (go k) (go v))
+        | MapRemove, [ m; k ] -> (let key = go k in VMap(entries m |> List.filter (fun (k', _) -> compareValue k' key <> 0)))
+        | SetAdd, [ s; x ] -> VSet(addElement (items s) (go x))
+        | SetRemove, [ s; x ] -> (let key = go x in VSet(items s |> List.filter (fun y -> compareValue y key <> 0)))
+        | Keys, [ m ] -> VSet(entries m |> List.map fst)
+        | Has, [ c; k ] ->
+            let key = go k
+            match go c with
+            | VMap m -> VBool(m |> List.exists (fun (k', _) -> compareValue k' key = 0))
+            | VSet s -> VBool(s |> List.exists (fun y -> compareValue y key = 0))
+            | _ -> raise (CannotEvaluate "not a map or a set")
+        | Get, [ m; k ] ->
+            let key = go k
+            match entries m |> List.tryFind (fun (k', _) -> compareValue k' key = 0) with
+            | Some(_, v) -> v
+            | None -> ev.Fail("key in map", e.Span, "key not in map")
+        | Union, [ a; b ] -> VSet(items b |> List.fold addElement (items a))
+        | Inter, [ a; b ] -> (let sb = items b in VSet(items a |> List.filter (fun x -> sb |> List.exists (fun y -> compareValue x y = 0))))
+        | Diff, [ a; b ] -> (let sb = items b in VSet(items a |> List.filter (fun x -> not (sb |> List.exists (fun y -> compareValue x y = 0)))))
+        | Subset, [ a; b ] -> (let sb = items b in VBool(items a |> List.forall (fun x -> sb |> List.exists (fun y -> compareValue x y = 0))))
+        | _ -> raise (CannotEvaluate "an operation on a map or a set that does not fit")
 
     /// Does this boolean expression hold? None when it cannot be computed.
     member ev.Holds(e: TExpr, env: Map<string, Value>) : bool option =

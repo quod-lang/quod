@@ -14,6 +14,9 @@ type TypeExpr =
     | TNat
     | TBool
     | TSeq of TypeExpr
+    /// `map<K, V>` and `set<T>`: finite, immutable, keys of an ordered type.
+    | TMap of TypeExpr * TypeExpr
+    | TSet of TypeExpr
     | TChar
     | TI32
     | TI64
@@ -64,6 +67,10 @@ and ExprKind =
     | IfExpr of Expr * Expr * Expr
     /// `forall i in lo..hi: body` (lo included, hi excluded)
     | Quant of Quantifier * string * Expr * Expr * Expr
+    /// `k in m`, `x in s`: is the key (the element) there?
+    | Member of Expr * Expr
+    /// `forall x in s: body` over the elements of a set (or `keys(m)`).
+    | QuantIn of Quantifier * string * Expr * Expr
 
 /// `Case` is None for `_`, which covers every case not named before it.
 and MatchArm = { Case: string option; Binders: string list; Body: Expr; ArmSpan: Span }

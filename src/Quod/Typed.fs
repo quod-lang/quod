@@ -12,6 +12,9 @@ type Ty =
     | TyNat
     | TyBool
     | TySeq of Ty
+    /// `map<K, V>` and `set<T>`: finite and immutable. Keys are of an ordered type (see `isKeyType`).
+    | TyMap of Ty * Ty
+    | TySet of Ty
     /// A Unicode scalar value: not an integer, though the verifier models it by one. `string` is `seq<char>`.
     | TyChar
     /// Integers that fit in 32 and 64 bits. In code, an operation that leaves the bounds is a proof
@@ -32,6 +35,8 @@ type Ty =
             match t, u with
             | TyInt, TyInt | TyNat, TyNat | TyBool, TyBool | TyChar, TyChar | TyI32, TyI32 | TyI64, TyI64 | TyError, TyError -> true
             | TySeq a, TySeq b -> a.Equals b
+            | TyMap(k, v), TyMap(k', v') -> k.Equals k' && v.Equals v'
+            | TySet a, TySet b -> a.Equals b
             | TyTuple a, TyTuple b -> a.Length = b.Length && List.forall2 (fun (x: Ty) y -> x.Equals y) a b
             | TyData a, TyData b -> a.DataName = b.DataName
             | _ -> false
@@ -41,6 +46,8 @@ type Ty =
         match t with
         | TyInt -> 1 | TyNat -> 2 | TyBool -> 3 | TyChar -> 4 | TyI32 -> 5 | TyI64 -> 6 | TyError -> 7
         | TySeq a -> 31 * a.GetHashCode() + 8
+        | TyMap(k, v) -> 31 * (31 * k.GetHashCode() + v.GetHashCode()) + 10
+        | TySet a -> 31 * a.GetHashCode() + 11
         | TyTuple a -> a |> List.fold (fun h (x: Ty) -> 31 * h + x.GetHashCode()) 9
         | TyData d -> d.DataName.GetHashCode()
 
@@ -64,6 +71,13 @@ type CmpOp =
 type LogicOp =
     | OAnd | OOr | OImplies | OIff
 
+/// The operations on maps and sets, each one a node of the typed tree (`ECol`).
+/// MapOf: a seq of pairs; SetOf: a seq; Put: map, key, value; MapRemove: map, key; SetAdd and SetRemove:
+/// set, element; Keys: map; Has: collection, key or element (`k in m`); Get: map, key (`m[k]`);
+/// Union, Inter, Diff, Subset: two sets.
+type ColOp =
+    | MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Has | Get | Union | Inter | Diff | Subset
+
 type TExpr = { Kind: TExprKind; Ty: Ty; Span: Span }
 
 and TExprKind =
@@ -84,6 +98,10 @@ and TExprKind =
     /// Every case of the enum, each once: its index, a name per field ("_" for none) and the value.
     | EMatch of TExpr * (int * string list * TExpr) list
     | ELen of TExpr
+    /// An operation on a map or a set.
+    | ECol of ColOp * TExpr list
+    /// `forall x in s: body` over the elements of a set (or of `keys(m)`).
+    | EQuantIn of Quantifier * string * TExpr * TExpr
     /// A call to a user function.
     | ECall of string * TExpr list
     | ENeg of TExpr
@@ -151,6 +169,15 @@ let shortName (n: string) =
     | k -> n.Substring(k + 1)
 
 /// The bounds of a bounded integer type.
+/// The keys of a map and the elements of a set are of an ordered type: the integers, `char`, `bool`
+/// and `string`. An order gives a canonical value, a traversal that does not depend on the backend, and a
+/// translation to C without a collector (design note maps-ensembles).
+let isKeyType (t: Ty) =
+    match t with
+    | TyInt | TyNat | TyI32 | TyI64 | TyChar | TyBool | TyError -> true
+    | TySeq TyChar -> true
+    | _ -> false
+
 let boundsOf (t: Ty) : (bigint * bigint) option =
     match t with
     | TyI32 -> Some(bigint System.Int32.MinValue, bigint System.Int32.MaxValue)
@@ -178,6 +205,8 @@ let rec tyText (t: Ty) =
     | TyData d -> d.DataName
     | TySeq TyChar -> "string"
     | TySeq e -> "seq<" + tyText e + ">"
+    | TyMap(k, v) -> "map<" + tyText k + ", " + tyText v + ">"
+    | TySet e -> "set<" + tyText e + ">"
     | TyTuple ts -> "(" + (ts |> List.map tyText |> String.concat ", ") + ")"
     | TyError -> "<error>"
 
@@ -187,6 +216,8 @@ let rec ofSyntax (t: TypeExpr) =
     | TypeExpr.TNat -> TyNat
     | TypeExpr.TBool -> TyBool
     | TypeExpr.TSeq e -> TySeq(ofSyntax e)
+    | TypeExpr.TMap(k, v) -> TyMap(ofSyntax k, ofSyntax v)
+    | TypeExpr.TSet e -> TySet(ofSyntax e)
     | TypeExpr.TChar -> TyChar
     | TypeExpr.TI32 -> TyI32
     | TypeExpr.TI64 -> TyI64
@@ -223,6 +254,15 @@ let rec toSyntax (e: TExpr) : Syntax.Expr =
         mk (Syntax.Match(u s, arms |> List.map (fun (k, names, body) ->
             ({ Case = Some cases.[k].CaseName; Binders = names; Body = u body; ArmSpan = e.Span }: Syntax.MatchArm))))
     | ELen s -> mk (Syntax.Call("len", [ u s ]))
+    | ECol(Has, [ c; k ]) -> mk (Syntax.Member(u k, u c))
+    | ECol(Get, [ m; k ]) -> mk (Syntax.Index(u m, u k))
+    | ECol(op, args) ->
+        let name =
+            match op with
+            | MapOf -> "map_of" | SetOf -> "set_of" | Put -> "put" | MapRemove | SetRemove -> "remove" | SetAdd -> "add"
+            | Keys -> "keys" | Union -> "union" | Inter -> "inter" | Diff -> "diff" | Subset -> "subset" | Has -> "has" | Get -> "get"
+        mk (Syntax.Call(name, List.map u args))
+    | EQuantIn(q, v, c, body) -> mk (Syntax.QuantIn(q, v, u c, u body))
     | ECall(f, args) -> mk (Syntax.Call(f, List.map u args))
     | ENeg x -> mk (Syntax.Unary(Syntax.Neg, u x))
     | ENot x -> mk (Syntax.Unary(Syntax.Not, u x))

@@ -16,6 +16,8 @@ let rec typeText (t: TypeExpr) =
     | TI64 -> "i64"
     | TNamed(n, _) -> n
     | TSeq e -> "seq<" + typeText e + ">"
+    | TMap(k, v) -> "map<" + typeText k + ", " + typeText v + ">"
+    | TSet e -> "set<" + typeText e + ">"
     | TTuple ts -> "(" + (ts |> List.map typeText |> String.concat ", ") + ")"
 
 let private opText = function
@@ -91,6 +93,10 @@ let rec exprText (e: Expr) : string =
     | Quant(q, v, lo, hi, body) ->
         let kw = match q with Forall -> "forall" | Exists -> "exists"
         kw + " " + v + " in " + wrap 6 lo + ".." + wrap 6 hi + ": " + exprText body
+    | Member(k, c) -> wrap 6 k + " in " + wrap 6 c
+    | QuantIn(q, v, c, body) ->
+        let kw = match q with Forall -> "forall" | Exists -> "exists"
+        kw + " " + v + " in " + wrap 6 c + ": " + exprText body
 
 let rec private stmts (sb: StringBuilder) (indent: string) (items: Stmt list) =
     for s in items do

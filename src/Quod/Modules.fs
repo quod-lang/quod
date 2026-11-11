@@ -54,6 +54,8 @@ let rec private expr (rename: Span -> string -> string) (e: Expr) : Expr =
         | Binary(op, a, b) -> Binary(op, go a, go b)
         | IfExpr(a, b, c) -> IfExpr(go a, go b, go c)
         | Quant(q, v, a, b, c) -> Quant(q, v, go a, go b, go c)
+        | Member(a, b) -> Member(go a, go b)
+        | QuantIn(q, v, a, b) -> QuantIn(q, v, go a, go b)
     { e with Kind = kind }
 
 let rec private stmt (rename: Span -> string -> string) (ty: TypeExpr -> TypeExpr) (s: Stmt) : Stmt =
