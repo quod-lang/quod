@@ -501,7 +501,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 |---|---|
 | 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
 | 0.4 | general refinement types |
-| 0.5 | capabilities and input/output, sealed contracts; maps and sets are the first part, see [Maps and sets](#maps-and-sets) |
+| 0.6 | capabilities and input/output, sealed contracts (maps and sets came with 0.5, see [Maps and sets](#maps-and-sets)) |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 
 **Quod 2.0 will be written in Quod.** Self-hosting needs strings, algebraic types (syntax trees),

@@ -5,10 +5,10 @@
 *Quod erat demonstrandum* : un langage de programmation conçu pour être **écrit par des agents IA**
 et **vérifié par la machine**. Le programme arrive avec sa démonstration.
 
-> **État : Quod 0.4, un langage jeune, qui avance.** Le compilateur vérifie les
+> **État : Quod 0.5, un langage jeune, qui avance.** Le compilateur vérifie les
 > types, prouve les contrats avec Z3, contrôle que chaque contrat détermine son résultat, et compile
-> vers Python et vers C#. Il n'a que des fonctions pures : pas d'entrées-sorties, pas encore de
-> dictionnaires ni d'ensembles. Des agents y ont écrit des programmes de 300 lignes à partir de la
+> vers Python et vers C#. Il n'a que des fonctions pures : pas encore d'entrées-sorties. Il a des
+> dictionnaires et des ensembles. Des agents y ont écrit des programmes de 300 lignes à partir de la
 > seule référence. Ce qui a été mesuré est
 > [plus bas](#ce-quon-a-appris-jusquici). Il a peu servi hors de son auteur : **les retours et les
 > rapports de bogues sont ce dont il a le plus besoin.** [Le télécharger](https://github.com/quod-lang/quod/releases/latest) : z3 est inclus.
@@ -90,7 +90,6 @@ calculé en `checked`, et un dépassement lève une exception au lieu de rendre 
 ## Ce que Quod ne sait pas faire encore
 
 - **Pas d'entrées-sorties, pas de fichiers, pas de réseau, pour l'instant.** Une fonction Quod est pure aujourd'hui : elle calcule un résultat à partir de ses arguments, et on l'appelle depuis Python ou C#. Les entrées-sorties sont prévues, sous forme de *capacités* (une fonction ne touche la console, les fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit, de sorte que le contrat dit encore ce qu'elle peut faire) : c'est le prochain point de la [feuille de route](#feuille-de-route).
-- **Pas de dictionnaires ni d'ensembles, pour l'instant.** Ils sont sur le même point de la feuille de route.
 - **Pas de classes ni d'héritage, et aucune de prévue** (structures, énumérations, `match` et génériques existent).
 - **La vérification peut refuser un programme correct** (le solveur abandonne sur certaines arithmétiques non linéaires ou quantificateurs profonds), et elle prend de quelques secondes à une minute sur des programmes de quelques centaines de lignes.
 - **Plateformes :** développé et testé sous Windows. Les binaires Linux et macOS sont construits et testés par la CI, mais très peu lancés à la main. Dites-nous si l'un ne marche pas.
@@ -192,11 +191,12 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 2. **Quod 0.2** ([publié](https://github.com/quod-lang/quod/releases/latest)) : une génération C# et un paquet MSBuild, pour livrer des fonctions prouvées dans des bases de code
    .NET existantes, et un dialogue plus fiable avec le solveur.
 3. **Quod 0.3** ([publié](https://github.com/quod-lang/quod/releases/latest)) : modules, caractères et chaînes avec une bibliothèque standard en Quod, `i32` et `i64`, structures, énumérations, `match` et génériques.
-4. **Quod 0.4** ([publié](https://github.com/quod-lang/quod/releases/latest)) : entiers C# en `long` contrôlé, limites comptées en opérations du solveur plutôt qu'en temps. Ce que cette ligne annonçait avant (capacités, contrats scellés, dictionnaires et ensembles, types raffinés généraux) passe en 0.5.
-5. **Quod 0.5** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
+4. **Quod 0.4** ([publié](https://github.com/quod-lang/quod/releases/latest)) : entiers C# en `long` contrôlé, limites comptées en opérations du solveur plutôt qu'en temps. Ce que cette ligne annonçait avant (capacités, contrats scellés, dictionnaires et ensembles, types raffinés généraux) passe en 0.5 et 0.6.
+5. **Quod 0.5** ([publié](https://github.com/quod-lang/quod/releases/latest)) : `map<K, V>` et `set<T>`, avec `sorted` comme seul moyen de les parcourir, et une bibliothèque `maps` en Quod.
+6. **Quod 0.6** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
-   dictionnaires et ensembles, types raffinés généraux.
-6. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
+   types raffinés généraux.
+7. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
    Quod.**
 
 Le développement se fait en public. Si vous écrivez du Dafny, ou laissez des agents écrire du code

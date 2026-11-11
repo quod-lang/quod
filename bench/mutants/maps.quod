@@ -1,0 +1,70 @@
+fn squares(n: nat) -> map<int, nat>
+  ensures forall k in keys(result): 0 <= k && k < n && result[k] == k * k
+  ensures forall k in 0..n: k in result
+{
+  let mut m: map<int, nat> = map_of([]);
+  let mut i = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant forall k in keys(m): 0 <= k && k < i && m[k] == k * k
+    invariant forall k in 0..i: k in m
+    decreases n - i
+  {
+    m = put(m, i, i * i);
+    i = i + 1;
+  }
+  return m;
+}
+
+fn evens(n: nat) -> set<int>
+  ensures forall k in result: 0 <= k && k < n && k % 2 == 0
+  ensures forall k in 0..n: k % 2 == 0 ==> k in result
+{
+  let mut s: set<int> = set_of([]);
+  let mut i = 0;
+  while i < n
+    invariant 0 <= i && i <= n
+    invariant forall k in s: 0 <= k && k < i && k % 2 == 0
+    invariant forall k in 0..i: k % 2 == 0 ==> k in s
+    decreases n - i
+  {
+    if i % 2 == 0 { s = add(s, i); }
+    i = i + 1;
+  }
+  return s;
+}
+
+fn visited(path: seq<(int, int)>) -> set<(int, int)>
+  ensures forall i in 0..len(path): path[i] in result
+  ensures forall p in result: exists i in 0..len(path): path[i] == p
+{
+  let mut seen: set<(int, int)> = set_of([]);
+  let mut i = 0;
+  while i < len(path)
+    invariant 0 <= i && i <= len(path)
+    invariant forall j in 0..i: path[j] in seen
+    invariant forall p in seen: exists j in 0..i: path[j] == p
+    decreases len(path) - i
+  {
+    seen = add(seen, path[i]);
+    i = i + 1;
+  }
+  return seen;
+}
+
+fn bump(m: map<int, nat>, k: int) -> map<int, nat>
+  ensures k in result
+  ensures result[k] == (if k in m { m[k] + 1 } else { 1 })
+  ensures forall j in keys(result): j == k || j in m
+  ensures forall j in keys(m): j != k ==> j in result && result[j] == m[j]
+{
+  put(m, k, if k in m { m[k] + 1 } else { 1 })
+}
+
+fn smallest(s: set<int>) -> int
+  requires len(s) > 0
+  ensures result in s
+  ensures forall x in s: result <= x
+{
+  sorted(s)[0]
+}

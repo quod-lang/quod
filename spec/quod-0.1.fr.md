@@ -518,7 +518,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
 | 0.4 | types raffinés généraux |
-| 0.5 | capacités et entrées-sorties, contrats scellés ; dictionnaires et ensembles en sont la première partie, voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles) |
+| 0.6 | capacités et entrées-sorties, contrats scellés (les dictionnaires et ensembles sont venus avec la 0.5, voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles)) |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 
 **Quod 2.0 sera écrit en Quod.** L'auto-hébergement demande des chaînes, des types algébriques (les

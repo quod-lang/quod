@@ -5,9 +5,9 @@
 *Quod erat demonstrandum*: a programming language designed to be **written by AI agents** and
 **checked by machines**. The program comes with its proof.
 
-> **Status: Quod 0.4, a young language that is moving.** The compiler checks types, proves
+> **Status: Quod 0.5, a young language that is moving.** The compiler checks types, proves
 > contracts with Z3, checks that every contract determines its result, and compiles to Python and
-> to C#. It has pure functions only: no input or output, no maps or sets yet. Agents wrote programs
+> to C#. It has pure functions only: no input or output yet. It has maps and sets. Agents wrote programs
 > of up to 300 lines in it from the reference alone. What was measured is
 > [below](#what-we-learned-so-far). It has had little use outside its author: **feedback and bug
 > reports are what it needs most.** [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
@@ -87,7 +87,6 @@ result (`i32` and `i64` have their bounds proved).
 ## What Quod cannot do yet
 
 - **No input or output, no files, no network, yet.** A Quod function is pure today: it computes a result from its arguments, and you call it from Python or C#. Input and output are planned, as *capabilities* (a function touches the console, files or the network only through a capability it receives, so the contract still says what it may do): this is the next item of the [roadmap](#roadmap).
-- **No maps or sets, yet.** They are on the same roadmap item.
 - **No classes or inheritance, and none planned** (structs, enums, `match` and generics exist).
 - **Verification can say no to a correct program** (the solver gives up on some nonlinear arithmetic or deep quantifiers), and it takes seconds to a minute on programs of a few hundred lines.
 - **Platforms:** developed and tested on Windows. The Linux and macOS binaries are built and tested by CI, but have been run by hand very little. Tell us if one does not work.
@@ -185,10 +184,11 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
    check Quod as a tool ([docs/mcp.md](docs/mcp.md)).
 2. **Quod 0.2** ([released](https://github.com/quod-lang/quod/releases/latest)): a C# backend and an MSBuild package, to deliver proved functions into existing .NET code bases, and a more reliable dialogue with the solver.
 3. **Quod 0.3** ([released](https://github.com/quod-lang/quod/releases/latest)): modules, characters and strings with a standard library in Quod, `i32` and `i64`, structs, enums, `match` and generics.
-4. **Quod 0.4** ([released](https://github.com/quod-lang/quod/releases/latest)): C# integers as a checked `long`, limits counted in solver operations instead of time. What this line announced before (capabilities, sealed contracts, maps and sets, general refinement types) moves to 0.5.
-5. **Quod 0.5**: capabilities (no ambient authority: a function touches the console, files or
-   the network only through a capability it receives), sealed contracts, maps and sets, general refinement types.
-6. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
+4. **Quod 0.4** ([released](https://github.com/quod-lang/quod/releases/latest)): C# integers as a checked `long`, limits counted in solver operations instead of time. What this line announced before (capabilities, sealed contracts, maps and sets, general refinement types) moves to 0.5 and 0.6.
+5. **Quod 0.5** ([released](https://github.com/quod-lang/quod/releases/latest)): `map<K, V>` and `set<T>`, with `sorted` as the one way to walk them, and a `maps` library in Quod.
+6. **Quod 0.6**: capabilities (no ambient authority: a function touches the console, files or
+   the network only through a capability it receives), sealed contracts, general refinement types.
+7. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
 
 Development happens in the open. If you write Dafny, or let agents write code you need to trust,
 issues and discussions are very welcome.
