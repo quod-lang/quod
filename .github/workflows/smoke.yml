@@ -1,13 +1,15 @@
 # First contact, on clean machines: downloads the published release and plays the README's quick start.
-# Run by hand (Actions > Smoke test of a release), with the tag to try; nothing is built from the sources.
+# Run by hand (Actions > Smoke test of a release), with the tag to try, or by a change of this file (v0.4.1 then); nothing is built from the sources.
 name: Smoke test of a release
 
 on:
+  push:
+    paths: [".github/workflows/smoke.yml"]
   workflow_dispatch:
     inputs:
       tag:
         description: Release tag to try (v0.4.1)
-        required: true
+        required: false
         default: v0.4.1
 
 jobs:
@@ -30,13 +32,13 @@ jobs:
         shell: bash
     steps:
       - name: Clone the repository, as a newcomer would
-        run: git clone --depth 1 --branch "${{ inputs.tag }}" https://github.com/quod-lang/quod.git repo
+        run: git clone --depth 1 --branch "${{ inputs.tag || 'v0.4.1' }}" https://github.com/quod-lang/quod.git repo
 
       - name: Download and unpack the release
         run: |
-          version="${{ inputs.tag }}"; version="${version#v}"
+          version="${{ inputs.tag || 'v0.4.1' }}"; version="${version#v}"
           file="quod-$version-${{ matrix.asset }}"
-          curl -fsSL -o "$file" "https://github.com/quod-lang/quod/releases/download/${{ inputs.tag }}/$file"
+          curl -fsSL -o "$file" "https://github.com/quod-lang/quod/releases/download/${{ inputs.tag || 'v0.4.1' }}/$file"
           mkdir pkg
           case "$file" in
             *.zip) unzip -q "$file" -d pkg ;;
