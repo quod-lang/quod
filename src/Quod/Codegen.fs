@@ -64,11 +64,13 @@ let rec boundInList (t: Ty) =
     let rec bound t =
         match t with
         | TyI32 | TyI64 -> true
-        | TySeq e -> bound e
+        | TySeq e | TySet e -> bound e
+        | TyMap(k, v) -> bound k || bound v
         | TyTuple ts -> List.exists bound ts
         | _ -> false
     match t with
-    | TySeq e -> bound e
+    | TySeq e | TySet e -> bound e
+    | TyMap(k, v) -> bound k || bound v
     | TyTuple ts -> List.exists boundInList ts
     | _ -> false
 
@@ -77,11 +79,13 @@ let rec natInList (t: Ty) =
     let rec hasNat t =
         match t with
         | TyNat -> true
-        | TySeq e -> hasNat e
+        | TySeq e | TySet e -> hasNat e
+        | TyMap(k, v) -> hasNat k || hasNat v
         | TyTuple ts -> List.exists hasNat ts
         | _ -> false
     match t with
-    | TySeq e -> hasNat e
+    | TySeq e | TySet e -> hasNat e
+    | TyMap(k, v) -> hasNat k || hasNat v
     | TyTuple ts -> List.exists natInList ts
     | _ -> false
 

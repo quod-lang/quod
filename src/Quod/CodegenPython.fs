@@ -25,6 +25,8 @@ let rec private pyType (t: Ty) =
     | TyChar | TySeq TyChar -> "str"
     | TyData d -> pyName (shortName d.DataName)
     | TySeq e -> "list[" + pyType e + "]"
+    | TyMap(k, v) -> "dict[" + pyType k + ", " + pyType v + "]"
+    | TySet e -> "frozenset[" + pyType e + "]"
     | TyTuple ts -> "tuple[" + (ts |> List.map pyType |> String.concat ", ") + "]"
 
 /// Helpers shared by every generated module. Builtins are aliased so that a Quod function or
@@ -40,6 +42,9 @@ _quod_ord = ord
 _quod_builtin_divmod = divmod
 _quod_ValueError = ValueError
 _quod_IndexError = IndexError
+_quod_KeyError = KeyError
+_quod_dict = dict
+_quod_frozenset = frozenset
 _quod_TypeError = TypeError
 _quod_AssertionError = AssertionError
 _quod_all = all
@@ -78,6 +83,13 @@ def _quod_at(xs, i: int):
     if not 0 <= i < _quod_len(xs):
         raise _quod_IndexError("index " + _quod_string(i) + " out of bounds (not proved: checked at run time)")
     return xs[i]
+
+
+def _quod_get(m, k):
+    # a key that is not there: Quod requires `k in m` (not proved: checked at run time)
+    if k not in m:
+        raise _quod_KeyError("key " + _quod_repr(k) + " is not in the map (not proved: checked at run time)")
+    return m[k]
 
 
 def _quod_slice(xs, lo: int, hi: int):
@@ -228,6 +240,10 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | ESlice(s, lo, hi) ->
             go s + "[" + (lo |> Option.map go |> Option.defaultValue "") + ":" + (hi |> Option.map go |> Option.defaultValue "") + "]"
         | EProj(t, k) -> go t + "[" + string k + "]"
+        | ECol(op, args) -> g.Collection(e, op, args)
+        | EQuantIn(q, v, col, body) ->
+            let f = match q with Syntax.Forall -> "_quod_all" | Syntax.Exists -> "_quod_any"
+            f + "(" + go body + " for " + pyName v + " in " + go col + ")"
         | ECons(k, xs) ->
             match e.Ty with
             | TyData d -> qualified d (caseClass d k) + "(" + (xs |> List.map go |> String.concat ", ") + ")"
@@ -283,6 +299,34 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | EConvert x when checking && e.Ty = TyChar -> "_quod_fit_char(" + go x + ")"
         | EConvert x -> (if e.Ty = TyChar then "_quod_chr(" else "_quod_ord(") + go x + ")"
 
+    /// An operation on a map (a dict) or a set (a frozenset). Values are never changed: each operation
+    /// gives a new one.
+    member g.Collection(e: TExpr, op: ColOp, args: TExpr list) : string =
+        let go = g.Expr
+        match op, args with
+        | MapOf, [ { Kind = ESeq items } ] ->
+            let entries =
+                items |> List.map (fun item ->
+                    match item.Kind with
+                    | ETuple [ k; x ] -> go k + ": " + go x
+                    | _ -> "**_quod_dict([" + go item + "])")
+            "{" + String.Join(", ", entries) + "}"
+        | SetOf, [ { Kind = ESeq items } ] -> if items.IsEmpty then "_quod_frozenset()" else "_quod_frozenset([" + String.Join(", ", items |> List.map go) + "])"
+        | Put, [ m; k; x ] -> "{**" + go m + ", " + go k + ": " + go x + "}"
+        | MapRemove, [ m; k ] ->
+            let key = g.Fresh "k"
+            "{" + key + "_k: " + key + "_v for " + key + "_k, " + key + "_v in " + go m + ".items() if " + key + "_k != " + go k + "}"
+        | SetAdd, [ s; x ] -> "(" + go s + " | _quod_frozenset([" + go x + "]))"
+        | SetRemove, [ s; x ] -> "(" + go s + " - _quod_frozenset([" + go x + "]))"
+        | Keys, [ m ] -> "_quod_frozenset(" + go m + ")"
+        | Has, [ c; k ] -> "(" + go k + " in " + go c + ")"
+        | Get, [ m; k ] -> if checking then "_quod_get(" + go m + ", " + go k + ")" else go m + "[" + go k + "]"
+        | Union, [ a; b ] -> "(" + go a + " | " + go b + ")"
+        | Inter, [ a; b ] -> "(" + go a + " & " + go b + ")"
+        | Diff, [ a; b ] -> "(" + go a + " - " + go b + ")"
+        | Subset, [ a; b ] -> "(" + go a + " <= " + go b + ")"
+        | _ -> failwith "internal: an operation on a map or a set that does not fit"
+
     /// An argument from Python as the generated code expects it: sequences as lists, tuples as
     /// tuples. A list of numbers or booleans is taken as it is (O(1)); a sequence of tuples or of
     /// sequences is rebuilt, since its elements may come as lists or tuples (O(n), at the public
@@ -297,6 +341,11 @@ type private Gen(checks: Set<string>, local: Set<string>) =
             | inner -> "[" + inner + " for _quod_x in " + term + "]"
         | TyTuple ts ->
             "(" + (ts |> List.mapi (fun k ct -> g.Normalize(ct, term + "[" + string k + "]")) |> String.concat ", ") + ")"
+        | TySet e -> "_quod_frozenset(" + (match g.Normalize(e, "_quod_x") with "_quod_x" -> term | inner -> "(" + inner + " for _quod_x in " + term + ")") + ")"
+        | TyMap(k, v) ->
+            match g.Normalize(k, "_quod_k"), g.Normalize(v, "_quod_v") with
+            | "_quod_k", "_quod_v" -> "_quod_dict(" + term + ")"
+            | nk, nv -> "{" + nk + ": " + nv + " for _quod_k, _quod_v in " + term + ".items()}"
         | _ -> term
 
     /// The test that a value's `nat`s are `>= 0`, None if it has none to test. Under a sequence,
@@ -308,9 +357,17 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | TyI32 | TyI64 ->
             let lo, hi = (boundsOf t).Value
             Some("(" + lo.ToString() + " <= " + term + " <= " + hi.ToString() + ")")
-        | TySeq e when deep ->
+        | TySeq e | TySet e when deep ->
             let x = "_quod_n" + string depth
             g.NatTest(e, x, deep, depth + 1) |> Option.map (fun inner -> "_quod_all(" + inner + " for " + x + " in " + term + ")")
+        | TyMap(k, v) when deep ->
+            let x = "_quod_n" + string depth
+            let y = "_quod_p" + string depth
+            match g.NatTest(k, x, deep, depth + 1), g.NatTest(v, y, deep, depth + 1) with
+            | None, None -> None
+            | tk, tv ->
+                let parts = [ tk; tv ] |> List.choose id
+                Some("_quod_all(" + String.Join(" and ", parts) + " for " + x + ", " + y + " in " + term + ".items())")
         | TyTuple ts ->
             match ts |> List.mapi (fun k c -> g.NatTest(c, term + "[" + string k + "]", deep, depth)) |> List.choose id with
             | [] -> None
