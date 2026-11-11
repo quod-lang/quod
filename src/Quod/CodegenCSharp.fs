@@ -67,6 +67,28 @@ let private moduleClass = new System.Threading.ThreadLocal<Map<string, string>>(
 /// fall on one name, the C# compiler says so.
 let private dataShort (name: string) = (shortName name).Replace("__", "_")
 
+/// What a C# map or set may hold, for now: keys and elements that are integers, booleans or strings
+/// (a string is a C# `string` inside a collection, which compares by value), values that are integers,
+/// booleans, maps or sets. Anything else is refused by Quod, not by the C# compiler.
+let rec private collectionKeyOk (t: Ty) =
+    match t with
+    | TyInt | TyNat | TyI32 | TyI64 | TyBool | TySeq TyChar -> true
+    | _ -> false
+
+let rec private collectionOk (t: Ty) =
+    match t with
+    | TyInt | TyNat | TyI32 | TyI64 | TyBool -> true
+    | TySet e -> collectionKeyOk e
+    | TyMap(k, v) -> collectionKeyOk k && collectionOk v
+    | _ -> false
+
+let private collectionCheck (t: Ty) =
+    let ok = match t with TyMap(k, v) -> collectionKeyOk k && collectionOk v | TySet e -> collectionKeyOk e | _ -> true
+    if not ok then
+        raise (Refused("a " + tyText t + " is not generated for C# yet: keys and elements are integers, booleans or strings, values are integers, booleans, maps or sets"))
+
+let private keyCs (t: Ty) (cs: Ty -> string) = if t = TySeq TyChar then "string" else cs t
+
 let rec csType (t: Ty) =
     match t with
     // a long, computed in checked: what is proved, or an OverflowException, never a wrong value
@@ -81,6 +103,12 @@ let rec csType (t: Ty) =
         | Some m, n -> defaultArg (moduleClass.Value.TryFind m) (pascal m) + "." + n.Replace("__", "_")
         | None, n -> (if rootClass.Value = "" then "" else rootClass.Value + ".") + n.Replace("__", "_")
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
+    | TyMap(k, v) ->
+        collectionCheck t
+        "IReadOnlyDictionary<" + keyCs k csType + ", " + csType v + ">"
+    | TySet e ->
+        collectionCheck t
+        "HashSet<" + keyCs e csType + ">"
     | TyTuple ts -> "(" + (ts |> List.map csType |> String.concat ", ") + ")"
 
 let rec private hasChar (t: Ty) =
@@ -178,6 +206,7 @@ let rec private merge (known: Ty) (other: Ty) =
     match known, other with
     | TyError, t -> t
     | TySeq a, TySeq b -> TySeq(merge a b)
+    | TyMap(k, a), TyMap(_, b) -> TyMap(k, merge a b)
     | TyTuple xs, TyTuple ys when xs.Length = ys.Length -> TyTuple(List.map2 merge xs ys)
     | t, _ -> t
 
@@ -186,6 +215,8 @@ let rec private shape (t: Ty) =
     match t with
     | TyNat | TyError -> TyInt
     | TySeq e -> TySeq(shape e)
+    | TyMap(k, v) -> TyMap(shape k, shape v)
+    | TySet e -> TySet(shape e)
     | TyTuple ts -> TyTuple(List.map shape ts)
     | t -> t
 
@@ -316,6 +347,44 @@ let private helpers =
             for (long i = lo; i < hi; i = i + 1) if (f(i)) return true;
             return false;
         }"
+      "put",
+      "private static IReadOnlyDictionary<K, V> _quod_put<K, V>(IReadOnlyDictionary<K, V> m, K k, V v)
+        {
+            var r = new Dictionary<K, V>();
+            foreach (var p in m) r[p.Key] = p.Value;
+            r[k] = v;
+            return r;
+        }"
+      "mremove",
+      "private static IReadOnlyDictionary<K, V> _quod_mremove<K, V>(IReadOnlyDictionary<K, V> m, K k)
+        {
+            var r = new Dictionary<K, V>();
+            foreach (var p in m) if (!EqualityComparer<K>.Default.Equals(p.Key, k)) r[p.Key] = p.Value;
+            return r;
+        }"
+      "mapof",
+      "private static IReadOnlyDictionary<K, V> _quod_mapof<K, V>(params KeyValuePair<K, V>[] items)
+        {
+            var r = new Dictionary<K, V>();
+            foreach (var p in items) r[p.Key] = p.Value;
+            return r;
+        }"
+      "sadd",
+      "private static HashSet<T> _quod_sadd<T>(HashSet<T> s, T x) { var r = new HashSet<T>(s); r.Add(x); return r; }"
+      "sremove",
+      "private static HashSet<T> _quod_sremove<T>(HashSet<T> s, T x) { var r = new HashSet<T>(s); r.Remove(x); return r; }"
+      "sunion",
+      "private static HashSet<T> _quod_sunion<T>(HashSet<T> a, HashSet<T> b) { var r = new HashSet<T>(a); r.UnionWith(b); return r; }"
+      "sinter",
+      "private static HashSet<T> _quod_sinter<T>(HashSet<T> a, HashSet<T> b) { var r = new HashSet<T>(a); r.IntersectWith(b); return r; }"
+      "sdiff",
+      "private static HashSet<T> _quod_sdiff<T>(HashSet<T> a, HashSet<T> b) { var r = new HashSet<T>(a); r.ExceptWith(b); return r; }"
+      "some",
+      "private static bool _quod_some<T>(IEnumerable<T> xs, Func<T, bool> f)
+        {
+            foreach (var x in xs) if (f(x)) return true;
+            return false;
+        }"
       "every",
       "private static bool _quod_every<T>(IEnumerable<T> xs, Func<T, bool> f)
         {
@@ -414,6 +483,7 @@ type private Gen(checks: Set<string>) =
             eqOrder.Add t
             match t with
             | TySeq e -> if shape e <> TyInt && e <> TyBool then g.EqName e |> ignore
+            | TyMap(_, v) -> (match shape v with TyInt | TyBool | TyI32 | TyI64 -> () | x -> g.EqName x |> ignore)
             | TyTuple ts -> for x in ts do if shape x <> TyInt && x <> TyBool then g.EqName x |> ignore
             | _ -> ()
             n
@@ -424,6 +494,48 @@ type private Gen(checks: Set<string>) =
         | TyData _ -> a + ".Equals(" + b + ")"
         | s -> g.EqName s + "(" + a + ", " + b + ")"
 
+    /// An operation on a map or a set: new values, never changed in place. A string key is a C# string.
+    member g.Collection(e: TExpr, op: ColOp, args: TExpr list) : string =
+        let key (kt: Ty) (x: TExpr) =
+            let text = g.Expr(x, kt)
+            if kt = TySeq TyChar then g.Help "text" + "(" + text + ")" else text
+        let colTy (c: TExpr) = c.Ty
+        let kOf (c: TExpr) = match c.Ty with TyMap(k, _) | TySet k -> k | _ -> TyInt
+        match op, args with
+        | MapOf, [ { Kind = ESeq items } ] ->
+            let k, v = (match e.Ty with TyMap(k, v) -> k, v | _ -> TyInt, TyInt)
+            let ck, cv = keyCs k csType, csType v
+            if items.IsEmpty then "(IReadOnlyDictionary<" + ck + ", " + cv + ">)new Dictionary<" + ck + ", " + cv + ">()"
+            else
+                let entries =
+                    items |> List.map (fun item ->
+                        match item.Kind with
+                        | ETuple [ a; b ] -> "new KeyValuePair<" + ck + ", " + cv + ">(" + key k a + ", " + g.Expr(b, v) + ")"
+                        | _ -> failwith "internal: a pair that is not written in place")
+                g.Help "mapof" + "<" + ck + ", " + cv + ">(" + String.Join(", ", entries) + ")"
+        | SetOf, [ { Kind = ESeq items } ] ->
+            let t = (match e.Ty with TySet t -> t | _ -> TyInt)
+            "new HashSet<" + keyCs t csType + ">(" + (if items.IsEmpty then "" else "new " + keyCs t csType + "[] { " + String.Join(", ", items |> List.map (key t)) + " }") + ")"
+        | Put, [ m; k; x ] ->
+            let kt, vt = (match m.Ty with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
+            g.Help "put" + "<" + keyCs kt csType + ", " + csType vt + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ", " + g.Expr(x, vt) + ")"
+        | MapRemove, [ m; k ] ->
+            let kt, vt = (match m.Ty with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
+            g.Help "mremove" + "<" + keyCs kt csType + ", " + csType vt + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ")"
+        | SetAdd, [ s; x ] -> g.Help "sadd" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
+        | SetRemove, [ s; x ] -> g.Help "sremove" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
+        | Keys, [ m ] -> "new HashSet<" + keyCs (kOf m) csType + ">(" + g.Expr(m, m.Ty) + ".Keys)"
+        | Has, [ c; k ] ->
+            match colTy c with
+            | TyMap _ -> g.Expr(c, c.Ty) + ".ContainsKey(" + key (kOf c) k + ")"
+            | _ -> g.Expr(c, c.Ty) + ".Contains(" + key (kOf c) k + ")"
+        | Get, [ m; k ] -> g.Expr(m, m.Ty) + "[" + key (kOf m) k + "]"
+        | Union, [ a; b ] -> g.Help "sunion" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
+        | Inter, [ a; b ] -> g.Help "sinter" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
+        | Diff, [ a; b ] -> g.Help "sdiff" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
+        | Subset, [ a; b ] -> g.Expr(a, a.Ty) + ".IsSubsetOf(" + g.Expr(b, a.Ty) + ")"
+        | _ -> failwith "internal: an operation on a map or a set that does not fit"
+
     member g.EqFunctions() : string list =
         [ for t in eqOrder do
               let ct = csType t
@@ -432,6 +544,10 @@ type private Gen(checks: Set<string>) =
                   | TySeq e ->
                       "if (a.Count != b.Count) return false;\n            for (int i = 0; i < a.Count; i++) if (!"
                       + g.Eq(e, "a[i]", "b[i]") + ") return false;\n            return true;"
+                  | TySet _ -> "return a.SetEquals(b);"
+                  | TyMap(_, v) ->
+                      "if (a.Count != b.Count) return false;\n            foreach (var p in a)\n            {\n                " + csType v
+                      + " o;\n                if (!b.TryGetValue(p.Key, out o) || !" + g.Eq(v, "p.Value", "o") + ") return false;\n            }\n            return true;"
                   | TyTuple ts ->
                       "return " + (ts |> List.mapi (fun k x -> g.Eq(x, "a.Item" + string (k + 1), "b.Item" + string (k + 1))) |> String.concat " && ") + ";"
                   | TyData _ -> "return a.Equals(b);"
@@ -507,6 +623,22 @@ type private Gen(checks: Set<string>) =
                 text
             | _ -> failwith "a match on no data type"
         | ELen s -> "(long)" + g.Expr(s, s.Ty) + ".Count"
+        | ECol(op, args) -> g.Collection(e, op, args)
+        | EQuantIn(q, v, col, body) ->
+            let f = match q with Syntax.Forall -> g.Help "every" | Syntax.Exists -> g.Help "some"
+            let elemTy = match col.Ty with TySet t -> t | _ -> TyInt
+            let tcol = g.Expr(col, col.Ty)
+            let mutable text = ""
+            g.Scoped(fun () ->
+                let name = g.Bind(v, elemTy)
+                if elemTy = TySeq TyChar then
+                    // inside a set, a string is a C# string: the variable of the body is Quod's
+                    g.Help "str" |> ignore
+                    g.Help "with" |> ignore
+                    text <- f + "<string>(" + tcol + ", _quod_s => _quod_with(_quod_str(_quod_s), " + name + " => " + g.Expr(body, TyBool) + "))"
+                else
+                    text <- f + "<" + csType elemTy + ">(" + tcol + ", " + name + " => " + g.Expr(body, TyBool) + ")")
+            text
         | ECall(f, args) -> g.Call(f, args)
         // computed without bounds: C# would wrap, in silence, a value that no proof says fits
         | ENeg _ | EArith _ when g.Checking && isBounded e.Ty ->
@@ -611,6 +743,19 @@ type private Gen(checks: Set<string>) =
             |> Option.map (fun inner ->
                 g.Help "every" |> ignore
                 "_quod_every<" + csType e + ">(" + term + ", " + x + " => " + inner + ")")
+        | TySet e when deep ->
+            let x = "_quod_n" + string depth
+            g.NatTest(e, x, deep, depth + 1)
+            |> Option.map (fun inner ->
+                g.Help "every" |> ignore
+                "_quod_every<" + csType e + ">(" + term + ", " + x + " => " + inner + ")")
+        | TyMap(k, v) when deep ->
+            let x = "_quod_n" + string depth
+            match g.NatTest(k, x + ".Key", deep, depth + 1), g.NatTest(v, x + ".Value", deep, depth + 1) with
+            | None, None -> None
+            | tk, tv ->
+                g.Help "every" |> ignore
+                Some("_quod_every<KeyValuePair<" + keyCs k csType + ", " + csType v + ">>(" + term + ", " + x + " => " + String.Join(" && ", [ tk; tv ] |> List.choose id) + ")")
         | TyTuple ts ->
             match ts |> List.mapi (fun k c -> g.NatTest(c, term + ".Item" + string (k + 1), deep, depth)) |> List.choose id with
             | [] -> None
@@ -709,7 +854,7 @@ let rec private hasIntegerList (t: Ty) =
 let rec private narrowType (narrow: string) (t: Ty) =
     match t with
     | TyInt | TyNat | TyError -> narrow
-    | TyBool | TyChar | TyI32 | TyI64 | TyData _ -> csType t
+    | TyBool | TyChar | TyI32 | TyI64 | TyData _ | TyMap _ | TySet _ -> csType t
     | TySeq e -> "IReadOnlyList<" + narrowType narrow e + ">"
     | TyTuple ts -> "(" + (ts |> List.map (narrowType narrow) |> String.concat ", ") + ")"
 
@@ -718,7 +863,7 @@ let rec private narrowType (narrow: string) (t: Ty) =
 let rec private widen (narrow: string) (t: Ty) (term: string) (depth: int) : string =
     match t with
     | TyInt | TyNat | TyError -> "(long)" + term
-    | TyBool | TyChar | TyI32 | TyI64 | TyData _ -> term
+    | TyBool | TyChar | TyI32 | TyI64 | TyData _ | TyMap _ | TySet _ -> term
     | TySeq e ->
         let x = "_quod_x" + string depth
         "new _QuodView<" + narrowType narrow e + ", " + csType e + ">(" + term + ", " + x + " => " + widen narrow e x (depth + 1) + ")"
