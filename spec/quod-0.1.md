@@ -208,11 +208,12 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 - **Build:** `map_of([(k1, v1), (k2, v2)])` and `set_of([a, b])` take a list written in place (a later pair wins over an earlier one with the same key). The empty ones are `map_of([])` and `set_of([])`, and their type comes from where they are used (`let mut m: map<string, nat> = map_of([]);`). A bigger one is built with `put` and `add`.
 - **Read:** `m[k]` needs `k in m`, an obligation like an index in bounds. `k in m` and `x in s` are booleans. `len(m)` and `len(s)` are the number of entries.
 - **Change** (a new value, never an in-place change as far as a program can tell): `put(m, k, v)`, `remove(m, k)`, `add(s, x)`, `remove(s, x)`, `keys(m)` (a `set<K>`), and `union`, `inter`, `diff` and `subset` for two sets.
+- **Traverse:** `sorted(s)` and `sorted_keys(m)` give a `seq` in ascending order, each element once; a loop walks it with an index. The order is by value for numbers and `char`, `false` before `true`, and for strings by scalar values one after the other. There is no other traversal, so no result depends on the order of insertion or of a hash. For numbers and chars the solver knows the order; for strings and booleans a program cannot compare them, so a contract cannot rely on it.
 - **Quantify** over the elements of a set in a contract: `forall x in s: ...`, `exists x in s: ...` (for a map, `keys(m)`).
-- **Proof:** the solver knows a map by `has`, `get` and its size, as it knows a sequence by `len` and `nth`. The size of a `put` and of a `remove` is exact. For `union`, `inter` and `diff` only inequalities are known, so a contract that depends on their exact size is not decided.
+- **Proof:** the solver knows a map by `has`, `get` and its size, as it knows a sequence by `len` and `nth`. The size of a `put` and of a `remove` is exact, and `len(union(a, b)) + len(inter(a, b)) == len(a) + len(b)` and `len(diff(a, b)) == len(a) - len(inter(a, b))` hold.
 - **Completeness:** two maps are different when they differ by a key or by the value of a key; a contract on a map result is checked like any other.
 - **Cost:** `m = put(m, k, v)` and `s = add(s, x)` on a local that nothing else sees change it in place, so that a loop that builds a map is linear.
-- **Not yet:** a traversal in code (the elements in order), keys that are tuples, structs or enums.
+- **Not yet:** keys that are tuples, structs or enums.
 - **Python:** a `dict` and a `frozenset` (a local set built in a loop is a `set` meanwhile); a Python caller passes a `dict`, and any iterable for a set.
 - **C#:** `IReadOnlyDictionary<K, V>` and `HashSet<T>`; a string key is a C# `string`. For now keys and elements are integers, booleans or strings, values are integers, booleans, maps or sets: anything else, and a struct or an enum holding a map or a set, is refused by Quod when it generates the C#. A caller must not change a map or a set it passed.
 

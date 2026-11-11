@@ -322,6 +322,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         | SetAdd, [ s; x ] -> VSet(addElement (items s) (go x))
         | SetRemove, [ s; x ] -> (let key = go x in VSet(items s |> List.filter (fun y -> compareValue y key <> 0)))
         | Keys, [ m ] -> VSet(entries m |> List.map fst)
+        | Sorted, [ s ] -> VSeq(items s)
         | Has, [ c; k ] ->
             let key = go k
             match go c with

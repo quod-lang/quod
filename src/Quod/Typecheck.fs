@@ -648,6 +648,22 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
             | t ->
                 c.Error(a.Span, ctx.FnName, name + "() needs sets, this is a " + tyText t)
                 fail ()
+        | Call("sorted", [ s ]) when not (fns.ContainsKey "sorted") ->
+            let ts = c.Expr(s, ctx, None)
+            match ts.Ty with
+            | TySet t -> mk (ECol(Sorted, [ ts ])) (TySeq t)
+            | TyError -> fail ()
+            | t ->
+                c.Error(s.Span, ctx.FnName, "sorted() needs a set (for a map, 'sorted_keys(m)'), this is a " + tyText t)
+                fail ()
+        | Call("sorted_keys", [ m ]) when not (fns.ContainsKey "sorted_keys") ->
+            let tm = c.Expr(m, ctx, None)
+            match tm.Ty with
+            | TyMap(kt, _) -> mk (ECol(Sorted, [ { Kind = ECol(Keys, [ tm ]); Ty = TySet kt; Span = m.Span } ])) (TySeq kt)
+            | TyError -> fail ()
+            | t ->
+                c.Error(m.Span, ctx.FnName, "sorted_keys() needs a map, this is a " + tyText t)
+                fail ()
         | Member(k, col) ->
             let tc = c.Expr(col, ctx, None)
             match tc.Ty with

@@ -9,7 +9,7 @@ let rec fresh (e: TExpr) =
     match e.Kind with
     | ESeq _ | EConcat _ | ESlice _ -> true
     // a map or a set that an operation just made: a new one, which nothing else refers to
-    | ECol((MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Union | Inter | Diff), _) -> true
+    | ECol((MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Union | Inter | Diff | Sorted), _) -> true
     | EIf(_, a, b) -> fresh a && fresh b
     | _ -> false
 

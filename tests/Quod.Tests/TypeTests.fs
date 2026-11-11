@@ -163,3 +163,9 @@ let ``maps and sets are typed, and their keys must be ordered`` () =
 [<Fact>]
 let ``a user function may be named like a map operation`` () =
     assertOk "fn put(x: int) -> int { x + 1 }\nfn keys(x: int) -> int { put(x) }"
+
+[<Fact>]
+let ``sorted gives a sequence from a set or from the keys of a map`` () =
+    assertOk "fn f(s: set<int>, m: map<string, int>) -> nat { len(sorted(s)) + len(sorted_keys(m)) }"
+    assertError "needs a set" "fn f(xs: seq<int>) -> seq<int> { sorted(xs) }"
+    assertError "needs a map" "fn f(s: set<int>) -> seq<int> { sorted_keys(s) }"

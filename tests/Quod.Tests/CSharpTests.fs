@@ -365,3 +365,22 @@ let ``what C# cannot hold yet is refused by Quod`` () =
 fn f(b: Box) -> nat { len(b.items) }") Set.empty defaultOptions with
     | Result.Error why -> Assert.Contains("holds a map or a set", why)
     | Ok _ -> failwith "generated"
+
+[<Fact>]
+let ``sorted runs in C#, in the order of scalar values for strings`` () =
+    let src =
+        "fn first_int(s: set<int>) -> int requires len(s) > 0 { sorted(s)[0] }\n"
+        + "fn last_key(m: map<int, int>) -> int requires len(m) > 0 { sorted_keys(m)[len(m) - 1] }\n"
+        + "fn count_sorted(s: set<string>) -> nat { len(sorted(s)) }\n"
+        + "fn first_code(s: set<string>) -> nat requires len(s) > 0 && len(sorted(s)[0]) > 0 { code(sorted(s)[0][0]) }\n"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"first\", () => T0.P.FirstInt(new HashSet<long> { 5L, -2L, 9L }));"
+              "        Case(\"last key\", () => T0.P.LastKey(new Dictionary<long, long> { { 4L, 1L }, { 7L, 2L }, { 1L, 3L } }));"
+              "        Case(\"count\", () => T0.P.CountSorted(new HashSet<string> { \"b\", \"a\", \"c\" }));"
+              // U+FF5E (one UTF-16 unit) comes before U+1F600 (two) by scalar value, and after it in UTF-16 order
+              "        Case(\"first by scalar\", () => T0.P.FirstCode(new HashSet<string> { \"\\uFF5E\", \"\\uD83D\\uDE00\" }));" ]
+    Assert.Equal("-2", got.["first"])
+    Assert.Equal("7", got.["last key"])
+    Assert.Equal("3", got.["count"])
+    Assert.Equal("65374", got.["first by scalar"])

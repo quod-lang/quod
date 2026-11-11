@@ -347,6 +347,9 @@ let mapsProgram =
     + "fn with_one(s: set<int>, x: int) -> set<int> { add(s, x) }\n"
     + "fn without_one(s: set<int>, x: int) -> set<int> { remove(s, x) }\n"
     + "fn same(a: map<int, int>, b: map<int, int>) -> bool { a == b }\n"
+    + "fn ascending(s: set<int>) -> seq<int> { sorted(s) }\n"
+    + "fn ascending_keys(m: map<int, int>) -> seq<int> { sorted_keys(m) }\n"
+    + "fn first_value(m: map<int, int>) -> int requires len(m) > 0 { m[sorted_keys(m)[0]] }\n"
     + "fn small() -> map<int, int> { map_of([(2, 20), (1, 10), (2, 22)]) }\n"
 
 [<Fact>]

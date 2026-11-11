@@ -76,7 +76,7 @@ type LogicOp =
 /// set, element; Keys: map; Has: collection, key or element (`k in m`); Get: map, key (`m[k]`);
 /// Union, Inter, Diff, Subset: two sets.
 type ColOp =
-    | MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Has | Get | Union | Inter | Diff | Subset
+    | MapOf | SetOf | Put | MapRemove | SetAdd | SetRemove | Keys | Has | Get | Union | Inter | Diff | Subset | Sorted
 
 type TExpr = { Kind: TExprKind; Ty: Ty; Span: Span }
 
@@ -260,7 +260,7 @@ let rec toSyntax (e: TExpr) : Syntax.Expr =
         let name =
             match op with
             | MapOf -> "map_of" | SetOf -> "set_of" | Put -> "put" | MapRemove | SetRemove -> "remove" | SetAdd -> "add"
-            | Keys -> "keys" | Union -> "union" | Inter -> "inter" | Diff -> "diff" | Subset -> "subset" | Has -> "has" | Get -> "get"
+            | Keys -> "keys" | Sorted -> "sorted" | Union -> "union" | Inter -> "inter" | Diff -> "diff" | Subset -> "subset" | Has -> "has" | Get -> "get"
         mk (Syntax.Call(name, List.map u args))
     | EQuantIn(q, v, c, body) -> mk (Syntax.QuantIn(q, v, u c, u body))
     | ECall(f, args) -> mk (Syntax.Call(f, List.map u args))

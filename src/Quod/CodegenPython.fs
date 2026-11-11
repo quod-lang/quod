@@ -44,6 +44,7 @@ _quod_ValueError = ValueError
 _quod_IndexError = IndexError
 _quod_KeyError = KeyError
 _quod_set = set
+_quod_sorted = sorted
 _quod_dict = dict
 _quod_frozenset = frozenset
 _quod_TypeError = TypeError
@@ -320,6 +321,7 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | SetAdd, [ s; x ] -> "(" + go s + " | _quod_frozenset([" + go x + "]))"
         | SetRemove, [ s; x ] -> "(" + go s + " - _quod_frozenset([" + go x + "]))"
         | Keys, [ m ] -> "_quod_frozenset(" + go m + ")"
+        | Sorted, [ s ] -> "_quod_sorted(" + go s + ")"
         | Has, [ c; k ] -> "(" + go k + " in " + go c + ")"
         | Get, [ m; k ] -> if checking then "_quod_get(" + go m + ", " + go k + ")" else go m + "[" + go k + "]"
         | Union, [ a; b ] -> "(" + go a + " | " + go b + ")"

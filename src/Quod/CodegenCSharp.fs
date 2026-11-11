@@ -369,6 +369,20 @@ let private helpers =
             foreach (var p in items) r[p.Key] = p.Value;
             return r;
         }"
+      "sorted",
+      "private static IReadOnlyList<T> _quod_sorted<T>(HashSet<T> s) { var r = new List<T>(s); r.Sort(); return r; }"
+      "sortedstr",
+      "private static IReadOnlyList<IReadOnlyList<int>> _quod_sortedstr(HashSet<string> s)
+        {
+            var r = new List<IReadOnlyList<int>>();
+            foreach (var x in s) r.Add(_quod_str(x));
+            r.Sort((a, b) =>
+            {
+                for (int i = 0; i < a.Count && i < b.Count; i++) if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+                return a.Count.CompareTo(b.Count);
+            });
+            return r;
+        }"
       "mcopy",
       "private static Dictionary<K, V> _quod_mcopy<K, V>(IReadOnlyDictionary<K, V> m) { var r = new Dictionary<K, V>(); foreach (var p in m) r[p.Key] = p.Value; return r; }"
       "sadd",
@@ -527,6 +541,12 @@ type private Gen(checks: Set<string>) =
         | SetAdd, [ s; x ] -> g.Help "sadd" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
         | SetRemove, [ s; x ] -> g.Help "sremove" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
         | Keys, [ m ] -> "new HashSet<" + keyCs (kOf m) csType + ">(" + g.Expr(m, m.Ty) + ".Keys)"
+        | Sorted, [ s ] ->
+            match kOf s with
+            | TySeq TyChar ->
+                g.Help "text" |> ignore
+                g.Help "sortedstr" + "(" + g.Expr(s, s.Ty) + ")"
+            | k -> g.Help "sorted" + "<" + csType k + ">(" + g.Expr(s, s.Ty) + ")"
         | Has, [ c; k ] ->
             match colTy c with
             | TyMap _ -> g.Expr(c, c.Ty) + ".ContainsKey(" + key (kOf c) k + ")"
@@ -647,7 +667,7 @@ type private Gen(checks: Set<string>) =
                 let name = g.Bind(v, elemTy)
                 if elemTy = TySeq TyChar then
                     // inside a set, a string is a C# string: the variable of the body is Quod's
-                    g.Help "str" |> ignore
+                    g.Help "text" |> ignore
                     g.Help "with" |> ignore
                     text <- f + "<string>(" + tcol + ", _quod_s => _quod_with(_quod_str(_quod_s), " + name + " => " + g.Expr(body, TyBool) + "))"
                 else

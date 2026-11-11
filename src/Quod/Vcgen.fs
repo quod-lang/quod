@@ -162,12 +162,46 @@ let private setAxioms (elem: Ty) : string list =
           ("(and (<= (" + size + " (" + union + " a b)) (+ (" + size + " a) (" + size + " b))) (>= (" + size + " (" + union + " a b)) (" + size + " a)) (>= (" + size + " (" + union + " a b)) (" + size + " b)))")
           ("(" + size + " (" + union + " a b))")
       forall ("(a " + s + ") (b " + s + ")") ("(and (<= (" + size + " (" + inter + " a b)) (" + size + " a)) (<= (" + size + " (" + inter + " a b)) (" + size + " b)))") ("(" + size + " (" + inter + " a b))")
+      // the exact sizes: a union and an intersection hold the elements of both, once each in all
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(= (+ (" + size + " (" + union + " a b)) (" + size + " (" + inter + " a b))) (+ (" + size + " a) (" + size + " b)))")
+          ("(" + size + " (" + union + " a b))")
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(= (" + size + " (" + diff + " a b)) (- (" + size + " a) (" + size + " (" + inter + " a b))))")
+          ("(" + size + " (" + diff + " a b))")
       forall ("(a " + s + ") (b " + s + ")")
           ("(and (<= (" + size + " (" + diff + " a b)) (" + size + " a)) (>= (" + size + " (" + diff + " a b)) (- (" + size + " a) (" + size + " b))))")
           ("(" + size + " (" + diff + " a b))")
       forall ("(a " + s + ") (b " + s + ")")
           ("(and (= (" + subset + " a b) (forall ((x " + e + ")) (=> (" + has + " a x) (" + has + " b x)))) (=> (" + subset + " a b) (<= (" + size + " a) (" + size + " b))))")
           ("(" + subset + " a b)") ]
+
+/// The ascending sequence of a set: as long as the set, with its elements and no other, each once. For
+/// numbers and chars it is strictly increasing; for strings and booleans the solver is not told the
+/// order (a program cannot compare them), so a contract cannot rely on it.
+let private sortedAxioms (elem: Ty) : string list =
+    let t = TySet elem
+    let st = TySeq elem
+    let s, e, q = sortOf t, sortOf elem, sortOf st
+    let sorted, idx = colOp "sorted" t, colOp "sidx" t
+    let has, size = colOp "has" t, colOp "size" t
+    let len, nth = seqOp "len" st, seqOp "nth" st
+    let forall = forallPat
+    let ordered = (match elem with TyInt | TyNat | TyI32 | TyI64 | TyChar -> true | _ -> false)
+    [ "(declare-fun " + sorted + " (" + s + ") " + q + ")"
+      "(declare-fun " + idx + " (" + s + " " + e + ") Int)"
+      forall ("(a " + s + ")") ("(= (" + len + " (" + sorted + " a)) (" + size + " a))") ("(" + sorted + " a)")
+      forall ("(a " + s + ") (i Int)")
+          ("(=> (and (<= 0 i) (< i (" + size + " a))) (" + has + " a (" + nth + " (" + sorted + " a) i)))")
+          ("(" + nth + " (" + sorted + " a) i)")
+      forall ("(a " + s + ") (x " + e + ")")
+          ("(=> (" + has + " a x) (and (<= 0 (" + idx + " a x)) (< (" + idx + " a x) (" + size + " a)) (= (" + nth + " (" + sorted + " a) (" + idx + " a x)) x)))")
+          ("(" + has + " a x)") ]
+    @ (if ordered then
+         [ forall ("(a " + s + ") (i Int) (j Int)")
+               ("(=> (and (<= 0 i) (< i j) (< j (" + size + " a))) (< (" + nth + " (" + sorted + " a) i) (" + nth + " (" + sorted + " a) j)))")
+               ("(" + nth + " (" + sorted + " a) i) (" + nth + " (" + sorted + " a) j)") ]
+       else [])
 
 /// Declarations and axioms for the maps from `key` to `value`, and `keys`, their set of keys.
 let private mapAxioms (key: Ty) (value: Ty) : string list =
@@ -1022,6 +1056,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         | SetAdd, [ s; x ] -> "(" + colOp "add" t + " " + go s + " " + go x + ")"
         | SetRemove, [ s; x ] -> "(" + colOp "remove" t + " " + go s + " " + go x + ")"
         | Keys, [ m ] -> "(" + colOp "keys" m.Ty + " " + go m + ")"
+        | Sorted, [ s ] -> "(" + colOp "sorted" s.Ty + " " + go s + ")"
         | Has, [ c; k ] -> "(" + colOp "has" c.Ty + " " + go c + " " + go k + ")"
         | Get, [ m; k ] ->
             let tm, tk = go m, go k
@@ -1568,6 +1603,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let elems = ResizeArray<Ty>()
         let maps = ResizeArray<Ty * Ty>()
         let sets = ResizeArray<Ty>()
+        let sorteds = ResizeArray<Ty>()
         let datas = ResizeArray<DataDecl>()
         // tuples and data types can hold each other: each is declared after what it holds
         let ordered = ResizeArray<Choice<Ty list, DataDecl>>()
@@ -1600,6 +1636,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let rec visitE (e: TExpr) =
             visit e.Ty
             match e.Kind with
+            | ECol(Sorted, [ s ]) ->
+                visitE s
+                match s.Ty with
+                | TySet el -> if not (sorteds |> Seq.exists (fun x -> tySig x = tySig el)) then sorteds.Add el
+                | _ -> ()
             | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter visitE xs
             | EQuantIn(_, _, a, b) -> visitE a; visitE b
             | EMatch(a, arms) -> visitE a; arms |> List.iter (fun (_, _, b) -> visitE b)
@@ -1649,6 +1690,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             for line in setAxioms e do z3.Send line
         for (k, x) in maps do
             for line in mapAxioms k x do z3.Send line
+        for el in sorteds do
+            for line in sortedAxioms el do z3.Send line
         // Every function is an SMT function symbol. A pure function returns the same result for
         // the same arguments, so this is sound even for statement functions, which callers know
         // through their contract only.

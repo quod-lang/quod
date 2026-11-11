@@ -381,3 +381,23 @@ let ``a map built in a loop keeps what the invariants say`` () =
 [<Fact>]
 let ``a false claim about a map is refused`` () =
     assertRefuted "postcondition" "fn f(m: map<int, int>, k: int) -> map<int, int> ensures len(result) == len(m) { put(m, k, 1) }" |> ignore
+
+[<Fact>]
+let ``the sorted sequence of a set holds its elements, once each, in increasing order`` () =
+    assertProved
+        ("fn ordered(s: set<int>) -> seq<int>
+"
+         + "  ensures len(result) == len(s)
+"
+         + "  ensures forall i in 0..len(result): result[i] in s
+"
+         + "  ensures forall i in 0..len(result): forall j in i + 1..len(result): result[i] < result[j]
+"
+         + "  ensures forall x in s: exists i in 0..len(result): result[i] == x
+"
+         + "{ sorted(s) }
+"
+         + "fn smallest(s: set<int>) -> int requires len(s) > 0 ensures result in s ensures forall x in s: result <= x { sorted(s)[0] }
+"
+         + "fn exact(a: set<int>, b: set<int>) -> nat ensures result == len(a) + len(b) ensures len(union(a, b)) + len(inter(a, b)) == len(a) + len(b) ensures len(diff(a, b)) == len(a) - len(inter(a, b)) { len(a) + len(b) }
+")
