@@ -63,7 +63,9 @@ jobs:
       - name: A weak contract is refused
         run: |
           cd repo
-          if "$QUOD_DIR/quod" check examples/bugs/*.quod > /dev/null 2>&1; then echo "a bug example was accepted"; exit 1; fi
+          for f in examples/bugs/*.quod; do
+            if "$QUOD_DIR/quod" check "$f" > /dev/null 2>&1; then echo "$f was accepted"; exit 1; fi
+          done
 
       - name: Build for Python and run
         run: |
