@@ -83,5 +83,5 @@ jobs:
 
       - name: MCP server answers initialize
         run: |
-          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' | timeout 20 "$QUOD_DIR/quod" mcp | head -c 400 | tee mcp.txt
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' | "$QUOD_DIR/quod" mcp | head -c 400 | tee mcp.txt
           grep -q '"result"' mcp.txt
