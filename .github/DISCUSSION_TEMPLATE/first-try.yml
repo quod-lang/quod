@@ -1,0 +1,42 @@
+# Category "First try" of the Discussions (its slug must be first-try). Same five questions as .github/ISSUE_TEMPLATE/first-try.yml.
+title: "First try: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying Quod. Nothing here is a test of you: every place where you hesitated, guessed or got stuck is a bug in the README or the compiler, and that is what I am looking for. Short answers are fine.
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup
+      description: Operating system, Quod version (`quod --version`), and about how long you spent.
+      placeholder: "Windows 11, quod 0.4.1, 40 minutes"
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: 1. Where did you get stuck, hesitate, or have to guess?
+      description: Install, first `quod check`, the weak-contract example, writing your own program. A command that did not work, with the exact message, is the most useful thing.
+    validations:
+      required: true
+  - type: textarea
+    id: program
+    attributes:
+      label: 2. What did you try to write, and did it work?
+      description: Paste your program or contract if you can. "I did not get that far" is an answer.
+  - type: textarea
+    id: message
+    attributes:
+      label: 3. Did a message from the compiler confuse you?
+      description: Paste it. Was it clear what to change?
+  - type: textarea
+    id: csharp
+    attributes:
+      label: 4. If you read C#: would you accept the generated C# in a code base?
+      description: What looked strange or hard to use? (`quod build file.quod --target csharp`; Quod's `int` is a checked `long`.)
+  - type: textarea
+    id: again
+    attributes:
+      label: 5. What would make you use it again, or stop?
+      description: Be as blunt as you like.
