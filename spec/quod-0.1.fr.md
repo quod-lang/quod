@@ -199,7 +199,7 @@ fn total_loop(xs: seq<int>) -> int
 
 ### Dictionnaires et ensembles
 
-`map<K, V>` et `set<T>` sont finis et immuables, égaux quand ils contiennent les mêmes entrées, quel que soit l'ordre de construction. **Les clés et les éléments sont d'un type ordonné** : `int`, `nat`, `i32`, `i64`, `char`, `bool`, `string` (pas encore les tuples, structures et énumérations). Les valeurs sont de n'importe quel type.
+`map<K, V>` et `set<T>` sont finis et immuables, égaux quand ils contiennent les mêmes entrées, quel que soit l'ordre de construction. **Les clés et les éléments sont d'un type ordonné** : `int`, `nat`, `i32`, `i64`, `char`, `bool`, `string`, et les tuples, structures et énumérations faits de ceux-là. Les valeurs sont de n'importe quel type.
 
 ```rust
 fn price(tariffs: map<string, i64>, code: string) -> i64
@@ -211,14 +211,13 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 - **Construire :** `map_of([(k1, v1), (k2, v2)])` et `set_of([a, b])` prennent une liste écrite sur place (une paire plus tardive l'emporte sur une plus ancienne de même clé). Les vides sont `map_of([])` et `set_of([])`, dont le type vient de l'endroit où ils servent (`let mut m: map<string, nat> = map_of([]);`). Un plus grand se construit avec `put` et `add`.
 - **Lire :** `m[k]` exige `k in m`, une obligation comme un indice dans les bornes. `k in m` et `x in s` sont des booléens. `len(m)` et `len(s)` donnent le nombre d'entrées.
 - **Changer** (une valeur nouvelle, jamais un changement sur place pour ce que voit un programme) : `put(m, k, v)`, `remove(m, k)`, `add(s, x)`, `remove(s, x)`, `keys(m)` (un `set<K>`), et `union`, `inter`, `diff` et `subset` pour deux ensembles.
-- **Parcourir :** `sorted(s)` et `sorted_keys(m)` donnent une `seq` par ordre croissant, chaque élément une fois ; une boucle la parcourt avec un indice. L'ordre est celui des valeurs pour les nombres et les `char`, `false` avant `true`, et pour les chaînes celui des valeurs scalaires l'une après l'autre. Il n'y a pas d'autre parcours : aucun résultat ne dépend de l'ordre d'insertion ou d'un hachage. Pour les nombres et les caractères le solveur connaît l'ordre ; pour les chaînes et les booléens un programme ne peut pas les comparer, un contrat ne peut donc pas s'y appuyer.
+- **Parcourir :** `sorted(s)` et `sorted_keys(m)` donnent une `seq` par ordre croissant, chaque élément une fois ; une boucle la parcourt avec un indice. L'ordre est celui des valeurs pour les nombres et les `char`, `false` avant `true`, pour les chaînes celui des valeurs scalaires l'une après l'autre, et pour les tuples et structures champ par champ. Une énumération peut être une clé mais n'est pas triée. Il n'y a pas d'autre parcours : aucun résultat ne dépend de l'ordre d'insertion ou d'un hachage. Pour les nombres et les caractères le solveur connaît l'ordre ; pour les chaînes et les booléens un programme ne peut pas les comparer, un contrat ne peut donc pas s'y appuyer.
 - **Quantifier** sur les éléments d'un ensemble dans un contrat : `forall x in s: ...`, `exists x in s: ...` (pour un dictionnaire, `keys(m)`).
 - **Preuve :** le solveur connaît un dictionnaire par `has`, `get` et sa taille, comme il connaît une séquence par `len` et `nth`. La taille d'un `put` et d'un `remove` est exacte, et `len(union(a, b)) + len(inter(a, b)) == len(a) + len(b)` et `len(diff(a, b)) == len(a) - len(inter(a, b))` valent.
 - **Complétude :** deux dictionnaires diffèrent par une clé ou par la valeur d'une clé ; un contrat sur un résultat dictionnaire se contrôle comme les autres.
 - **Coût :** `m = put(m, k, v)` et `s = add(s, x)` sur une locale que rien d'autre ne voit la changent sur place, de sorte qu'une boucle qui construit un dictionnaire est linéaire.
-- **Pas encore :** les clés qui sont des tuples, structures ou énumérations.
 - **Python :** un `dict` et un `frozenset` (un ensemble local construit dans une boucle est un `set` entre-temps) ; un appelant Python passe un `dict`, et n'importe quel itérable pour un ensemble.
-- **C# :** `IReadOnlyDictionary<K, V>` et `HashSet<T>` ; une clé chaîne est un `string` C#. Pour l'instant clés et éléments sont des entiers, booléens ou chaînes, les valeurs des entiers, booléens, dictionnaires ou ensembles : le reste, et une structure ou énumération qui contient un dictionnaire ou un ensemble, est refusé par Quod quand il génère le C#. Un appelant ne doit pas modifier un dictionnaire ou un ensemble qu'il a passé.
+- **C# :** `IReadOnlyDictionary<K, V>` et `HashSet<T>` ; une clé chaîne est un `string` C#. Pour l'instant clés et éléments sont des entiers, booléens, chaînes, tuples de nombres et de booléens, structures et énumérations ; les valeurs des entiers, booléens, tuples de ceux-là, structures, énumérations, dictionnaires ou ensembles. `sorted` est généré pour les nombres, booléens, chaînes et tuples de nombres et de booléens, pas encore pour les structures. Tout le reste, le reste, et une structure ou énumération qui contient un dictionnaire ou un ensemble, est refusé par Quod quand il génère le C#. Un appelant ne doit pas modifier un dictionnaire ou un ensemble qu'il a passé.
 
 ### Modules
 

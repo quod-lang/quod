@@ -84,6 +84,22 @@ let rec compareValue (a: Value) (b: Value) : int =
             | _, [] -> 1
             | x :: xt, y :: yt -> (match compareValue x y with 0 -> go xt yt | c -> c)
         go xs ys
+    | VTuple xs, VTuple ys ->
+        let rec go (xs: Value list) (ys: Value list) =
+            match xs, ys with
+            | x :: xt, y :: yt -> (match compareValue x y with 0 -> go xt yt | c -> c)
+            | _ -> 0
+        go xs ys
+    // a struct: its fields in turn; two cases of an enum: by name, which is only a canonical order
+    | VData(a, xs), VData(b, ys) ->
+        match compare a b with
+        | 0 ->
+            let rec go (xs: Value list) (ys: Value list) =
+                match xs, ys with
+                | x :: xt, y :: yt -> (match compareValue x y with 0 -> go xt yt | c -> c)
+                | _ -> 0
+            go xs ys
+        | c -> c
     | _ -> 0
 
 let putEntry (entries: (Value * Value) list) (k: Value) (v: Value) =

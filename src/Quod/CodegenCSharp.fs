@@ -73,11 +73,15 @@ let private dataShort (name: string) = (shortName name).Replace("__", "_")
 let rec private collectionKeyOk (t: Ty) =
     match t with
     | TyInt | TyNat | TyI32 | TyI64 | TyBool | TySeq TyChar -> true
+    // a tuple of numbers and booleans compares by value, a class by its Equals and GetHashCode
+    | TyTuple ts -> ts |> List.forall (fun x -> match x with TyInt | TyNat | TyI32 | TyI64 | TyBool -> true | _ -> false)
+    | TyData _ -> true
     | _ -> false
 
 let rec private collectionOk (t: Ty) =
     match t with
-    | TyInt | TyNat | TyI32 | TyI64 | TyBool -> true
+    | TyInt | TyNat | TyI32 | TyI64 | TyBool | TyData _ -> true
+    | TyTuple ts -> ts |> List.forall (fun x -> match x with TyInt | TyNat | TyI32 | TyI64 | TyBool -> true | _ -> false)
     | TySet e -> collectionKeyOk e
     | TyMap(k, v) -> collectionKeyOk k && collectionOk v
     | _ -> false
@@ -543,6 +547,9 @@ type private Gen(checks: Set<string>) =
         | Keys, [ m ] -> "new HashSet<" + keyCs (kOf m) csType + ">(" + g.Expr(m, m.Ty) + ".Keys)"
         | Sorted, [ s ] ->
             match kOf s with
+            | TyData _ -> raise (Refused("sorted() of structs is not generated for C# yet"))
+            | TyTuple ts when ts |> List.exists (fun x -> match x with TyInt | TyNat | TyI32 | TyI64 | TyBool -> false | _ -> true) ->
+                raise (Refused("sorted() of tuples is generated for C# only when they hold numbers and booleans"))
             | TySeq TyChar ->
                 g.Help "text" |> ignore
                 g.Help "sortedstr" + "(" + g.Expr(s, s.Ty) + ")"

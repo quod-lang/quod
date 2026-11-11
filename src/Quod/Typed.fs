@@ -172,10 +172,22 @@ let shortName (n: string) =
 /// The keys of a map and the elements of a set are of an ordered type: the integers, `char`, `bool`
 /// and `string`. An order gives a canonical value, a traversal that does not depend on the backend, and a
 /// translation to C without a collector (design note maps-ensembles).
-let isKeyType (t: Ty) =
+let rec isKeyType (t: Ty) =
     match t with
     | TyInt | TyNat | TyI32 | TyI64 | TyChar | TyBool | TyError -> true
     | TySeq TyChar -> true
+    | TyTuple ts -> List.forall isKeyType ts
+    | TyData d -> d.DataCases |> List.forall (fun c -> c.Fields |> List.forall (fun (_, ft) -> isKeyType ft))
+    | _ -> false
+
+/// What `sorted` can put in order: numbers, chars, booleans, strings, and the tuples and structs of those.
+/// An enum is a key, and is not sorted: which case comes first would be a choice nobody asked for.
+let rec isSortable (t: Ty) =
+    match t with
+    | TyInt | TyNat | TyI32 | TyI64 | TyChar | TyBool | TyError -> true
+    | TySeq TyChar -> true
+    | TyTuple ts -> List.forall isSortable ts
+    | TyData d -> d.IsStruct && d.DataCases |> List.forall (fun c -> c.Fields |> List.forall (fun (_, ft) -> isSortable ft))
     | _ -> false
 
 let boundsOf (t: Ty) : (bigint * bigint) option =

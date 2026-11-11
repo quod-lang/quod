@@ -153,7 +153,7 @@ let ``maps and sets are typed, and their keys must be ordered`` () =
     assertOk "fn f(m: map<string, nat>, s: set<int>, k: string) -> bool { k in m && 3 in s && len(m) > len(s) }"
     assertOk "fn g(m: map<int, int>) -> map<int, int> { put(remove(m, 1), 2, m[2]) }"
     assertError "must be of an ordered type" "fn f(m: map<seq<int>, int>) -> int { len(m) }"
-    assertError "must be of an ordered type" "fn f(s: set<(int, int)>) -> int { len(s) }"
+    assertError "must be of an ordered type" "fn f(s: set<seq<seq<int>>>) -> int { len(s) }"
     assertError "takes a list written in place" "fn f(xs: seq<(int, int)>) -> map<int, int> { map_of(xs) }"
     assertError "needs a map" "fn f(xs: seq<int>) -> seq<int> { put(xs, 1, 2) }"
     assertError "needs a map or a set" "fn f(x: int) -> bool { 1 in x }"
@@ -169,3 +169,12 @@ let ``sorted gives a sequence from a set or from the keys of a map`` () =
     assertOk "fn f(s: set<int>, m: map<string, int>) -> nat { len(sorted(s)) + len(sorted_keys(m)) }"
     assertError "needs a set" "fn f(xs: seq<int>) -> seq<int> { sorted(xs) }"
     assertError "needs a map" "fn f(s: set<int>) -> seq<int> { sorted_keys(s) }"
+
+[<Fact>]
+let ``tuples, structs and enums are keys; only tuples and structs of orderable parts are sorted`` () =
+    let decls = "struct Pt { x: int, y: int }\nenum Color { Red, Custom(int) }\nstruct Bag { items: seq<int> }\n"
+    assertOk (decls + "fn f(s: set<(int, string)>, m: map<Pt, Color>, c: set<Color>, p: Pt) -> bool { p in m && Red in c && len(s) > 0 }")
+    assertOk (decls + "fn g(s: set<Pt>, t: set<(int, bool)>) -> nat { len(sorted(s)) + len(sorted(t)) }")
+    assertError "is not one" (decls + "fn h(m: map<Bag, int>) -> nat { len(m) }")
+    assertError "is not one" "fn h(s: set<(int, seq<int>)>) -> nat { len(s) }"
+    assertError "can be put in order" (decls + "fn k(c: set<Color>) -> seq<Color> { sorted(c) }")

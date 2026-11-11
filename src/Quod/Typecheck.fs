@@ -212,7 +212,7 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
 
     member c.CheckKey(t: Ty) =
         if not (isKeyType t) then
-            c.Error(keySpan, "", "the keys of a map, and the elements of a set, must be of an ordered type (int, nat, i32, i64, char, bool or string); '" + tyText t + "' is not one")
+            c.Error(keySpan, "", "the keys of a map, and the elements of a set, must be of an ordered type (int, nat, i32, i64, char, bool or string, or a tuple, a struct or an enum of those); '" + tyText t + "' is not one")
 
     member private c.TyWithin(t: TypeExpr, within: string list) : Ty =
         match t with
@@ -651,6 +651,9 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
         | Call("sorted", [ s ]) when not (fns.ContainsKey "sorted") ->
             let ts = c.Expr(s, ctx, None)
             match ts.Ty with
+            | TySet t when not (isSortable t) ->
+                c.Error(s.Span, ctx.FnName, "sorted() needs elements that can be put in order: numbers, chars, booleans, strings, and tuples and structs of those; " + tyText t + " is not one")
+                fail ()
             | TySet t -> mk (ECol(Sorted, [ ts ])) (TySeq t)
             | TyError -> fail ()
             | t ->
@@ -659,6 +662,9 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
         | Call("sorted_keys", [ m ]) when not (fns.ContainsKey "sorted_keys") ->
             let tm = c.Expr(m, ctx, None)
             match tm.Ty with
+            | TyMap(kt, _) when not (isSortable kt) ->
+                c.Error(m.Span, ctx.FnName, "sorted_keys() needs keys that can be put in order: numbers, chars, booleans, strings, and tuples and structs of those; " + tyText kt + " is not one")
+                fail ()
             | TyMap(kt, _) -> mk (ECol(Sorted, [ { Kind = ECol(Keys, [ tm ]); Ty = TySet kt; Span = m.Span } ])) (TySeq kt)
             | TyError -> fail ()
             | t ->

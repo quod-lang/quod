@@ -301,6 +301,14 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | EConvert x when checking && e.Ty = TyChar -> "_quod_fit_char(" + go x + ")"
         | EConvert x -> (if e.Ty = TyChar then "_quod_chr(" else "_quod_ord(") + go x + ")"
 
+    /// What Python sorts by, for a tuple or a struct: the tuple of its parts' keys, field by field.
+    member g.SortKey(t: Ty, term: string) : string =
+        match t with
+        | TyTuple ts -> "(" + (ts |> List.mapi (fun k c -> g.SortKey(c, term + "[" + string k + "]") + ", ") |> String.concat "") + ")"
+        | TyData d ->
+            "(" + (d.DataCases.[0].Fields |> List.map (fun (fname, ft) -> g.SortKey(ft, term + "." + pyName fname) + ", ") |> String.concat "") + ")"
+        | _ -> term
+
     /// An operation on a map (a dict) or a set (a frozenset). Values are never changed: each operation
     /// gives a new one.
     member g.Collection(e: TExpr, op: ColOp, args: TExpr list) : string =
@@ -321,7 +329,10 @@ type private Gen(checks: Set<string>, local: Set<string>) =
         | SetAdd, [ s; x ] -> "(" + go s + " | _quod_frozenset([" + go x + "]))"
         | SetRemove, [ s; x ] -> "(" + go s + " - _quod_frozenset([" + go x + "]))"
         | Keys, [ m ] -> "_quod_frozenset(" + go m + ")"
-        | Sorted, [ s ] -> "_quod_sorted(" + go s + ")"
+        | Sorted, [ s ] ->
+            match s.Ty with
+            | TySet(TyTuple _ | TyData _ as t) -> "_quod_sorted(" + go s + ", key=lambda _quod_o: " + g.SortKey(t, "_quod_o") + ")"
+            | _ -> "_quod_sorted(" + go s + ")"
         | Has, [ c; k ] -> "(" + go k + " in " + go c + ")"
         | Get, [ m; k ] -> if checking then "_quod_get(" + go m + ", " + go k + ")" else go m + "[" + go k + "]"
         | Union, [ a; b ] -> "(" + go a + " | " + go b + ")"

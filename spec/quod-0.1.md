@@ -196,7 +196,7 @@ fn total_loop(xs: seq<int>) -> int
 
 ### Maps and sets
 
-`map<K, V>` and `set<T>` are finite and immutable, equal when they hold the same entries, whatever the order they were built in. **Keys and elements are of an ordered type**: `int`, `nat`, `i32`, `i64`, `char`, `bool`, `string` (tuples, structs and enums are not yet). Values are of any type.
+`map<K, V>` and `set<T>` are finite and immutable, equal when they hold the same entries, whatever the order they were built in. **Keys and elements are of an ordered type**: `int`, `nat`, `i32`, `i64`, `char`, `bool`, `string`, and the tuples, structs and enums made of those. Values are of any type.
 
 ```rust
 fn price(tariffs: map<string, i64>, code: string) -> i64
@@ -208,14 +208,13 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 - **Build:** `map_of([(k1, v1), (k2, v2)])` and `set_of([a, b])` take a list written in place (a later pair wins over an earlier one with the same key). The empty ones are `map_of([])` and `set_of([])`, and their type comes from where they are used (`let mut m: map<string, nat> = map_of([]);`). A bigger one is built with `put` and `add`.
 - **Read:** `m[k]` needs `k in m`, an obligation like an index in bounds. `k in m` and `x in s` are booleans. `len(m)` and `len(s)` are the number of entries.
 - **Change** (a new value, never an in-place change as far as a program can tell): `put(m, k, v)`, `remove(m, k)`, `add(s, x)`, `remove(s, x)`, `keys(m)` (a `set<K>`), and `union`, `inter`, `diff` and `subset` for two sets.
-- **Traverse:** `sorted(s)` and `sorted_keys(m)` give a `seq` in ascending order, each element once; a loop walks it with an index. The order is by value for numbers and `char`, `false` before `true`, and for strings by scalar values one after the other. There is no other traversal, so no result depends on the order of insertion or of a hash. For numbers and chars the solver knows the order; for strings and booleans a program cannot compare them, so a contract cannot rely on it.
+- **Traverse:** `sorted(s)` and `sorted_keys(m)` give a `seq` in ascending order, each element once; a loop walks it with an index. The order is by value for numbers and `char`, `false` before `true`, for strings by scalar values one after the other, and for tuples and structs field by field. An enum can be a key but is not sorted. There is no other traversal, so no result depends on the order of insertion or of a hash. For numbers and chars the solver knows the order; for strings and booleans a program cannot compare them, so a contract cannot rely on it.
 - **Quantify** over the elements of a set in a contract: `forall x in s: ...`, `exists x in s: ...` (for a map, `keys(m)`).
 - **Proof:** the solver knows a map by `has`, `get` and its size, as it knows a sequence by `len` and `nth`. The size of a `put` and of a `remove` is exact, and `len(union(a, b)) + len(inter(a, b)) == len(a) + len(b)` and `len(diff(a, b)) == len(a) - len(inter(a, b))` hold.
 - **Completeness:** two maps are different when they differ by a key or by the value of a key; a contract on a map result is checked like any other.
 - **Cost:** `m = put(m, k, v)` and `s = add(s, x)` on a local that nothing else sees change it in place, so that a loop that builds a map is linear.
-- **Not yet:** keys that are tuples, structs or enums.
 - **Python:** a `dict` and a `frozenset` (a local set built in a loop is a `set` meanwhile); a Python caller passes a `dict`, and any iterable for a set.
-- **C#:** `IReadOnlyDictionary<K, V>` and `HashSet<T>`; a string key is a C# `string`. For now keys and elements are integers, booleans or strings, values are integers, booleans, maps or sets: anything else, and a struct or an enum holding a map or a set, is refused by Quod when it generates the C#. A caller must not change a map or a set it passed.
+- **C#:** `IReadOnlyDictionary<K, V>` and `HashSet<T>`; a string key is a C# `string`. For now keys and elements are integers, booleans, strings, tuples of numbers and booleans, structs and enums; values are integers, booleans, tuples of those, structs, enums, maps or sets. `sorted` is generated for numbers, booleans, strings and tuples of numbers and booleans, not yet for structs. Anything else, anything else, and a struct or an enum holding a map or a set, is refused by Quod when it generates the C#. A caller must not change a map or a set it passed.
 
 ### Modules
 

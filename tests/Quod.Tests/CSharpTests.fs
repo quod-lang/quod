@@ -384,3 +384,22 @@ let ``sorted runs in C#, in the order of scalar values for strings`` () =
     Assert.Equal("7", got.["last key"])
     Assert.Equal("3", got.["count"])
     Assert.Equal("65374", got.["first by scalar"])
+
+[<Fact>]
+let ``tuples and structs as keys run in C#`` () =
+    let src =
+        "struct Pt { x: int, y: int }\n"
+        + "fn cell(m: map<Pt, int>, p: Pt) -> int requires p in m { m[p] }\n"
+        + "fn cells(s: set<Pt>) -> nat { len(add(s, Pt(1, 2))) }\n"
+        + "fn pairs(s: set<(int, int)>) -> int requires len(s) > 0 { sorted(s)[0].1 }\n"
+        + "fn seen(s: set<(int, int)>, x: int, y: int) -> bool { (x, y) in s }\n"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"cell\", () => T0.P.Cell(new Dictionary<T0.P.Pt, long> { { new T0.P.Pt(1L, 2L), 7L } }, new T0.P.Pt(1L, 2L)));"
+              "        Case(\"cells\", () => T0.P.Cells(new HashSet<T0.P.Pt> { new T0.P.Pt(1L, 2L), new T0.P.Pt(3L, 4L) }));"
+              "        Case(\"pairs\", () => T0.P.Pairs(new HashSet<(long, long)> { (2L, 1L), (1L, 9L), (1L, 3L) }));"
+              "        Case(\"seen\", () => T0.P.Seen(new HashSet<(long, long)> { (2L, 1L) }, 2L, 1L));" ]
+    Assert.Equal("7", got.["cell"])
+    Assert.Equal("2", got.["cells"])
+    Assert.Equal("3", got.["pairs"])
+    Assert.Equal("true", got.["seen"])

@@ -401,3 +401,26 @@ let ``the sorted sequence of a set holds its elements, once each, in increasing 
 "
          + "fn exact(a: set<int>, b: set<int>) -> nat ensures result == len(a) + len(b) ensures len(union(a, b)) + len(inter(a, b)) == len(a) + len(b) ensures len(diff(a, b)) == len(a) - len(inter(a, b)) { len(a) + len(b) }
 ")
+
+[<Fact>]
+let ``a set of pairs built in a loop holds what the invariants say`` () =
+    assertProved
+        ("fn visited(path: seq<(int, int)>) -> set<(int, int)>\n"
+         + "  ensures forall i in 0..len(path): path[i] in result\n"
+         + "  ensures forall p in result: exists i in 0..len(path): path[i] == p\n"
+         + "{\n"
+         + "  let mut seen: set<(int, int)> = set_of([]);\n"
+         + "  let mut i = 0;\n"
+         + "  while i < len(path)\n"
+         + "    invariant 0 <= i && i <= len(path)\n"
+         + "    invariant forall j in 0..i: path[j] in seen\n"
+         + "    invariant forall p in seen: exists j in 0..i: path[j] == p\n"
+         + "    decreases len(path) - i\n"
+         + "  {\n"
+         + "    seen = add(seen, path[i]);\n"
+         + "    i = i + 1;\n"
+         + "  }\n"
+         + "  return seen;\n"
+         + "}\n"
+         + "struct Pt { x: int, y: int }\n"
+         + "fn grid(m: map<Pt, int>, p: Pt) -> int requires p in m ensures result == m[p] { m[p] }\n")
