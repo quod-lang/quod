@@ -38,6 +38,7 @@ Les six tâches : `binary_search`, `merge_intervals`, `rle_encode`, `bounded_que
 | `nat` | `int` dont on sait qu'il est `>= 0` ; seul type raffiné de la 0.1 |
 | `bool` | `true`, `false` |
 | `seq<T>` | séquence finie immuable |
+| `map<K, V>`, `set<T>` | dictionnaire et ensemble finis immuables, à clés d'un type ordonné (voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles)) |
 | `(T1, T2, ...)` | tuple, composantes `t.0`, `t.1`, ... |
 
 Affecter une expression `int` à un `nat` crée une obligation de preuve.
@@ -195,6 +196,28 @@ fn total_loop(xs: seq<int>) -> int
   ...
 }
 ```
+
+### Dictionnaires et ensembles
+
+`map<K, V>` et `set<T>` sont finis et immuables, égaux quand ils contiennent les mêmes entrées, quel que soit l'ordre de construction. **Les clés et les éléments sont d'un type ordonné** : `int`, `nat`, `i32`, `i64`, `char`, `bool`, `string` (pas encore les tuples, structures et énumérations). Les valeurs sont de n'importe quel type.
+
+```rust
+fn price(tariffs: map<string, i64>, code: string) -> i64
+  requires code in tariffs
+  ensures result == tariffs[code]
+{ tariffs[code] }
+```
+
+- **Construire :** `map_of([(k1, v1), (k2, v2)])` et `set_of([a, b])` prennent une liste écrite sur place (une paire plus tardive l'emporte sur une plus ancienne de même clé). Les vides sont `map_of([])` et `set_of([])`, dont le type vient de l'endroit où ils servent (`let mut m: map<string, nat> = map_of([]);`). Un plus grand se construit avec `put` et `add`.
+- **Lire :** `m[k]` exige `k in m`, une obligation comme un indice dans les bornes. `k in m` et `x in s` sont des booléens. `len(m)` et `len(s)` donnent le nombre d'entrées.
+- **Changer** (une valeur nouvelle, jamais un changement sur place pour ce que voit un programme) : `put(m, k, v)`, `remove(m, k)`, `add(s, x)`, `remove(s, x)`, `keys(m)` (un `set<K>`), et `union`, `inter`, `diff` et `subset` pour deux ensembles.
+- **Quantifier** sur les éléments d'un ensemble dans un contrat : `forall x in s: ...`, `exists x in s: ...` (pour un dictionnaire, `keys(m)`).
+- **Preuve :** le solveur connaît un dictionnaire par `has`, `get` et sa taille, comme il connaît une séquence par `len` et `nth`. La taille d'un `put` et d'un `remove` est exacte. Pour `union`, `inter` et `diff` seules des inégalités sont connues : un contrat qui dépend de leur taille exacte n'est pas décidé.
+- **Complétude :** deux dictionnaires diffèrent par une clé ou par la valeur d'une clé ; un contrat sur un résultat dictionnaire se contrôle comme les autres.
+- **Coût :** `m = put(m, k, v)` et `s = add(s, x)` sur une locale que rien d'autre ne voit la changent sur place, de sorte qu'une boucle qui construit un dictionnaire est linéaire.
+- **Pas encore :** un parcours dans le code (les éléments dans l'ordre), les clés qui sont des tuples, structures ou énumérations.
+- **Python :** un `dict` et un `frozenset` (un ensemble local construit dans une boucle est un `set` entre-temps) ; un appelant Python passe un `dict`, et n'importe quel itérable pour un ensemble.
+- **C# :** `IReadOnlyDictionary<K, V>` et `HashSet<T>` ; une clé chaîne est un `string` C#. Pour l'instant clés et éléments sont des entiers, booléens ou chaînes, les valeurs des entiers, booléens, dictionnaires ou ensembles : le reste, et une structure ou énumération qui contient un dictionnaire ou un ensemble, est refusé par Quod quand il génère le C#. Un appelant ne doit pas modifier un dictionnaire ou un ensemble qu'il a passé.
 
 ### Modules
 
@@ -494,7 +517,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
 | 0.4 | types raffinés généraux |
-| 0.4 | capacités et entrées-sorties, contrats scellés, tables associatives et ensembles |
+| 0.5 | capacités et entrées-sorties, contrats scellés ; dictionnaires et ensembles en sont la première partie, voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles) |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 
 **Quod 2.0 sera écrit en Quod.** L'auto-hébergement demande des chaînes, des types algébriques (les

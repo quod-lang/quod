@@ -1,6 +1,6 @@
 # Dictionnaires et ensembles (0.5) : note de conception
 
-État : proposition, rien n'est implémenté. Le but : écrire une règle métier qui cherche une valeur par clé (un tarif, une catégorie, un droit) sans la coder dans une séquence de paires, dont la preuve est lourde et la lecture pénible. C'est le point que le README annonce avec les capacités ; il passe en premier, parce qu'il bloque plus tôt : l'hôte (Python ou C#) fait déjà les entrées-sorties.
+État : étape 1 implémentée et approuvée (2026-11-11) ; les étapes 2 à 4 restent à faire. Écarts avec la proposition : `map_of` et `set_of` prennent une liste écrite sur place (une liste quelconque aurait demandé un pli dans les axiomes) ; les quantificateurs sur les éléments d'une séquence n'existaient pas, ils sont ajoutés pour les ensembles seulement ; le C# n'accepte pour l'instant que des clés entières, booléennes ou chaînes et des valeurs entières, booléennes, dictionnaires ou ensembles, et refuse une structure qui contient un dictionnaire ou un ensemble ; `sorted` et les clés composées ne sont pas encore là. Le but : écrire une règle métier qui cherche une valeur par clé (un tarif, une catégorie, un droit) sans la coder dans une séquence de paires, dont la preuve est lourde et la lecture pénible. C'est le point que le README annonce avec les capacités ; il passe en premier, parce qu'il bloque plus tôt : l'hôte (Python ou C#) fait déjà les entrées-sorties.
 
 ## Ce que ça donne
 
@@ -49,7 +49,7 @@ fn count(words: seq<string>) -> map<string, nat>
    - `put(m, k, v)`, `remove(m, k)`, `add(s, x)`, `remove(s, x)` rendent une nouvelle valeur ;
    - `keys(m)` rend un `set<K>`, `len(m)` et `len(s)` rendent un `nat`, `union`, `inter`, `diff` et `subset` pour les ensembles.
    - **Ce qu'on écarte :** des littéraux `{k: v}`, qui se confondent avec les blocs `{ ... }` de l'analyseur, et des méthodes `m.put(...)`, que Quod n'a nulle part.
-4. **`forall` et `exists` parcourent un ensemble ou `keys(m)`** (`forall w in keys(m): ...`), comme ils parcourent déjà les éléments d'une séquence.
+4. **`forall` et `exists` parcourent un ensemble ou `keys(m)`** (`forall w in keys(m): ...`). Les quantificateurs actuels ne parcourent que des intervalles `a..b` : celui-ci est nouveau, et ne vaut que pour les ensembles.
 5. **Parcourir dans le code : par une séquence triée.** `sorted(s)` et `sorted_keys(m)` rendent une `seq` en ordre croissant sans doublon. On boucle avec un `while` sur cette séquence. Il n'y a pas d'itérateur ni d'ordre non spécifié : un résultat ne peut pas dépendre du backend.
 6. **Une écriture `m = put(m, k, v)` dans une boucle ne recopie pas** quand le dictionnaire n'est pas partagé, comme l'ajout à une liste locale aujourd'hui (`appendable`). Sans cela, construire un dictionnaire de n entrées coûte n².
 7. **Les bornes de type suivent les éléments.** Un `map<string, nat>` porte, comme une `seq<nat>`, le fait que toutes les valeurs sont `>= 0` ; un `set<i32>` que tous ses éléments tiennent dans `i32`.
