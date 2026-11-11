@@ -1,0 +1,83 @@
+# First contact, on clean machines: downloads the published release and plays the README's quick start.
+# Run by hand (Actions > Smoke test of a release), with the tag to try; nothing is built from the sources.
+name: Smoke test of a release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to try (v0.4.1)
+        required: true
+        default: v0.4.1
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            asset: linux-x64.tar.gz
+          - os: ubuntu-24.04
+            asset: linux-x64.tar.gz
+          - os: macos-15
+            asset: osx-arm64.tar.gz
+          - os: windows-latest
+            asset: win-x64.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Clone the repository, as a newcomer would
+        run: git clone --depth 1 --branch "${{ inputs.tag }}" https://github.com/quod-lang/quod.git repo
+
+      - name: Download and unpack the release
+        run: |
+          version="${{ inputs.tag }}"; version="${version#v}"
+          file="quod-$version-${{ matrix.asset }}"
+          curl -fsSL -o "$file" "https://github.com/quod-lang/quod/releases/download/${{ inputs.tag }}/$file"
+          mkdir pkg
+          case "$file" in
+            *.zip) unzip -q "$file" -d pkg ;;
+            *) tar -xzf "$file" -C pkg ;;
+          esac
+          dir=$(find pkg -maxdepth 2 \( -name quod -o -name quod.exe \) -type f | head -1 | xargs dirname)
+          echo "QUOD_DIR=$PWD/$dir" >> "$GITHUB_ENV"
+          ls -l "$dir"
+
+      - name: macOS quarantine, as the README says
+        if: runner.os == 'macOS'
+        run: xattr -d com.apple.quarantine "$QUOD_DIR/quod" "$QUOD_DIR/z3" || true
+
+      - name: quod --version
+        run: |
+          "$QUOD_DIR/quod" --version
+
+      - name: Check the README example
+        run: |
+          cd repo
+          "$QUOD_DIR/quod" check examples/binary_search.quod | tee out.txt
+          grep -q "^verified" out.txt
+
+      - name: A weak contract is refused
+        run: |
+          cd repo
+          if "$QUOD_DIR/quod" check examples/bugs/*.quod > /dev/null 2>&1; then echo "a bug example was accepted"; exit 1; fi
+
+      - name: Build for Python and run
+        run: |
+          cd repo
+          "$QUOD_DIR/quod" build examples/prefix_sums.quod --target python
+          ls examples | head
+
+      - name: Build for C#
+        run: |
+          cd repo
+          "$QUOD_DIR/quod" build examples/binary_search.quod --target csharp
+          ls examples
+
+      - name: MCP server answers initialize
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' | timeout 20 "$QUOD_DIR/quod" mcp | head -c 400 | tee mcp.txt
+          grep -q '"result"' mcp.txt
