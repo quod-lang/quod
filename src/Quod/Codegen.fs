@@ -29,12 +29,13 @@ let appendable (body: TStmt list) (checkedAtRunTime: bool) : Set<string> =
         | EConvert a -> inner a
         | EIndex(s, i) -> reads s; inner i
         | ESlice(s, lo, hi) -> reads s; Option.iter inner lo; Option.iter inner hi
-        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter inner xs
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter inner xs
         | EProj(x, _) | EField(x, _, _) | ENeg x | ENot x | EToNat x -> inner x
         | EMatch(x, arms) -> inner x; arms |> List.iter (fun (_, _, b) -> inner b)
         | EArith(_, a, b) | ECmp(_, a, b) | ELogic(_, a, b) -> inner a; inner b
         | EIf(c, a, b) -> inner c; inner a; inner b
         | EQuant(_, _, lo, hi, b) -> inner lo; inner hi; inner b
+        | EQuantIn(_, _, a, b) -> inner a; inner b
         | EInt _ | EBool _ | EResult -> ()
     let rec walk (ss: TStmt list) =
         for s in ss do
@@ -88,11 +89,11 @@ let rec natInList (t: Ty) =
 /// could hide one.
 let rec cheap (e: TExpr) =
     match e.Kind with
-    | EQuant _ | ECall _ | EMatch _ -> false
+    | EQuant _ | EQuantIn _ | ECall _ | EMatch _ -> false
     | ECons(_, xs) -> List.forall cheap xs
     | EField(a, _, _) -> cheap a
     | EInt _ | EBool _ | EVar _ | EResult -> true
-    | ESeq xs | ETuple xs -> List.forall cheap xs
+    | ESeq xs | ETuple xs | ECol(_, xs) -> List.forall cheap xs
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> cheap a && cheap b
     | ESlice(a, b, c) -> cheap a && Option.forall cheap b && Option.forall cheap c
     | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> cheap a
@@ -190,6 +191,8 @@ let rec private mapCalls (rename: string -> string) (e: TExpr) : TExpr =
         | ELogic(op, a, b) -> ELogic(op, go a, go b)
         | EIf(a, b, c) -> EIf(go a, go b, go c)
         | EQuant(q, v, a, b, c) -> EQuant(q, v, go a, go b, go c)
+        | ECol(op, xs) -> ECol(op, List.map go xs)
+        | EQuantIn(q, v, a, b) -> EQuantIn(q, v, go a, go b)
         | EToNat a -> EToNat(go a)
         | EConvert a -> EConvert(go a)
     { e with Kind = kind }

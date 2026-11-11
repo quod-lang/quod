@@ -75,25 +75,27 @@ let valueUses (prog: TProgram) : Set<string> =
     let rec expr (e: TExpr) =
         match e.Kind with
         | ECall(g, xs) -> used.Add g |> ignore; List.iter expr xs
-        | ESeq xs | ETuple xs | ECons(_, xs) -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECons(_, xs) | ECol(_, xs) -> List.iter expr xs
         | EField(a, _, _) -> expr a
         | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
+        | EQuantIn(_, _, a, b) -> expr a; expr b
         | EInt _ | EBool _ | EVar _ | EResult -> ()
     /// Does a variable named n appear in e?
     let rec reads (n: string) (e: TExpr) =
         match e.Kind with
         | EVar m -> m = n
-        | ECall(_, xs) | ESeq xs | ETuple xs | ECons(_, xs) -> List.exists (reads n) xs
+        | ECall(_, xs) | ESeq xs | ETuple xs | ECons(_, xs) | ECol(_, xs) -> List.exists (reads n) xs
         | EField(a, _, _) -> reads n a
         | EMatch(a, arms) -> reads n a || arms |> List.exists (fun (_, _, b) -> reads n b)
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> reads n a || reads n b
         | ESlice(a, b, c) -> reads n a || Option.exists (reads n) b || Option.exists (reads n) c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> reads n a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> reads n a || reads n b || reads n c
+        | EQuantIn(_, _, a, b) -> reads n a || reads n b
         | EInt _ | EBool _ | EResult -> false
     for f in prog.Fns do
         match f.Body with
@@ -148,6 +150,8 @@ let rec private unfold (values: Map<string, TExpr>) (g: string) (f: string) (e: 
         | ELogic(o, a, b) -> ELogic(o, go a, go b)
         | EIf(a, b, c) -> EIf(go a, go b, go c)
         | EQuant(q, v, lo, hi, b) -> EQuant(q, v, go lo, go hi, go b)
+        | ECol(op, xs) -> ECol(op, List.map go xs)
+        | EQuantIn(q, v, a, b) -> EQuantIn(q, v, go a, go b)
         | EToNat a -> EToNat(go a)
     { e with Kind = kind }
 
@@ -212,13 +216,14 @@ let diagnostics (file: string) (prog: TProgram) : Diagnostic list =
 let rec private calls (e: TExpr) : string list =
     match e.Kind with
     | ECall(g, args) -> g :: List.collect calls args
-    | ESeq xs | ETuple xs | ECons(_, xs) -> List.collect calls xs
+    | ESeq xs | ETuple xs | ECons(_, xs) | ECol(_, xs) -> List.collect calls xs
     | EField(a, _, _) -> calls a
     | EMatch(a, arms) -> calls a @ (arms |> List.collect (fun (_, _, b) -> calls b))
     | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> calls a @ calls b
     | ESlice(a, b, c) -> calls a @ (Option.toList b |> List.collect calls) @ (Option.toList c |> List.collect calls)
     | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> calls a
     | EIf(a, b, c) | EQuant(_, _, a, b, c) -> calls a @ calls b @ calls c
+    | EQuantIn(_, _, a, b) -> calls a @ calls b
     | EInt _ | EBool _ | EVar _ | EResult -> []
 
 let rec private callsIn (items: TStmt list) : string list =

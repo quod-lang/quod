@@ -81,9 +81,18 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
         w.WriteEndArray()
     | Eval.VSeq xs when not xs.IsEmpty && xs |> List.forall (function Eval.VChar _ -> true | _ -> false) ->
         w.WriteStringValue(String.Join("", xs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))
-    | Eval.VSeq xs | Eval.VTuple xs ->
+    | Eval.VSeq xs | Eval.VTuple xs | Eval.VSet xs ->
         w.WriteStartArray()
         for x in xs do writeValue w x
+        w.WriteEndArray()
+    | Eval.VMap entries ->
+        // a map is an array of [key, value] pairs, in ascending order of key
+        w.WriteStartArray()
+        for (k, x) in entries do
+            w.WriteStartArray()
+            writeValue w k
+            writeValue w x
+            w.WriteEndArray()
         w.WriteEndArray()
 
 /// A JSON argument as a value of type t: integers as numbers (or strings, for big ones), booleans,
@@ -109,6 +118,14 @@ let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
     | TySeq el, JsonValueKind.Array ->
         let items = [ for x in e.EnumerateArray() -> readValue el x ]
         if List.forall Option.isSome items then Some(Eval.VSeq(List.map Option.get items)) else None
+    | TySet el, JsonValueKind.Array ->
+        let items = [ for x in e.EnumerateArray() -> readValue el x ]
+        if List.forall Option.isSome items then Some(Eval.VSet(items |> List.map Option.get |> List.fold Eval.addElement [])) else None
+    | TyMap(kt, vt), JsonValueKind.Array ->
+        let pairs = [ for x in e.EnumerateArray() -> (if x.ValueKind = JsonValueKind.Array && x.GetArrayLength() = 2 then readValue (TyTuple [ kt; vt ]) x else None) ]
+        if List.forall Option.isSome pairs then
+            Some(Eval.VMap(pairs |> List.map Option.get |> List.fold (fun m p -> match p with Eval.VTuple [ k; v ] -> Eval.putEntry m k v | _ -> m) []))
+        else None
     | TyTuple ts, JsonValueKind.Array when e.GetArrayLength() = ts.Length ->
         let items = List.map2 readValue ts [ for x in e.EnumerateArray() -> x ]
         if List.forall Option.isSome items then Some(Eval.VTuple(List.map Option.get items)) else None

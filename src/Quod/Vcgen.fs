@@ -27,6 +27,8 @@ let rec private tySig (t: Ty) =
     | TyI64 -> "W"
     | TyData d -> "D" + d.DataName + "E"
     | TySeq e -> "S" + tySig e + "E"
+    | TyMap(k, v) -> "M" + tySig k + tySig v + "E"
+    | TySet e -> "Z" + tySig e + "E"
     | TyTuple ts -> "T" + (ts |> List.map tySig |> String.concat "") + "E"
 
 let private tupleName (ts: Ty list) = "Tup_" + (ts |> List.map tySig |> String.concat "")
@@ -36,6 +38,7 @@ let rec sortOf (t: Ty) =
     | TyInt | TyNat | TyChar | TyI32 | TyI64 | TyError -> "Int"
     | TyBool -> "Bool"
     | TySeq e -> "Seq_" + tySig e
+    | TyMap _ | TySet _ -> "Col_" + tySig t
     | TyTuple ts -> tupleName ts
     | TyData d -> "D_" + d.DataName
 
@@ -107,6 +110,111 @@ let private seqAxioms (elem: Ty) : string list =
           ("(=> (and (<= 0 lo) (<= 0 m) (= n (+ m 1)) (<= (+ lo n) (" + len + " a))) (= (" + ext + " a lo n) (" + cat + " (" + ext + " a lo m) (" + unit + " (" + nth + " a (+ lo m))))))")
           ("(" + ext + " a lo m) (" + ext + " a lo n)") ]
 
+/// Maps and sets are axiomatized like sequences: one uninterpreted sort per type, functions
+/// (m.has.t, m.get.t, m.put.t...) and triggered axioms, never Z3's arrays. A map has a domain (`has`),
+/// a value for each key of it (`get`), and a size, which makes it finite.
+let private colOp (op: string) (t: Ty) =
+    match t with
+    | TyMap _ -> "m." + op + "." + tySig t
+    | _ -> "s." + op + "." + tySig t
+
+let private forallPat (binders: string) (body: string) (pattern: string) =
+    "(assert (forall (" + binders + ") (! " + body + " :pattern (" + pattern + "))))"
+
+/// Declarations and axioms for the sets of `elem`.
+let private setAxioms (elem: Ty) : string list =
+    let t = TySet elem
+    let s, e = sortOf t, sortOf elem
+    let f op = colOp op t
+    let has, add, remove, size, empty, eq = f "has", f "add", f "remove", f "size", f "empty", f "eq"
+    let union, inter, diff, subset = f "union", f "inter", f "diff", f "subset"
+    let forall = forallPat
+    [ "(declare-fun " + has + " (" + s + " " + e + ") Bool)"
+      "(declare-fun " + add + " (" + s + " " + e + ") " + s + ")"
+      "(declare-fun " + remove + " (" + s + " " + e + ") " + s + ")"
+      "(declare-fun " + size + " (" + s + ") Int)"
+      "(declare-fun " + empty + " () " + s + ")"
+      "(declare-fun " + eq + " (" + s + " " + s + ") Bool)"
+      "(declare-fun " + union + " (" + s + " " + s + ") " + s + ")"
+      "(declare-fun " + inter + " (" + s + " " + s + ") " + s + ")"
+      "(declare-fun " + diff + " (" + s + " " + s + ") " + s + ")"
+      "(declare-fun " + subset + " (" + s + " " + s + ") Bool)"
+      forall ("(a " + s + ")") ("(>= (" + size + " a) 0)") ("(" + size + " a)")
+      "(assert (= (" + size + " " + empty + ") 0))"
+      forall ("(x " + e + ")") ("(not (" + has + " " + empty + " x))") ("(" + has + " " + empty + " x)")
+      forall ("(a " + s + ") (x " + e + ")") ("(=> (" + has + " a x) (>= (" + size + " a) 1))") ("(" + has + " a x)")
+      // extensional equality, as for sequences
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(and (= (" + eq + " a b) (= a b)) (= (" + eq + " a b) (forall ((x " + e + ")) (= (" + has + " a x) (" + has + " b x)))))")
+          ("(" + eq + " a b)")
+      forall ("(a " + s + ") (x " + e + ")")
+          ("(and (" + has + " (" + add + " a x) x) (= (" + size + " (" + add + " a x)) (+ (" + size + " a) (ite (" + has + " a x) 0 1))))")
+          ("(" + add + " a x)")
+      forall ("(a " + s + ") (x " + e + ") (y " + e + ")") ("(= (" + has + " (" + add + " a x) y) (or (= x y) (" + has + " a y)))") ("(" + has + " (" + add + " a x) y)")
+      forall ("(a " + s + ") (x " + e + ")")
+          ("(and (not (" + has + " (" + remove + " a x) x)) (= (" + size + " (" + remove + " a x)) (- (" + size + " a) (ite (" + has + " a x) 1 0))))")
+          ("(" + remove + " a x)")
+      forall ("(a " + s + ") (x " + e + ") (y " + e + ")") ("(= (" + has + " (" + remove + " a x) y) (and (not (= x y)) (" + has + " a y)))") ("(" + has + " (" + remove + " a x) y)")
+      forall ("(a " + s + ") (b " + s + ") (x " + e + ")") ("(= (" + has + " (" + union + " a b) x) (or (" + has + " a x) (" + has + " b x)))") ("(" + has + " (" + union + " a b) x)")
+      forall ("(a " + s + ") (b " + s + ") (x " + e + ")") ("(= (" + has + " (" + inter + " a b) x) (and (" + has + " a x) (" + has + " b x)))") ("(" + has + " (" + inter + " a b) x)")
+      forall ("(a " + s + ") (b " + s + ") (x " + e + ")") ("(= (" + has + " (" + diff + " a b) x) (and (" + has + " a x) (not (" + has + " b x))))") ("(" + has + " (" + diff + " a b) x)")
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(and (<= (" + size + " (" + union + " a b)) (+ (" + size + " a) (" + size + " b))) (>= (" + size + " (" + union + " a b)) (" + size + " a)) (>= (" + size + " (" + union + " a b)) (" + size + " b)))")
+          ("(" + size + " (" + union + " a b))")
+      forall ("(a " + s + ") (b " + s + ")") ("(and (<= (" + size + " (" + inter + " a b)) (" + size + " a)) (<= (" + size + " (" + inter + " a b)) (" + size + " b)))") ("(" + size + " (" + inter + " a b))")
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(and (<= (" + size + " (" + diff + " a b)) (" + size + " a)) (>= (" + size + " (" + diff + " a b)) (- (" + size + " a) (" + size + " b))))")
+          ("(" + size + " (" + diff + " a b))")
+      forall ("(a " + s + ") (b " + s + ")")
+          ("(and (= (" + subset + " a b) (forall ((x " + e + ")) (=> (" + has + " a x) (" + has + " b x)))) (=> (" + subset + " a b) (<= (" + size + " a) (" + size + " b))))")
+          ("(" + subset + " a b)") ]
+
+/// Declarations and axioms for the maps from `key` to `value`, and `keys`, their set of keys.
+let private mapAxioms (key: Ty) (value: Ty) : string list =
+    let t = TyMap(key, value)
+    let m, k, v = sortOf t, sortOf key, sortOf value
+    let ks = sortOf (TySet key)
+    let f op = colOp op t
+    let has, get, put, remove, size, empty, eq, keys = f "has", f "get", f "put", f "remove", f "size", f "empty", f "eq", f "keys"
+    let setHas, setSize = colOp "has" (TySet key), colOp "size" (TySet key)
+    let forall = forallPat
+    [ "(declare-fun " + has + " (" + m + " " + k + ") Bool)"
+      "(declare-fun " + get + " (" + m + " " + k + ") " + v + ")"
+      "(declare-fun " + put + " (" + m + " " + k + " " + v + ") " + m + ")"
+      "(declare-fun " + remove + " (" + m + " " + k + ") " + m + ")"
+      "(declare-fun " + size + " (" + m + ") Int)"
+      "(declare-fun " + empty + " () " + m + ")"
+      "(declare-fun " + eq + " (" + m + " " + m + ") Bool)"
+      "(declare-fun " + keys + " (" + m + ") " + ks + ")"
+      forall ("(a " + m + ")") ("(>= (" + size + " a) 0)") ("(" + size + " a)")
+      "(assert (= (" + size + " " + empty + ") 0))"
+      forall ("(x " + k + ")") ("(not (" + has + " " + empty + " x))") ("(" + has + " " + empty + " x)")
+      forall ("(a " + m + ") (x " + k + ")") ("(=> (" + has + " a x) (>= (" + size + " a) 1))") ("(" + has + " a x)")
+      // extensional equality: the same keys and the same value for each
+      forall ("(a " + m + ") (b " + m + ")")
+          ("(and (= (" + eq + " a b) (= a b)) (= (" + eq + " a b) (forall ((x " + k + ")) (and (= (" + has + " a x) (" + has + " b x)) (=> (" + has + " a x) (= (" + get + " a x) (" + get + " b x)))))))")
+          ("(" + eq + " a b)")
+      forall ("(a " + m + ") (x " + k + ") (y " + v + ")")
+          ("(and (" + has + " (" + put + " a x y) x) (= (" + get + " (" + put + " a x y) x) y) (= (" + size + " (" + put + " a x y)) (+ (" + size + " a) (ite (" + has + " a x) 0 1))))")
+          ("(" + put + " a x y)")
+      forall ("(a " + m + ") (x " + k + ") (y " + v + ") (j " + k + ")")
+          ("(=> (not (= j x)) (= (" + has + " (" + put + " a x y) j) (" + has + " a j)))")
+          ("(" + has + " (" + put + " a x y) j)")
+      forall ("(a " + m + ") (x " + k + ") (y " + v + ") (j " + k + ")")
+          ("(=> (not (= j x)) (= (" + get + " (" + put + " a x y) j) (" + get + " a j)))")
+          ("(" + get + " (" + put + " a x y) j)")
+      forall ("(a " + m + ") (x " + k + ")")
+          ("(and (not (" + has + " (" + remove + " a x) x)) (= (" + size + " (" + remove + " a x)) (- (" + size + " a) (ite (" + has + " a x) 1 0))))")
+          ("(" + remove + " a x)")
+      forall ("(a " + m + ") (x " + k + ") (j " + k + ")")
+          ("(=> (not (= j x)) (= (" + has + " (" + remove + " a x) j) (" + has + " a j)))")
+          ("(" + has + " (" + remove + " a x) j)")
+      forall ("(a " + m + ") (x " + k + ") (j " + k + ")")
+          ("(=> (not (= j x)) (= (" + get + " (" + remove + " a x) j) (" + get + " a j)))")
+          ("(" + get + " (" + remove + " a x) j)")
+      forall ("(a " + m + ") (x " + k + ")") ("(= (" + setHas + " (" + keys + " a) x) (" + has + " a x))") ("(" + setHas + " (" + keys + " a) x)")
+      forall ("(a " + m + ")") ("(= (" + setSize + " (" + keys + " a)) (" + size + " a))") ("(" + setSize + " (" + keys + " a))") ]
+
 let private app (f: string) (args: string list) =
     if args.IsEmpty then f else "(" + f + " " + String.Join(" ", args) + ")"
 
@@ -141,6 +249,16 @@ let rec private typeFacts (fresh: unit -> string) (t: Ty) (term: string) : strin
         match typeFacts fresh e ("(" + seqOp "nth" t + " " + term + " " + q + ")") with
         | [] -> []
         | fs -> [ "(forall ((" + q + " Int)) (=> (and (<= 0 " + q + ") (< " + q + " (" + seqOp "len" t + " " + term + "))) " + conj fs + "))" ]
+    | TySet e ->
+        let q = fresh ()
+        match typeFacts fresh e q with
+        | [] -> []
+        | fs -> [ "(forall ((" + q + " " + sortOf e + ")) (=> (" + colOp "has" t + " " + term + " " + q + ") " + conj fs + "))" ]
+    | TyMap(k, v) ->
+        let q = fresh ()
+        match typeFacts fresh k q @ typeFacts fresh v ("(" + colOp "get" t + " " + term + " " + q + ")") with
+        | [] -> []
+        | fs -> [ "(forall ((" + q + " " + sortOf k + ")) (=> (" + colOp "has" t + " " + term + " " + q + ") " + conj fs + "))" ]
     | TyTuple ts ->
         ts |> List.mapi (fun k ct -> typeFacts fresh ct ("(" + tupleName ts + "_" + string k + " " + term + ")")) |> List.concat
     | TyData d ->
@@ -269,6 +387,12 @@ let rec private smallValues (t: Ty) : Eval.Value list =
     | TySeq e ->
         let elems = smallValues e |> List.truncate 12
         [ Eval.VSeq [] ] @ [ for x in elems -> Eval.VSeq [ x ] ] @ ([ for x in elems do for y in elems -> Eval.VSeq [ x; y ] ] |> List.truncate 20)
+    | TySet e ->
+        let elems = smallValues e |> List.truncate 6
+        [ Eval.VSet [] ] @ [ for x in elems -> Eval.VSet [ x ] ] @ ([ for x in elems do for y in elems do if Eval.compareValue x y < 0 then Eval.VSet [ x; y ] ] |> List.truncate 10)
+    | TyMap(k, v) ->
+        let ks, vs = smallValues k |> List.truncate 4, smallValues v |> List.truncate 3
+        [ Eval.VMap [] ] @ [ for x in ks do for y in vs -> Eval.VMap [ x, y ] ] |> List.truncate 12
 
 /// The simplest value of a type: 0, false, [], a tuple of those (an edge case worth running).
 let rec private zeroValue (t: Ty) : Eval.Value =
@@ -278,6 +402,8 @@ let rec private zeroValue (t: Ty) : Eval.Value =
     | TyChar -> Eval.VChar(int 'a')
     | TyData d -> Eval.VData(d.DataCases.[0].CaseName, d.DataCases.[0].Fields |> List.map (fun (_, t) -> zeroValue t))
     | TySeq _ -> Eval.VSeq []
+    | TyMap _ -> Eval.VMap []
+    | TySet _ -> Eval.VSet []
     | TyTuple ts -> Eval.VTuple(ts |> List.map zeroValue)
 
 /// A random small value of a type, for inputs (ints in -6..6, sequences of length 0..5).
@@ -299,6 +425,8 @@ let rec private randomValue (rnd: Random) (t: Ty) : Eval.Value =
         Eval.VData(c.CaseName, c.Fields |> List.map (fun (_, t) -> randomValue rnd t))
     | TyChar -> Eval.VChar [| int 'a'; int 'b'; int 'A'; int '0'; int '9'; int ' '; int ','; 0xE9; 0x3B1; 0x1F600 |].[rnd.Next 10]
     | TySeq e -> Eval.VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
+    | TySet e -> Eval.VSet([ for _ in 1 .. rnd.Next(0, 5) -> randomValue rnd e ] |> List.fold Eval.addElement [])
+    | TyMap(k, v) -> Eval.VMap([ for _ in 1 .. rnd.Next(0, 5) -> randomValue rnd k, randomValue rnd v ] |> List.fold (fun m (a, b) -> Eval.putEntry m a b) [])
     | TyTuple ts -> Eval.VTuple(ts |> List.map (randomValue rnd))
 
 /// The integer literals of the program, and their neighbours: a bug triggered by `n == 1000`
@@ -309,13 +437,14 @@ let private programConstants (prog: TProgram) : bigint list =
     let rec expr (e: TExpr) =
         match e.Kind with
         | EInt n -> found.Add n |> ignore
-        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter expr xs
         | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
         | EField(a, _, _) -> expr a
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
         | EIf(a, b, c) | EQuant(_, _, a, b, c) -> expr a; expr b; expr c
+        | EQuantIn(_, _, a, b) -> expr a; expr b
         | EBool _ | EVar _ | EResult -> ()
     let rec stmt (s: TStmt) =
         match s.Kind with
@@ -351,6 +480,8 @@ let rec private inputValue (rnd: Random) (pool: bigint list) (t: Ty) : Eval.Valu
         let lengths = pool |> List.filter (fun c -> c.Sign > 0 && c <= 50I)
         let n = if not lengths.IsEmpty && rnd.Next 3 = 0 then int lengths.[rnd.Next lengths.Length] else rnd.Next(0, 6)
         Eval.VSeq [ for _ in 1 .. n -> inputValue rnd pool e ]
+    | TySet e -> Eval.VSet([ for _ in 1 .. rnd.Next(0, 5) -> inputValue rnd pool e ] |> List.fold Eval.addElement [])
+    | TyMap(k, v) -> Eval.VMap([ for _ in 1 .. rnd.Next(0, 5) -> inputValue rnd pool k, inputValue rnd pool v ] |> List.fold (fun m (a, b) -> Eval.putEntry m a b) [])
     | TyTuple ts -> Eval.VTuple(ts |> List.map (inputValue rnd pool))
     | TyBool | TyChar | TyI32 | TyI64 -> randomValue rnd t
     | TyData d ->
@@ -481,7 +612,7 @@ let rec private bexpr (env: Map<string, BVal>) (e: TExpr) : BVal =
         if a.Sign < 0 || a > b || b > bigint l.Length then raise Unbounded
         BSeq(l |> List.skip (int a) |> List.take (int (b - a)))
     | EProj(t, k) -> (match go t with BTup l -> l.[k] | _ -> raise Unbounded)
-    | ECall _ | EResult -> raise Unbounded
+    | ECall _ | EResult | ECol _ | EQuantIn _ -> raise Unbounded
     | ENeg x -> (match go x with BInt n -> BInt(-n) | v -> BTerm("(- " + bterm v + ")"))
     | ENot x -> (match go x with BBool b -> BBool(not b) | v -> BTerm("(not " + bterm v + ")"))
     | EArith(op, a, b) ->
@@ -535,13 +666,13 @@ let private ifSpans (f: TFn) : Span list =
     let rec expr (e: TExpr) =
         match e.Kind with
         | EIf(c, a, b) -> found.Add e.Span; expr c; expr a; expr b
-        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter expr xs
+        | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter expr xs
         | EMatch(a, arms) -> expr a; arms |> List.iter (fun (_, _, b) -> expr b)
         | EField(a, _, _) -> expr a
         | EIndex(a, b) | EConcat(a, b) | EArith(_, a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> expr a; expr b
         | ESlice(a, b, c) -> expr a; Option.iter expr b; Option.iter expr c
         | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> expr a
-        | EQuant _ | EInt _ | EBool _ | EVar _ | EResult -> ()
+        | EQuant _ | EQuantIn _ | EInt _ | EBool _ | EVar _ | EResult -> ()
     let rec stmt (st: TStmt) =
         match st.Kind with
         | SLet(_, _, _, e) | SAssign(_, e) | SReturn e -> expr e
@@ -761,7 +892,26 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             match t.Ty with
             | TyTuple ts -> "(" + tupleName ts + "_" + string k + " " + go t + ")"
             | _ -> failwith "internal: projection of a non-tuple"
-        | ELen s -> "(" + seqOp "len" s.Ty + " " + go s + ")"
+        | ELen s ->
+            match s.Ty with
+            | TyMap _ | TySet _ -> "(" + colOp "size" s.Ty + " " + go s + ")"
+            | _ -> "(" + seqOp "len" s.Ty + " " + go s + ")"
+        | ECol(op, args) -> v.Collection(e, op, args, go, ob)
+        | EQuantIn(q, name, col, body) ->
+            let tcol = go col
+            let sym = v.FreshQ()
+            let elemTy = match col.Ty with TySet t -> t | _ -> TyInt
+            let sort = sortOf elemTy
+            let member' = "(" + colOp "has" col.Ty + " " + tcol + " " + sym + ")"
+            let inner = Collector()
+            let tbody = v.Expr(body, env.Add(name, sym), member' :: guards, inner)
+            for o in inner.Obs do
+                out.Obs.Add { o with Goal = "(forall ((" + sym + " " + sort + ")) " + o.Goal + ")" }
+            for f in inner.Facts do
+                out.Facts.Add("(forall ((" + sym + " " + sort + ")) " + f + ")")
+            match q with
+            | Forall -> "(forall ((" + sym + " " + sort + ")) (=> " + member' + " " + tbody + "))"
+            | Exists -> "(exists ((" + sym + " " + sort + ")) (and " + member' + " " + tbody + "))"
         | ECall(name, args) -> v.Call(e, name, args |> List.map go, guards, out)
         | ENeg x ->
             let term = "(- " + go x + ")"
@@ -787,6 +937,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         | EEq(a, b) ->
             match a.Ty with
             | TySeq _ -> "(" + seqOp "eq" a.Ty + " " + go a + " " + go b + ")"
+            | TyMap _ | TySet _ -> "(" + colOp "eq" a.Ty + " " + go a + " " + go b + ")"
             | _ -> "(= " + go a + " " + go b + ")"
         | ELogic(op, a, b) ->
             let ta = go a
@@ -849,6 +1000,38 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             if e.Ty = TyChar then ob (scalarFact tx) "the argument of char_of is a Unicode scalar value" e.Span
             if isBounded e.Ty then ob (boundFact e.Ty tx) ("the value fits in " + tyText e.Ty) e.Span
             tx
+
+    /// An operation on a map or a set. A read needs the key to be there: an obligation.
+    member v.Collection(e: TExpr, op: ColOp, args: TExpr list, go: TExpr -> string, ob: string -> string -> Span -> unit) : string =
+        let t = e.Ty
+        match op, args with
+        | MapOf, [ { Kind = ESeq items } ] ->
+            let empty = colOp "empty" t
+            items |> List.fold (fun acc item ->
+                match item.Kind, item.Ty with
+                | ETuple [ k; x ], _ -> "(" + colOp "put" t + " " + acc + " " + go k + " " + go x + ")"
+                | _, TyTuple ts ->
+                    let tt = go item
+                    let n = tupleName ts
+                    "(" + colOp "put" t + " " + acc + " (" + n + "_0 " + tt + ") (" + n + "_1 " + tt + "))"
+                | _ -> failwith "internal: a pair that is not a pair") empty
+        | SetOf, [ { Kind = ESeq items } ] ->
+            items |> List.fold (fun acc item -> "(" + colOp "add" t + " " + acc + " " + go item + ")") (colOp "empty" t)
+        | Put, [ m; k; x ] -> "(" + colOp "put" t + " " + go m + " " + go k + " " + go x + ")"
+        | MapRemove, [ m; k ] -> "(" + colOp "remove" t + " " + go m + " " + go k + ")"
+        | SetAdd, [ s; x ] -> "(" + colOp "add" t + " " + go s + " " + go x + ")"
+        | SetRemove, [ s; x ] -> "(" + colOp "remove" t + " " + go s + " " + go x + ")"
+        | Keys, [ m ] -> "(" + colOp "keys" m.Ty + " " + go m + ")"
+        | Has, [ c; k ] -> "(" + colOp "has" c.Ty + " " + go c + " " + go k + ")"
+        | Get, [ m; k ] ->
+            let tm, tk = go m, go k
+            ob ("(" + colOp "has" m.Ty + " " + tm + " " + tk + ")") "key in map" e.Span
+            "(" + colOp "get" m.Ty + " " + tm + " " + tk + ")"
+        | Union, [ a; b ] -> "(" + colOp "union" t + " " + go a + " " + go b + ")"
+        | Inter, [ a; b ] -> "(" + colOp "inter" t + " " + go a + " " + go b + ")"
+        | Diff, [ a; b ] -> "(" + colOp "diff" t + " " + go a + " " + go b + ")"
+        | Subset, [ a; b ] -> "(" + colOp "subset" a.Ty + " " + go a + " " + go b + ")"
+        | _ -> failwith "internal: an operation on a map or a set that does not fit"
 
     /// A call: the callee's precondition is an obligation; its contract is a fact; a call
     /// inside the same recursive cycle must make the measure smaller.
@@ -1383,6 +1566,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     member v.Prelude() =
         let tuples = ResizeArray<Ty list>()
         let elems = ResizeArray<Ty>()
+        let maps = ResizeArray<Ty * Ty>()
+        let sets = ResizeArray<Ty>()
         let datas = ResizeArray<DataDecl>()
         // tuples and data types can hold each other: each is declared after what it holds
         let ordered = ResizeArray<Choice<Ty list, DataDecl>>()
@@ -1391,6 +1576,14 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | TySeq e ->
                 visit e
                 if not (elems |> Seq.exists (fun x -> tySig x = tySig e)) then elems.Add e
+            | TySet e ->
+                visit e
+                if not (sets |> Seq.exists (fun x -> tySig x = tySig e)) then sets.Add e
+            | TyMap(k, x) ->
+                visit k
+                visit x
+                visit (TySet k)
+                if not (maps |> Seq.exists (fun (a, b) -> tySig a = tySig k && tySig b = tySig x)) then maps.Add((k, x))
             | TyTuple ts ->
                 List.iter visit ts
                 let key = ts |> List.map tySig
@@ -1407,7 +1600,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let rec visitE (e: TExpr) =
             visit e.Ty
             match e.Kind with
-            | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.iter visitE xs
+            | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter visitE xs
+            | EQuantIn(_, _, a, b) -> visitE a; visitE b
             | EMatch(a, arms) -> visitE a; arms |> List.iter (fun (_, _, b) -> visitE b)
             | EField(a, _, _) -> visitE a
             | EIndex(a, b) | EArith(_, a, b) | EConcat(a, b) | ECmp(_, a, b) | EEq(a, b) | ELogic(_, a, b) -> visitE a; visitE b
@@ -1431,6 +1625,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         // before the tuples: a field of a tuple can be a sequence, and an element a tuple
         for e in elems do
             z3.Send("(declare-sort " + sortOf (TySeq e) + " 0)")
+        for e in sets do
+            z3.Send("(declare-sort " + sortOf (TySet e) + " 0)")
+        for (k, x) in maps do
+            z3.Send("(declare-sort " + sortOf (TyMap(k, x)) + " 0)")
         for item in ordered do
             match item with
             | Choice1Of2 ts ->
@@ -1447,6 +1645,10 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 z3.Send("(declare-datatypes ((" + sortOf (TyData d) + " 0)) ((" + String.Join(" ", cases) + ")))")
         for e in elems do
             for line in seqAxioms e do z3.Send line
+        for e in sets do
+            for line in setAxioms e do z3.Send line
+        for (k, x) in maps do
+            for line in mapAxioms k x do z3.Send line
         // Every function is an SMT function symbol. A pure function returns the same result for
         // the same arguments, so this is sound even for statement functions, which callers know
         // through their contract only.
@@ -1598,7 +1800,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 | ESlice(a, b, c) -> indexed a || Option.exists indexed b || Option.exists indexed c
                 | EProj(a, _) | ELen a | ENeg a | ENot a | EToNat a | EConvert a -> indexed a
                 | EIf(a, b, c) | EQuant(_, _, a, b, c) -> indexed a || indexed b || indexed c
-                | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) -> List.exists indexed xs
+                | EQuantIn(_, _, a, b) -> indexed a || indexed b
+                | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.exists indexed xs
                 | EMatch(a, arms) -> indexed a || arms |> List.exists (fun (_, _, b) -> indexed b)
                 | EField(a, _, _) -> indexed a
                 | EInt _ | EBool _ | EVar _ | EResult -> false
@@ -1623,6 +1826,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | None ->
                 match f.Ret with
                 | TySeq _ -> "(" + seqOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
+                | TyMap _ | TySet _ -> "(" + colOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
                 | _ -> "(= " + r1 + " " + r2 + ")"
         for a in List.rev (List.ofSeq silent.Facts) @ List.rev assume do
             z3.Send("(assert " + a + ")")
@@ -1739,6 +1943,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             let same =
                 match f.Ret with
                 | TySeq _ -> "(" + seqOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
+                | TyMap _ | TySet _ -> "(" + colOp "eq" f.Ret + " " + r1 + " " + r2 + ")"
                 | _ -> "(= " + r1 + " " + r2 + ")"
             // small inputs first: the solver spends its whole time limit on most sequences (a
             // binary_search took 3 s more to check, mutant bench of 0.1.5)
