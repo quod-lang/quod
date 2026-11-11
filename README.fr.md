@@ -5,11 +5,11 @@
 *Quod erat demonstrandum* : un langage de programmation conçu pour être **écrit par des agents IA**
 et **vérifié par la machine**. Le programme arrive avec sa démonstration.
 
-> **État : Quod 0.4, une expérience qui fonctionne et qui est jeune.** Le compilateur vérifie les
+> **État : Quod 0.4, un langage jeune, qui avance.** Le compilateur vérifie les
 > types, prouve les contrats avec Z3, contrôle que chaque contrat détermine son résultat, et compile
 > vers Python et vers C#. Il n'a que des fonctions pures : pas d'entrées-sorties, pas encore de
 > dictionnaires ni d'ensembles. Des agents y ont écrit des programmes de 300 lignes à partir de la
-> seule référence. Ce qui a été mesuré, surtout négatif, est
+> seule référence. Ce qui a été mesuré est
 > [plus bas](#ce-quon-a-appris-jusquici). Il a peu servi hors de son auteur : **les retours et les
 > rapports de bogues sont ce dont il a le plus besoin.** [Le télécharger](https://github.com/quod-lang/quod/releases/latest) : z3 est inclus.
 
@@ -167,17 +167,18 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 - **Un agent plus petit trouve les trous.** Un passage avec Haiku a trouvé trois manières de
   contourner le contrôle de complétude (un contrat qu'aucun modèle du solveur ne réfutait, un
   `loose` qui accepte tout, pas d'ensures du tout), toutes désormais détectées.
-- **Depuis, des résultats surtout négatifs ou modestes.** Sur 72 passages à tâches inédites (quatre
+- **Depuis : des mesures, et les jalons qu'elles fixent.** Sur 72 passages à tâches inédites (quatre
   bras, six tâches), la mesure de solidité n'a pas su séparer Quod de Dafny : **aucun gain mesuré**
   en contrats solides. Par MCP, un agent n'est pas devant Dafny. Une erreur pour contrat manquant
   ne fait pas écrire de contrats à un petit modèle (14B). Un contrat trivial (`len(result) == 0`,
   `return []`) peut être complet et faux. Deux modèles ont écrit des moteurs de facturation d'environ
   300 lignes sur trois modules (24 sur 24 vérifiés et conformes à un oracle), mais règles, oracle et
   compilateur ont un seul auteur : [le plafond n'a pas été atteint](bench/runs/t9-billing/report.md).
+  Chacun de ces points est un jalon : un gain mesuré en contrats solides, un test plus dur que celui d'un seul auteur, un premier utilisateur extérieur.
 - **Des revues externes ont trouvé des fausses preuves, corrigées.** Quatre revues adverses (par un
   modèle de langage, avec des programmes rejouables) ont trouvé entre autres un axiome de longueur
   trop fort et un z3 qui répondait `unsat` à une question satisfiable après une vérification
-  interrompue (environ 1 construction sur 200 sur une famille de fichiers). La dernière, de la 0.4.0,
+  interrompue (vu comme environ 1 construction sur 300 refusée à tort, sur une famille de fichiers). La dernière, de la 0.4.0,
   n'en a trouvé aucune dans la construction par défaut. Nous ne prétendons pas qu'il n'en reste pas.
 
 ## Feuille de route

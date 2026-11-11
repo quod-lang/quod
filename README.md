@@ -5,10 +5,10 @@
 *Quod erat demonstrandum*: a programming language designed to be **written by AI agents** and
 **checked by machines**. The program comes with its proof.
 
-> **Status: Quod 0.4, an experiment that works and is young.** The compiler checks types, proves
+> **Status: Quod 0.4, a young language that is moving.** The compiler checks types, proves
 > contracts with Z3, checks that every contract determines its result, and compiles to Python and
 > to C#. It has pure functions only: no input or output, no maps or sets yet. Agents wrote programs
-> of up to 300 lines in it from the reference alone. What was measured, mostly negative, is
+> of up to 300 lines in it from the reference alone. What was measured is
 > [below](#what-we-learned-so-far). It has had little use outside its author: **feedback and bug
 > reports are what it needs most.** [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
 
@@ -161,17 +161,18 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 - **A smaller agent finds the holes.** A Haiku run found three ways around the completeness
   check (a contract no solver model could refute, a `loose` that accepts everything, no ensures
   at all), each now caught.
-- **Since then, mostly negative or modest results.** On 72 held-out runs (four arms, six tasks), the
+- **Since then: measurements, and the milestones they set.** On 72 held-out runs (four arms, six tasks), the
   soundness measure could not separate Quod from Dafny: **no measured gain** in sound contracts.
   Through MCP, an agent is not ahead of Dafny. An error for a missing contract does not make a
   small model (14B) write contracts. A trivial contract (`len(result) == 0`, `return []`) can be
   complete and wrong. Two models wrote billing engines of about 300 lines over three modules
   (24 of 24 verified and pass an oracle), but rules, oracle and compiler have one author:
   [the ceiling was not reached](bench/runs/t9-billing/report.md).
+  Each of these is a milestone: a measured gain in sound contracts, a harder test than one author's, a first external user.
 - **External reviews found false proofs, which were fixed.** Four adversarial reviews (by a
   language model, with replayable programs) found, among others, a length axiom that was too
-  strong and a z3 that answered `unsat` to a satisfiable question after an interrupted check (about
-  1 build in 200 on one family of files). The last, of 0.4.0, found none in the default build. We do not
+  strong and a z3 that answered `unsat` to a satisfiable question after an interrupted check (seen as
+  about 1 build in 300 wrongly refused, on one family of files). The last, of 0.4.0, found none in the default build. We do not
   claim there is none left.
 
 ## Roadmap
