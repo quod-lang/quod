@@ -145,7 +145,7 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 
 ## What we learned so far
 
-*Phase 0 in full: [Green proofs, empty promises: when AI agents write their own specifications](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf) (dev.to).*
+*The idea, the measurements and what is missing: [A compiler that refuses a contract that says too little](https://dev.to/malek_aitouaret_f026758c/a-compiler-that-refuses-a-contract-that-says-too-little-5521) (dev.to). Phase 0 in full: [Green proofs, empty promises: when AI agents write their own specifications](https://dev.to/malek_aitouaret_f026758c/green-proofs-empty-promises-when-ai-agents-write-their-own-specifications-59lf) (dev.to).*
 
 - **Phase 0, Dafny.** Asked to write *verified* Dafny, a smaller model produced contracts that
   verify but barely say anything: 5 of 8 only constrained a length, a format or a shape. One of
