@@ -5,10 +5,12 @@
 *Quod erat demonstrandum*: a programming language designed to be **written by AI agents** and
 **checked by machines**. The program comes with its proof.
 
-> **Status: Quod 0.4, young but real.** The compiler checks types, proves contracts with Z3,
-> checks that every contract determines its result, and compiles to Python and to C#. An AI agent wrote
-> the six VerifBench tasks in Quod from the language reference alone, and all six pass the hidden
-> tests. [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
+> **Status: Quod 0.4, an experiment that works and is young.** The compiler checks types, proves
+> contracts with Z3, checks that every contract determines its result, and compiles to Python and
+> to C#. It has pure functions only: no input or output, no maps or sets yet. Agents wrote programs
+> of up to 300 lines in it from the reference alone. What was measured, mostly negative, is
+> [below](#what-we-learned-so-far). It has had little use outside its author: **feedback and bug
+> reports are what it needs most.** [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
 
 ## Thesis
 
@@ -20,7 +22,7 @@ verified rather than merely plausible.
 Quod is independent of any LLM: the judge is a solver (SMT), the compiler never calls a model,
 and a human can write Quod too, just more tediously.
 
-## Quod 0.1 in one program
+## Quod in one program
 
 ```rust
 fn binary_search(xs: seq<int>, target: int) -> int
@@ -76,15 +78,24 @@ For `x = 0` in `[-1, 0]`, both `0` (the right answer) and `-1` satisfy the contr
 "`result == x` when `x` is already in range".
 
 `quod build file.quod --target python` then generates a Python module: proved contracts become
-documentation, not run-time checks.
+documentation, not run-time checks. `--target csharp` generates C# 7.3 (so .NET Framework 4.7.2 as well
+as .NET): Quod's `int` is a `long` computed in `checked`, and an overflow throws instead of returning a wrong
+result (`i32` and `i64` have their bounds proved).
+
+## What Quod cannot do yet
+
+- **No input or output, no files, no network.** A Quod function is pure: it computes a result from its arguments. You call it from Python or C#.
+- **No maps or sets**, no classes or inheritance (structs, enums, `match` and generics exist).
+- **Verification can say no to a correct program** (the solver gives up on some nonlinear arithmetic or deep quantifiers), and it takes seconds to a minute on programs of a few hundred lines.
+- **Platforms:** developed and tested on Windows. The Linux and macOS binaries are built and tested by CI, but have been run by hand very little. Tell us if one does not work.
 
 ## What is here
 
 | Folder | Content |
 |---|---|
-| [src/Quod/](src/Quod/) | The compiler, in **F#**, shipped as a **Native AOT** binary (no .NET needed to run it): parser, type checker, verifier (Z3 through SMT-LIB), completeness check, Python backend |
+| [src/Quod/](src/Quod/) | The compiler, in **F#**, shipped as a **Native AOT** binary (no .NET needed to run it): parser, type checker, verifier (Z3 through SMT-LIB), completeness check, Python and C# backends, MCP server |
 | [tests/](tests/) | The compiler's tests (xUnit), among them a differential test of the generated Python against the evaluator |
-| [spec/](spec/) | The language: [Quod 0.1](spec/quod-0.1.md) (what exists), [kernel draft](spec/kernel.md) (where it is going) |
+| [spec/](spec/) | The language: [reference](spec/quod-0.1.md) (what exists, kept up to date although the file name says 0.1), [kernel draft](spec/kernel.md) (where it is going) |
 | [examples/](examples/) | Programs that verify, and [programs that must be rejected](examples/bugs/) |
 | [bench/](bench/) | **VerifBench**: Phase 0 (Python vs Dafny, written by agents), and [the six tasks in Quod](bench/quod/), by hand and by an agent |
 | [tools/dafny-complete/](tools/dafny-complete/) | The first building block, for Dafny: a spec-completeness checker that finds concrete witnesses of underspecified contracts |
@@ -147,6 +158,18 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 - **A smaller agent finds the holes.** A Haiku run found three ways around the completeness
   check (a contract no solver model could refute, a `loose` that accepts everything, no ensures
   at all), each now caught.
+- **Since then, mostly negative or modest results.** On 72 held-out runs (four arms, six tasks), the
+  soundness measure could not separate Quod from Dafny: **no measured gain** in sound contracts.
+  Through MCP, an agent is not ahead of Dafny. An error for a missing contract does not make a
+  small model (14B) write contracts. A trivial contract (`len(result) == 0`, `return []`) can be
+  complete and wrong. Two models wrote billing engines of about 300 lines over three modules
+  (24 of 24 verified and pass an oracle), but rules, oracle and compiler have one author:
+  [the ceiling was not reached](bench/runs/t9-billing/report.md).
+- **External reviews found false proofs, which were fixed.** Four adversarial reviews (by a
+  language model, with replayable programs) found, among others, a length axiom that was too
+  strong and a z3 that answered `unsat` to a satisfiable question after an interrupted check (about
+  1 build in 200 on one family of files). The last, of 0.4.0, found none in the default build. We do not
+  claim there is none left.
 
 ## Roadmap
 

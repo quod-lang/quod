@@ -5,10 +5,13 @@
 *Quod erat demonstrandum* : un langage de programmation conçu pour être **écrit par des agents IA**
 et **vérifié par la machine**. Le programme arrive avec sa démonstration.
 
-> **État : Quod 0.1, jeune mais réel.** Le compilateur vérifie les types, prouve les contrats avec
-> Z3, contrôle que chaque contrat détermine son résultat, et compile vers Python. Un agent IA a
-> écrit les six tâches VerifBench en Quod à partir de la seule référence du langage, et les six
-> passent les tests cachés. [Le télécharger](https://github.com/quod-lang/quod/releases/latest) : z3 est inclus.
+> **État : Quod 0.4, une expérience qui fonctionne et qui est jeune.** Le compilateur vérifie les
+> types, prouve les contrats avec Z3, contrôle que chaque contrat détermine son résultat, et compile
+> vers Python et vers C#. Il n'a que des fonctions pures : pas d'entrées-sorties, pas encore de
+> dictionnaires ni d'ensembles. Des agents y ont écrit des programmes de 300 lignes à partir de la
+> seule référence. Ce qui a été mesuré, surtout négatif, est
+> [plus bas](#ce-quon-a-appris-jusquici). Il a peu servi hors de son auteur : **les retours et les
+> rapports de bogues sont ce dont il a le plus besoin.** [Le télécharger](https://github.com/quod-lang/quod/releases/latest) : z3 est inclus.
 
 ## Thèse
 
@@ -20,7 +23,7 @@ de code vérifié plutôt que simplement plausible.
 Quod est indépendant de tout LLM : le juge est un solveur (SMT), le compilateur n'appelle jamais
 de modèle, et un humain peut écrire du Quod, simplement plus laborieusement.
 
-## Quod 0.1 en un programme
+## Quod en un programme
 
 ```rust
 fn binary_search(xs: seq<int>, target: int) -> int
@@ -78,14 +81,24 @@ manque « `result == x` quand `x` est déjà dans l'intervalle ».
 
 `quod build fichier.quod --target python` produit ensuite un module Python : les contrats prouvés
 deviennent de la documentation, pas des vérifications à l'exécution.
+`--target csharp` produit du C# 7.3 (donc .NET Framework 4.7.2 comme .NET) : le `int` de Quod est un `long`
+calculé en `checked`, et un dépassement lève une exception au lieu de rendre un résultat faux (`i32` et
+`i64` ont leurs bornes prouvées).
+
+## Ce que Quod ne sait pas faire encore
+
+- **Pas d'entrées-sorties, pas de fichiers, pas de réseau.** Une fonction Quod est pure : elle calcule un résultat à partir de ses arguments. On l'appelle depuis Python ou C#.
+- **Pas de dictionnaires ni d'ensembles**, pas de classes ni d'héritage (structures, énumérations, `match` et génériques existent).
+- **La vérification peut refuser un programme correct** (le solveur abandonne sur certaines arithmétiques non linéaires ou quantificateurs profonds), et elle prend de quelques secondes à une minute sur des programmes de quelques centaines de lignes.
+- **Plateformes :** développé et testé sous Windows. Les binaires Linux et macOS sont construits et testés par la CI, mais très peu lancés à la main. Dites-nous si l'un ne marche pas.
 
 ## Contenu
 
 | Dossier | Contenu |
 |---|---|
-| [src/Quod/](src/Quod/) | Le compilateur, en **F#**, livré comme binaire **Native AOT** (pas besoin de .NET pour l'utiliser) : analyse, typage, vérification (Z3 en SMT-LIB), contrôle de complétude, génération Python |
+| [src/Quod/](src/Quod/) | Le compilateur, en **F#**, livré comme binaire **Native AOT** (pas besoin de .NET pour l'utiliser) : analyse, typage, vérification (Z3 en SMT-LIB), contrôle de complétude, génération Python et C#, serveur MCP |
 | [tests/](tests/) | Les tests du compilateur (xUnit), dont un test différentiel du Python généré contre l'évaluateur |
-| [spec/](spec/) | Le langage : [Quod 0.1](spec/quod-0.1.fr.md) (ce qui existe), [brouillon du noyau](spec/kernel.fr.md) (où il va) |
+| [spec/](spec/) | Le langage : [référence](spec/quod-0.1.fr.md) (ce qui existe, tenue à jour bien que le nom du fichier dise 0.1), [brouillon du noyau](spec/kernel.fr.md) (où il va) |
 | [examples/](examples/) | Des programmes qui se vérifient, et [des programmes qui doivent être rejetés](examples/bugs/) |
 | [bench/](bench/README.fr.md) | **VerifBench** : la phase 0 (Python contre Dafny, écrits par des agents), et [les six tâches en Quod](bench/quod/README.fr.md), à la main et par un agent |
 | [tools/dafny-complete/](tools/dafny-complete/) | La première brique, pour Dafny : un contrôle de spec complète qui trouve des témoins concrets des contrats sous-spécifiés |
@@ -151,6 +164,18 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 - **Un agent plus petit trouve les trous.** Un passage avec Haiku a trouvé trois manières de
   contourner le contrôle de complétude (un contrat qu'aucun modèle du solveur ne réfutait, un
   `loose` qui accepte tout, pas d'ensures du tout), toutes désormais détectées.
+- **Depuis, des résultats surtout négatifs ou modestes.** Sur 72 passages à tâches inédites (quatre
+  bras, six tâches), la mesure de solidité n'a pas su séparer Quod de Dafny : **aucun gain mesuré**
+  en contrats solides. Par MCP, un agent n'est pas devant Dafny. Une erreur pour contrat manquant
+  ne fait pas écrire de contrats à un petit modèle (14B). Un contrat trivial (`len(result) == 0`,
+  `return []`) peut être complet et faux. Deux modèles ont écrit des moteurs de facturation d'environ
+  300 lignes sur trois modules (24 sur 24 vérifiés et conformes à un oracle), mais règles, oracle et
+  compilateur ont un seul auteur : [le plafond n'a pas été atteint](bench/runs/t9-billing/report.md).
+- **Des revues externes ont trouvé des fausses preuves, corrigées.** Quatre revues adverses (par un
+  modèle de langage, avec des programmes rejouables) ont trouvé entre autres un axiome de longueur
+  trop fort et un z3 qui répondait `unsat` à une question satisfiable après une vérification
+  interrompue (environ 1 construction sur 200 sur une famille de fichiers). La dernière, de la 0.4.0,
+  n'en a trouvé aucune dans la construction par défaut. Nous ne prétendons pas qu'il n'en reste pas.
 
 ## Feuille de route
 
@@ -163,10 +188,11 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 2. **Quod 0.2** ([publié](https://github.com/quod-lang/quod/releases/latest)) : une génération C# et un paquet MSBuild, pour livrer des fonctions prouvées dans des bases de code
    .NET existantes, et un dialogue plus fiable avec le solveur.
 3. **Quod 0.3** ([publié](https://github.com/quod-lang/quod/releases/latest)) : modules, caractères et chaînes avec une bibliothèque standard en Quod, `i32` et `i64`, structures, énumérations, `match` et génériques.
-4. **Quod 0.4** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
+4. **Quod 0.4** ([publié](https://github.com/quod-lang/quod/releases/latest)) : entiers C# en `long` contrôlé, limites comptées en opérations du solveur plutôt qu'en temps. Ce que cette ligne annonçait avant (capacités, contrats scellés, dictionnaires et ensembles, types raffinés généraux) passe en 0.5.
+5. **Quod 0.5** : capacités (aucune autorité ambiante : une fonction ne touche la console, les
    fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit), contrats scellés,
    dictionnaires et ensembles, types raffinés généraux.
-5. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
+6. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
    Quod.**
 
 Le développement se fait en public. Si vous écrivez du Dafny, ou laissez des agents écrire du code
