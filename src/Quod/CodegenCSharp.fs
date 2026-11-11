@@ -1077,7 +1077,15 @@ and private generateInner (sourceFile: string) (prog: TProgram) (whole: TProgram
         // the structs and enums: immutable classes, equal by their values. Quod holds its own
         // representation in `_f0`; a C# caller builds and reads through what checks and converts.
         let dataText = StringBuilder()
+        let rec holdsCollection (t: Ty) =
+            match t with
+            | TyMap _ | TySet _ -> true
+            | TySeq e -> holdsCollection e
+            | TyTuple ts -> List.exists holdsCollection ts
+            | _ -> false
         for d in prog.Types do
+            if d.DataCases |> List.exists (fun c -> c.Fields |> List.exists (fun (_, t) -> holdsCollection t)) then
+                raise (Refused("'" + dataShort d.DataName + "' holds a map or a set, which is not generated for C# yet: a class would compare them by reference"))
             let inner = if d.IsStruct then indent else indent + "    "
             let dataName = dataShort d.DataName
             if not d.IsStruct then

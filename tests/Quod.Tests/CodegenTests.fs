@@ -53,6 +53,8 @@ let rec pyLiteral (v: Value) =
     | VInt n -> n.ToString()
     | VBool b -> if b then "True" else "False"
     | VSeq xs -> "[" + (xs |> List.map pyLiteral |> String.concat ", ") + "]"
+    | VMap entries -> "{" + (entries |> List.map (fun (k, x) -> pyLiteral k + ": " + pyLiteral x) |> String.concat ", ") + "}"
+    | VSet xs -> "frozenset([" + (xs |> List.map pyLiteral |> String.concat ", ") + "])"
     | VTuple [ x ] -> "(" + pyLiteral x + ",)"
     | VTuple xs -> "(" + (xs |> List.map pyLiteral |> String.concat ", ") + ")"
 
@@ -62,6 +64,8 @@ let private quodText =
     + "    if isinstance(v, bool): return 'true' if v else 'false'\n"
     + "    if isinstance(v, int): return str(v)\n"
     + "    if isinstance(v, list): return '[' + ', '.join(_show(x) for x in v) + ']'\n"
+    + "    if isinstance(v, dict): return '{' + ', '.join(_show(k) + ': ' + _show(x) for k, x in sorted(v.items())) + '}'\n"
+    + "    if isinstance(v, frozenset): return '{' + ', '.join(_show(x) for x in sorted(v)) + '}'\n"
     + "    return '(' + ', '.join(_show(x) for x in v) + ')'\n"
 
 /// Read back a value printed by _show, at the type the function returns.
@@ -83,6 +87,27 @@ let parseValue (t: Ty) (text: string) : Value =
                 skip ()
             pos <- pos + 1
             VSeq(List.ofSeq items)
+        | TySet e ->
+            pos <- pos + 1
+            let items = ResizeArray()
+            skip ()
+            while peek () <> '}' do
+                items.Add(value e)
+                skip ()
+            pos <- pos + 1
+            VSet(List.ofSeq items)
+        | TyMap(k, v) ->
+            pos <- pos + 1
+            let items = ResizeArray()
+            skip ()
+            while peek () <> '}' do
+                let key = value k
+                skip ()
+                pos <- pos + 1 // the colon
+                items.Add((key, value v))
+                skip ()
+            pos <- pos + 1
+            VMap(List.ofSeq items)
         | TyTuple ts ->
             pos <- pos + 1
             let items = ts |> List.map value
@@ -103,6 +128,8 @@ let rec randomValue (rnd: Random) (t: Ty) : Value =
     | TyNat -> VInt(BigInteger(rnd.Next(0, 7)))
     | TyBool -> VBool(rnd.Next 2 = 0)
     | TySeq e -> VSeq [ for _ in 1 .. rnd.Next(0, 6) -> randomValue rnd e ]
+    | TySet e -> VSet([ for _ in 1 .. rnd.Next(0, 5) -> randomValue rnd e ] |> List.fold addElement [])
+    | TyMap(k, v) -> VMap([ for _ in 1 .. rnd.Next(0, 5) -> randomValue rnd k, randomValue rnd v ] |> List.fold (fun m (a, b) -> putEntry m a b) [])
     | TyTuple ts -> VTuple(ts |> List.map (randomValue rnd))
 
 /// Run every function of `src` in Python on random inputs that satisfy its precondition.
@@ -305,3 +332,23 @@ let ``sequences of tuples are accepted as lists of lists at the public boundary`
         + "fn firsts(xs: seq<(int, int)>) -> bool requires len(xs) > 0 { first(xs) && first(xs[..1]) }\n"
     let _, modul = compile src
     Assert.Equal("True True False\n", runPython modul "print(first([[1, 2]]), firsts(((1, 2), (3, 4))), first([(2, 1)]))")
+
+/// A program with maps and sets, expression functions and statement functions.
+let mapsProgram =
+    "fn lookup(m: map<int, int>, k: int) -> int requires k in m { m[k] }\n"
+    + "fn bump(m: map<int, nat>, k: int) -> map<int, nat> { put(m, k, if k in m { m[k] + 1 } else { 1 }) }\n"
+    + "fn drop(m: map<int, int>, k: int) -> map<int, int> { remove(m, k) }\n"
+    + "fn domain(m: map<int, int>) -> set<int> { keys(m) }\n"
+    + "fn size_of(s: set<int>) -> nat { len(s) }\n"
+    + "fn both(a: set<int>, b: set<int>) -> set<int> { union(a, b) }\n"
+    + "fn common(a: set<int>, b: set<int>) -> set<int> { inter(a, b) }\n"
+    + "fn rest(a: set<int>, b: set<int>) -> set<int> { diff(a, b) }\n"
+    + "fn within(a: set<int>, b: set<int>) -> bool { subset(a, b) }\n"
+    + "fn with_one(s: set<int>, x: int) -> set<int> { add(s, x) }\n"
+    + "fn without_one(s: set<int>, x: int) -> set<int> { remove(s, x) }\n"
+    + "fn same(a: map<int, int>, b: map<int, int>) -> bool { a == b }\n"
+    + "fn small() -> map<int, int> { map_of([(2, 20), (1, 10), (2, 22)]) }\n"
+
+[<Fact>]
+let ``maps and sets run in Python as the evaluator says`` () =
+    Assert.True(differential mapsProgram 25 > 200)

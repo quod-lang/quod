@@ -147,3 +147,19 @@ let ``int parts of literals are accepted as nat, with a proof obligation`` () =
     assertOk "fn f(c: nat) -> seq<nat> { [c, c + 1] }"
     assertOk "fn f(b: bool, c: nat) -> (int, nat) { if b { (0, c + 1) } else { (1, 1) } }"
     assertError "but (int, nat) is expected" "fn f(p: (int, int)) -> (int, nat) { p }"
+
+[<Fact>]
+let ``maps and sets are typed, and their keys must be ordered`` () =
+    assertOk "fn f(m: map<string, nat>, s: set<int>, k: string) -> bool { k in m && 3 in s && len(m) > len(s) }"
+    assertOk "fn g(m: map<int, int>) -> map<int, int> { put(remove(m, 1), 2, m[2]) }"
+    assertError "must be of an ordered type" "fn f(m: map<seq<int>, int>) -> int { len(m) }"
+    assertError "must be of an ordered type" "fn f(s: set<(int, int)>) -> int { len(s) }"
+    assertError "takes a list written in place" "fn f(xs: seq<(int, int)>) -> map<int, int> { map_of(xs) }"
+    assertError "needs a map" "fn f(xs: seq<int>) -> seq<int> { put(xs, 1, 2) }"
+    assertError "needs a map or a set" "fn f(x: int) -> bool { 1 in x }"
+    assertError "needs a set" "fn f(m: map<int, int>) -> bool { forall x in m: x > 0 }"
+    assertError "has type" "fn f(m: map<int, int>) -> map<int, int> { put(m, 1, true) }"
+
+[<Fact>]
+let ``a user function may be named like a map operation`` () =
+    assertOk "fn put(x: int) -> int { x + 1 }\nfn keys(x: int) -> int { put(x) }"

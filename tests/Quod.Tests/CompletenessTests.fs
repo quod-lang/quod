@@ -156,3 +156,28 @@ let ``the first index of a maximum is determined, in two clauses or in one`` () 
         + "  return best; }"
     assertDetermined (argmax "  ensures forall i in 0..len(xs): xs[i] <= xs[result]\n  ensures forall i in 0..result: xs[i] < xs[result]\n")
     assertDetermined (argmax "  ensures forall i in 0..len(xs): xs[i] < xs[result] || (xs[i] == xs[result] && result <= i)\n")
+
+[<Fact>]
+let ``a weak contract on a map result gets two maps as the witness`` () =
+    let src = "fn bump(m: map<int, nat>, k: int) -> map<int, nat> ensures k in result { put(m, k, 1) }"
+    let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
+    Assert.True(errs.IsEmpty)
+    use z3 = new Quod.Smt.Session(Quod.Tests.VerifyTests.z3Path, 10000, None)
+    let ds = (Quod.Vcgen.verify "test.quod" typed z3 0).Diagnostics
+    Assert.True(ds |> List.exists (fun d -> d.Kind = "completeness" && d.Status = "underspecified"), "expected an underspecified contract")
+
+[<Fact>]
+let ``a map contract that fixes the result is determined`` () =
+    let src =
+        "fn bump(m: map<int, nat>, k: int) -> map<int, nat>\n"
+        + "  ensures k in result\n"
+        + "  ensures result[k] == (if k in m { m[k] + 1 } else { 1 })\n"
+        + "  ensures forall j in keys(result): j == k || j in m\n"
+        + "  ensures forall j in keys(m): j != k ==> j in result && result[j] == m[j]\n"
+        + "{ put(m, k, if k in m { m[k] + 1 } else { 1 }) }\n"
+    let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
+    Assert.True(errs.IsEmpty)
+    use z3 = new Quod.Smt.Session(Quod.Tests.VerifyTests.z3Path, 10000, None)
+    let ds = (Quod.Vcgen.verify "test.quod" typed z3 0).Diagnostics
+    Assert.True(ds |> List.forall (fun d -> d.Severity <> Quod.Diagnostics.Severity.Error), String.concat " | " (ds |> List.map Quod.Diagnostics.toText))
+    Assert.True(ds |> List.forall (fun d -> d.Kind <> "completeness"))

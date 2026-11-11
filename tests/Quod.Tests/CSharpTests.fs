@@ -300,3 +300,68 @@ let ``the comment of a public method says which requires it leaves to the caller
         Assert.Contains("requires n &gt; 0 (checked)", code)
         Assert.Contains("NOT CHECKED, the caller's duty, unless QUOD_CHECK_REQUIRES is defined: requires forall", code)
     | Result.Error why -> failwith why
+
+[<Fact>]
+let ``maps and sets run in C# as in Python`` () =
+    let src =
+        "fn lookup(m: map<string, nat>, k: string) -> nat requires k in m { m[k] }
+"
+        + "fn bumped(m: map<int, nat>, k: int, j: int) -> nat requires j in put(m, k, if k in m { m[k] + 1 } else { 1 }) { put(m, k, if k in m { m[k] + 1 } else { 1 })[j] }
+"
+        + "fn size_of(s: set<int>) -> nat { len(s) }
+"
+        + "fn domain_size(m: map<int, int>) -> nat { len(keys(m)) }
+"
+        + "fn both_size(a: set<int>, b: set<int>) -> nat { len(union(a, b)) }
+"
+        + "fn common_size(a: set<int>, b: set<int>) -> nat { len(inter(a, b)) }
+"
+        + "fn has_str(s: set<string>, x: string) -> bool { x in add(s, \"b\") }
+"
+        + "fn same(a: map<int, int>, b: map<int, int>) -> bool { a == b }
+"
+        + "fn small_size() -> nat { len(map_of([(\"a\", 1), (\"b\", 2), (\"a\", 3)])) }
+"
+        + "fn dropped(m: map<int, int>, k: int) -> bool { !(k in remove(m, k)) }
+"
+    let dict (pairs: (string * int) list) = "new Dictionary<string, long> { " + (pairs |> List.map (fun (k, v) -> "{ \"" + k + "\", " + string v + "L }") |> String.concat ", ") + " }"
+    let idict (pairs: (int * int) list) = "new Dictionary<long, long> { " + (pairs |> List.map (fun (k, v) -> "{ " + string k + "L, " + string v + "L }") |> String.concat ", ") + " }"
+    let iset (xs: int list) = "new HashSet<long> { " + (xs |> List.map (fun x -> string x + "L") |> String.concat ", ") + " }"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"lookup\", () => T0.P.Lookup(" + dict [ "a", 3; "b", 4 ] + ", \"b\"));"
+              "        Case(\"lookup absent\", () => T0.P.Lookup(" + dict [ "a", 3 ] + ", \"z\"));"
+              "        Case(\"bumped\", () => T0.P.Bumped(" + idict [ 1, 2 ] + ", 1L, 1L));"
+              "        Case(\"bumped new\", () => T0.P.Bumped(" + idict [ 1, 2 ] + ", 5L, 5L));"
+              "        Case(\"size\", () => T0.P.SizeOf(" + iset [ 1; 2; 3 ] + "));"
+              "        Case(\"domain\", () => T0.P.DomainSize(" + idict [ 1, 2; 3, 4 ] + "));"
+              "        Case(\"union\", () => T0.P.BothSize(" + iset [ 1; 2 ] + ", " + iset [ 2; 3 ] + "));"
+              "        Case(\"inter\", () => T0.P.CommonSize(" + iset [ 1; 2 ] + ", " + iset [ 2; 3 ] + "));"
+              "        Case(\"has string\", () => T0.P.HasStr(new HashSet<string> { \"a\" }, \"b\"));"
+              "        Case(\"same\", () => T0.P.Same(" + idict [ 1, 2; 3, 4 ] + ", " + idict [ 3, 4; 1, 2 ] + "));"
+              "        Case(\"not same\", () => T0.P.Same(" + idict [ 1, 2 ] + ", " + idict [ 1, 3 ] + "));"
+              "        Case(\"small\", () => T0.P.SmallSize());"
+              "        Case(\"dropped\", () => T0.P.Dropped(" + idict [ 1, 2 ] + ", 1L));" ]
+    Assert.Equal("4", got.["lookup"])
+    Assert.StartsWith("!", got.["lookup absent"])
+    Assert.Equal("3", got.["bumped"])
+    Assert.Equal("1", got.["bumped new"])
+    Assert.Equal("3", got.["size"])
+    Assert.Equal("2", got.["domain"])
+    Assert.Equal("3", got.["union"])
+    Assert.Equal("1", got.["inter"])
+    Assert.Equal("true", got.["has string"])
+    Assert.Equal("true", got.["same"])
+    Assert.Equal("false", got.["not same"])
+    Assert.Equal("2", got.["small"])
+    Assert.Equal("true", got.["dropped"])
+
+[<Fact>]
+let ``what C# cannot hold yet is refused by Quod`` () =
+    match generate "p.quod" (typedOf "fn f(m: map<int, seq<int>>) -> nat { len(m) }") Set.empty defaultOptions with
+    | Result.Error why -> Assert.Contains("not generated for C#", why)
+    | Ok _ -> failwith "generated"
+    match generate "p.quod" (typedOf "struct Box { items: set<int> }
+fn f(b: Box) -> nat { len(b.items) }") Set.empty defaultOptions with
+    | Result.Error why -> Assert.Contains("holds a map or a set", why)
+    | Ok _ -> failwith "generated"

@@ -336,3 +336,48 @@ let ``an arithmetic bug is refuted whatever the file holds besides`` () =
     for src in [ add; add + neighbour; neighbour + add ] do
         let d = assertRefuted "postcondition" src
         Assert.Equal<(string * string) list>([ "a", "27"; "b", "3" ], d.Counterexample)
+
+[<Fact>]
+let ``a read of a key that may be absent is refused, with the map it fails on`` () =
+    let d = assertRefuted "key in map" "fn f(m: map<int, int>, k: int) -> int { m[k] }"
+    Assert.Equal(Some "run", d.Evidence)
+    assertProved "fn f(m: map<int, int>, k: int) -> int requires k in m { m[k] }"
+
+[<Fact>]
+let ``maps and sets obey what the axioms say`` () =
+    assertProved
+        ("fn after_put(m: map<int, int>, k: int, v: int) -> int ensures result == v { put(m, k, v)[k] }\n"
+         + "fn put_keeps(m: map<int, int>, k: int, v: int, j: int) -> bool requires j in m && j != k ensures result { put(m, k, v)[j] == m[j] }\n"
+         + "fn size_after_put(m: map<int, int>, k: int, v: int) -> nat ensures result == (if k in m { len(m) } else { len(m) + 1 }) { len(put(m, k, v)) }\n"
+         + "fn removed(m: map<int, int>, k: int) -> bool ensures result { !(k in remove(m, k)) }\n"
+         + "fn keys_of_put(m: map<int, int>, k: int, v: int) -> bool ensures result { k in keys(put(m, k, v)) && len(keys(m)) == len(m) }\n"
+         + "fn union_has(a: set<int>, b: set<int>, x: int) -> bool ensures result { (x in a || x in b) == (x in union(a, b)) }\n"
+         + "fn inter_is_smaller(a: set<int>, b: set<int>) -> bool ensures result { len(inter(a, b)) <= len(a) }\n"
+         + "fn add_twice(s: set<int>, x: int) -> bool ensures result { add(add(s, x), x) == add(s, x) }\n"
+         + "fn order_does_not_matter() -> bool ensures result { map_of([(1, 2), (3, 4)]) == map_of([(3, 4), (1, 2)]) }\n"
+         + "fn last_wins() -> bool ensures result { map_of([(1, 2), (1, 3)])[1] == 3 }\n")
+
+[<Fact>]
+let ``a map built in a loop keeps what the invariants say`` () =
+    assertProved
+        ("fn squares(n: nat) -> map<int, nat>\n"
+         + "  ensures forall k in keys(result): 0 <= k && k < n && result[k] == k * k\n"
+         + "  ensures forall k in 0..n: k in result\n"
+         + "{\n"
+         + "  let mut m: map<int, nat> = map_of([]);\n"
+         + "  let mut i = 0;\n"
+         + "  while i < n\n"
+         + "    invariant 0 <= i && i <= n\n"
+         + "    invariant forall k in keys(m): 0 <= k && k < i && m[k] == k * k\n"
+         + "    invariant forall k in 0..i: k in m\n"
+         + "    decreases n - i\n"
+         + "  {\n"
+         + "    m = put(m, i, i * i);\n"
+         + "    i = i + 1;\n"
+         + "  }\n"
+         + "  return m;\n"
+         + "}\n")
+
+[<Fact>]
+let ``a false claim about a map is refused`` () =
+    assertRefuted "postcondition" "fn f(m: map<int, int>, k: int) -> map<int, int> ensures len(result) == len(m) { put(m, k, 1) }" |> ignore
