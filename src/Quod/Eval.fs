@@ -302,7 +302,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
         | SWhile(cond, invs, dec, body) ->
             let numbered = List.zip invs [ 1 .. invs.Length ]
             for (inv, k) in numbered do
-                ev.Require(inv, env, "invariant #" + string k + " holds on entry to the loop", inv.Span)
+                ev.Require(inv, env, "invariant #" + string k + " `" + Printer.exprText (toSyntax inv) + "` holds on entry to the loop", inv.Span)
             let mutable en = env
             let test () =
                 match ev.Expr(cond, en) with
@@ -313,7 +313,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
                 if m0.Sign < 0 then raise (Violation("loop measure (decreases) is >= 0", dec.Span))
                 en <- ev.Block(body, en)
                 for (inv, k) in numbered do
-                    ev.Require(inv, en, "invariant #" + string k + " is preserved by the loop body", inv.Span)
+                    ev.Require(inv, en, "invariant #" + string k + " `" + Printer.exprText (toSyntax inv) + "` is preserved by the loop body", inv.Span)
                 if not (ev.Int(dec, en) < m0) then raise (Violation("loop measure (decreases) gets smaller", dec.Span))
             en
 

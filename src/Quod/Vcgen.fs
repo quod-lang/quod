@@ -1292,7 +1292,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let numbered = List.zip invs [ 1 .. invs.Length ]
         let mutable entry = st
         for (inv, k) in numbered do
-            entry <- v.Prove(entry, inv, "invariant #" + string k + " holds on entry to the loop", inv.Span)
+            entry <- v.Prove(entry, inv, "invariant #" + string k + " `" + Printer.exprText (toSyntax inv) + "` holds on entry to the loop", inv.Span)
         let modified = assignedIn body |> List.filter st.Env.ContainsKey |> List.distinct
         let mutable loop = entry
         for name in modified do
@@ -1317,7 +1317,7 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         if finish.Alive then
             let mutable e = finish
             for (inv, k) in numbered do
-                e <- v.Prove(e, inv, "invariant #" + string k + " is preserved by the loop body", inv.Span)
+                e <- v.Prove(e, inv, "invariant #" + string k + " `" + Printer.exprText (toSyntax inv) + "` is preserved by the loop body", inv.Span)
             let e2, m1 = v.Eval(e, dec)
             v.Check(e2, { Goal = "(< " + m1 + " " + m0 + ")"; Label = "loop measure (decreases) gets smaller"; Span = dec.Span }) |> ignore
         // after the loop

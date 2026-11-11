@@ -179,7 +179,7 @@ let ``a bug the solver times out on is refuted by running the function (the revi
 [<Fact>]
 let ``false invariants get a counterexample from execution`` () =
     let d =
-        assertRefuted "invariant #3 is preserved"
+        assertRefuted "invariant #3 `forall j in 0..i: xs[j] <= xs[best]` is preserved"
             ("fn max_index(xs: seq<int>) -> int requires len(xs) > 0 ensures 0 <= result < len(xs) ensures forall i in 0..len(xs): xs[i] <= xs[result] {\n"
              + "  let mut best = 0; let mut i = 1;\n"
              + "  while i < len(xs) invariant 1 <= i <= len(xs) invariant 0 <= best < len(xs) invariant forall j in 0..i: xs[j] <= xs[best] decreases len(xs) - i\n"
