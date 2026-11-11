@@ -86,8 +86,9 @@ result (`i32` and `i64` have their bounds proved).
 
 ## What Quod cannot do yet
 
-- **No input or output, no files, no network.** A Quod function is pure: it computes a result from its arguments. You call it from Python or C#.
-- **No maps or sets**, no classes or inheritance (structs, enums, `match` and generics exist).
+- **No input or output, no files, no network, yet.** A Quod function is pure today: it computes a result from its arguments, and you call it from Python or C#. Input and output are planned, as *capabilities* (a function touches the console, files or the network only through a capability it receives, so the contract still says what it may do): this is the next item of the [roadmap](#roadmap).
+- **No maps or sets, yet.** They are on the same roadmap item.
+- **No classes or inheritance, and none planned** (structs, enums, `match` and generics exist).
 - **Verification can say no to a correct program** (the solver gives up on some nonlinear arithmetic or deep quantifiers), and it takes seconds to a minute on programs of a few hundred lines.
 - **Platforms:** developed and tested on Windows. The Linux and macOS binaries are built and tested by CI, but have been run by hand very little. Tell us if one does not work.
 

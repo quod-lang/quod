@@ -89,8 +89,9 @@ calculé en `checked`, et un dépassement lève une exception au lieu de rendre 
 
 ## Ce que Quod ne sait pas faire encore
 
-- **Pas d'entrées-sorties, pas de fichiers, pas de réseau.** Une fonction Quod est pure : elle calcule un résultat à partir de ses arguments. On l'appelle depuis Python ou C#.
-- **Pas de dictionnaires ni d'ensembles**, pas de classes ni d'héritage (structures, énumérations, `match` et génériques existent).
+- **Pas d'entrées-sorties, pas de fichiers, pas de réseau, pour l'instant.** Une fonction Quod est pure aujourd'hui : elle calcule un résultat à partir de ses arguments, et on l'appelle depuis Python ou C#. Les entrées-sorties sont prévues, sous forme de *capacités* (une fonction ne touche la console, les fichiers ou le réseau qu'au travers d'une capacité qu'elle reçoit, de sorte que le contrat dit encore ce qu'elle peut faire) : c'est le prochain point de la [feuille de route](#feuille-de-route).
+- **Pas de dictionnaires ni d'ensembles, pour l'instant.** Ils sont sur le même point de la feuille de route.
+- **Pas de classes ni d'héritage, et aucune de prévue** (structures, énumérations, `match` et génériques existent).
 - **La vérification peut refuser un programme correct** (le solveur abandonne sur certaines arithmétiques non linéaires ou quantificateurs profonds), et elle prend de quelques secondes à une minute sur des programmes de quelques centaines de lignes.
 - **Plateformes :** développé et testé sous Windows. Les binaires Linux et macOS sont construits et testés par la CI, mais très peu lancés à la main. Dites-nous si l'un ne marche pas.
 
