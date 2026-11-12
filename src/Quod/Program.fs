@@ -10,6 +10,8 @@ let private usage =
     + "  parse   read FILE, report the first syntax error, or print the program back\n"
     + "  check   type-check FILE, prove its contracts, check that they are complete\n"
     + "  build   check FILE, then generate code (only for a verified program)\n"
+    + "  run     check FILE, then run its main(c: console.Console) and print what it writes (--function NAME for another)
+"
     + "  mcp     serve check, build, run and the language reference to an AI agent (MCP, stdio)\n"
     + "  contract FILE CASES --function NAME   evaluate a contract on the arguments and results of a JSON file\n"
     + "  reference [SECTION]   print the language reference (all there is to know to write Quod),\n"
@@ -148,6 +150,49 @@ let private buildCommand (file: string) (o: Options) =
                                 "warning: not fully proved, contracts checked at run time in: " + String.Join(", ", unproved))
                     0)
 
+/// `quod run FILE`: check the program, then run `main` (one Console in, one Console out) with the evaluator
+/// and print the lines it wrote. The program is run as it is proved, with no Python or .NET involved.
+let private runCommand (file: string) (o: Options) =
+    withFile file (fun src ->
+        match verifyFile file src o with
+        | Result.Error code -> code
+        | Ok(typed, result) ->
+            let errors = Pipeline.errorsOf result
+            let name = defaultArg o.Function "main"
+            if not errors.IsEmpty then
+                Console.Error.WriteLine("rejected: " + Pipeline.summary result + "; the program is not run")
+                1
+            else
+                match typed.Fns |> List.tryFind (fun f -> f.Name = name) with
+                | None ->
+                    Console.Error.WriteLine("error: " + file + " has no function '" + name + "' to run (quod run FILE [--function NAME])")
+                    2
+                | Some f when (match f.Params with [ p ] -> Capabilities.isCapability p.Ty | _ -> false) && Capabilities.isCapability f.Ret ->
+                    let fns = typed.Fns |> List.map (fun g -> g.Name, g) |> Map.ofList
+                    let ev = Eval.Evaluator(fns, false)
+                    let start = Eval.VData(Capabilities.capabilityType, [ Eval.VSeq [] ])
+                    try
+                        match Eval.withBigStack (fun () -> ev.Run(f, [ start ])) with
+                        | Eval.VData(_, [ Eval.VSeq lines ]) ->
+                            for line in lines do
+                                match line with
+                                | Eval.VSeq cs -> Console.WriteLine(String.Join("", cs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))
+                                | _ -> ()
+                            0
+                        | _ ->
+                            Console.Error.WriteLine("error: '" + name + "' did not return a Console")
+                            1
+                    with
+                    | Eval.Violation(label, _) ->
+                        Console.Error.WriteLine("error: " + label + " fails while running '" + name + "'")
+                        1
+                    | Eval.CannotEvaluate why ->
+                        Console.Error.WriteLine("error: cannot run '" + name + "': " + why)
+                        1
+                | Some _ ->
+                    Console.Error.WriteLine("error: '" + name + "' must take one Console and return one: fn " + name + "(c: console.Console) -> console.Console")
+                    2)
+
 [<EntryPoint>]
 let main argv =
     let o, args = parseOptions (List.ofArray argv)
@@ -155,6 +200,7 @@ let main argv =
     | [ "parse"; file ] -> parseCommand file o
     | [ "check"; file ] -> checkCommand file o
     | [ "build"; file ] -> buildCommand file o
+    | [ "run"; file ] -> runCommand file o
     | [ "contract"; file; cases ] when o.Function.IsSome ->
         withFile file (fun src ->
             match Mcp.contractCases file src o.Function.Value (File.ReadAllText cases) with

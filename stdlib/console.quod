@@ -1,0 +1,20 @@
+// The console, as a capability: a function writes only through a Console it receives.
+// A Console is used once: `let c2 = console.say(c, "a")` consumes `c`. The model is the list of the
+// lines written, read in contracts as `console.written(c)`; code cannot read it.
+
+struct Console {
+  lines: seq<string>,
+}
+
+// The lines written so far (in contracts only).
+fn written(c: Console) -> seq<string>
+{
+  c.lines
+}
+
+// The console, with one more line written.
+fn say(c: Console, line: string) -> Console
+  ensures written(result) == written(c) + [line]
+{
+  Console(c.lines + [line])
+}

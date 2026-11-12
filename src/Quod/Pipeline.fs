@@ -40,7 +40,7 @@ let check (file: string) (src: string) (s: Settings) : Outcome =
         | Ok loaded ->
         let inFiles = List.map (Modules.inFile loaded.Files)
         let typed, typeErrors = Typecheck.check file loaded.Program
-        let refused = if typeErrors.IsEmpty then ContractStyle.beforeProofs file typed else []
+        let refused = if typeErrors.IsEmpty then ContractStyle.beforeProofs file typed @ Capabilities.check file typed else []
         if not typeErrors.IsEmpty then Rejected(inFiles typeErrors)
         elif not refused.IsEmpty then Rejected(inFiles refused)
         else
@@ -164,9 +164,12 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
             unproved |> Set.filter (fun f -> fst (Modules.split f) = m) |> Set.map (fun f -> snd (Modules.split f))
         let one (m: string option) (source: string) =
             let view = Codegen.moduleView m typed
-            match target with
-            | Python allRequires -> Ok(CodegenPython.generateWith source view (shortNames m) allRequires)
-            | CSharp options -> CodegenCSharp.generateIn source view typed (shortNames m) options
+            match target, m with
+            // the console is not generated from its Quod text: in the code it writes to a stream
+            | Python _, Some "console" -> Ok Capabilities.pythonRuntime
+            | CSharp options, Some "console" -> Ok(Capabilities.csharpRuntime options.Namespace)
+            | Python allRequires, _ -> Ok(CodegenPython.generateWith source view (shortNames m) allRequires)
+            | CSharp options, _ -> CodegenCSharp.generateIn source view typed (shortNames m) options
         // a copy of a generic of another module may hold a type of this file (review of 0.3)
         (match target with
          | CSharp _ -> CodegenCSharp.setRootClass file typed

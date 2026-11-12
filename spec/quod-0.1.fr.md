@@ -54,7 +54,7 @@ fn nom(p1: T1, p2: T2) -> T
 { corps }
 ```
 
-Toutes les fonctions sont pures : pas d'entrée-sortie, pas de modification de leurs arguments.
+Toutes les fonctions sont pures (pas d'entrée-sortie, pas de modification de leurs arguments), sauf celles qui reçoivent une capacité : voir [Capacités](#capacités--la-console).
 Plusieurs résultats forment un tuple (`-> (int, int)`, `result.0`).
 
 Deux sortes de corps, distinguées par leur contenu :
@@ -219,6 +219,26 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 - **Bibliothèque :** `import maps` donne `maps.get_or(m, k, other)`, `maps.count_up(m, k)` (un de plus pour une clé, 1 si elle n'y était pas) et `maps.merge(a, b)` (les entrées des deux, `b` l'emportant), écrites en Quod et prouvées avec le programme, comme `strings` et `option`.
 - **Python :** un `dict` et un `frozenset` (un ensemble local construit dans une boucle est un `set` entre-temps) ; un appelant Python passe un `dict`, et n'importe quel itérable pour un ensemble.
 - **C# :** `IReadOnlyDictionary<K, V>` et `HashSet<T>` ; une clé chaîne est un `string` C#. Pour l'instant clés et éléments sont des entiers, booléens, chaînes, tuples de nombres et de booléens, structures et énumérations ; les valeurs des entiers, booléens, tuples de ceux-là, structures, énumérations, dictionnaires ou ensembles. `sorted` est généré pour les nombres, booléens, chaînes et tuples de nombres et de booléens, pas encore pour les structures. Tout le reste, le reste, et une structure ou énumération qui contient un dictionnaire ou un ensemble, est refusé par Quod quand il génère le C#. Un appelant ne doit pas modifier un dictionnaire ou un ensemble qu'il a passé.
+
+### Capacités : la console
+
+*Nouveau en 0.6 (étape 1 de [la note de conception](../docs/design/capacites.fr.md)) : la sortie seulement.* Une fonction est pure tant qu'elle ne reçoit pas de capacité. `import console` donne le type `console.Console` et une opération, `console.say(c, ligne)`, qui écrit la ligne et rend la `Console` suivante.
+
+```
+import console
+
+fn greet(c: console.Console, name: string) -> console.Console
+  ensures console.written(result) == console.written(c) + ["hello, " + name]
+{
+  console.say(c, "hello, " + name)
+}
+```
+
+- **Le modèle.** Dans un contrat, `console.written(c)` est la `seq<string>` des lignes écrites jusqu'ici. `console.say(c, ligne)` a pour contrat `console.written(result) == console.written(c) + [ligne]`. Les preuves reposent sur ce modèle ; la vraie console (un flux) n'est pas vérifiée, pas plus que l'hôte.
+- **Une `Console` s'utilise une fois.** `let d = console.say(c, "a")` consomme `c` ; nommer `c` de nouveau est une erreur. Chaque branche d'un `if` ou d'un `match` peut l'utiliser ; une boucle qui utilise une console termine chaque tour en affectant celle qu'elle a obtenue (`d = console.say(d, ...)`).
+- **Un programme ne peut ni construire une `Console`, ni lire ses lignes dans le code, ni en garder une dans une séquence, un dictionnaire, un ensemble, un champ ou un argument de type.** Il en reçoit une, et la transmet ou la rend (seule ou dans un tuple). Une fonction qui n'a pas de `Console` parmi ses paramètres ne peut pas écrire.
+- **`quod run fichier.quod [--function NOM]`** vérifie le fichier, puis exécute `main(c: console.Console) -> console.Console` avec l'évaluateur et affiche les lignes écrites (à la fin de l'exécution). `quod_run` du serveur MCP prend une console sous forme du tableau des lignes déjà écrites (`[]`) et rend les lignes.
+- **Python :** `console.Console()` écrit sur la sortie standard, `console.Console(flux)` sur n'importe quel flux texte ; `console.say` rend le même objet. **C# :** `new ConsoleModule.Console()` ou `new ConsoleModule.Console(textWriter)` ; `ConsoleModule.Say` rend le même objet.
 
 ### Modules
 
@@ -404,6 +424,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 ```
 quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES] [--require-contracts]
 quod build fichier.quod [--target python|csharp] [--namespace NOM] [--check-requires all] [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
+quod run fichier.quod [--function NOM]   # vérifie, puis exécute main(c: console.Console) et affiche ce qu'il écrit
 quod mcp [--require-contracts]  # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 quod contract fichier.quod cas.json --function NOM   # évalue un contrat sur des arguments et des résultats donnés
@@ -518,7 +539,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 |---|---|
 | 0.2 | un backend C# (le serveur MCP est arrivé avec la 0.1.1) |
 | 0.4 | types raffinés généraux |
-| 0.6 | capacités et entrées-sorties, contrats scellés (les dictionnaires et ensembles sont venus avec la 0.5, voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles)) |
+| 0.6 | capacités et entrées-sorties (la console, en sortie seulement, est là : voir [Capacités](#capacités--la-console) ; puis l'entrée, les fichiers) ; les contrats scellés passent à la 0.7 (les dictionnaires et ensembles sont venus avec la 0.5, voir [Dictionnaires et ensembles](#dictionnaires-et-ensembles)) |
 | plus tard | backend C (code natif, WASM) ; ce qu'il faut à un compilateur, pour la 2.0 |
 
 **Quod 2.0 sera écrit en Quod.** L'auto-hébergement demande des chaînes, des types algébriques (les

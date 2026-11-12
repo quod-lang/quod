@@ -22,6 +22,7 @@
     <EmbeddedResource Include="..\..\stdlib\strings.quod" LogicalName="stdlib/strings.quod" />
     <EmbeddedResource Include="..\..\stdlib\option.quod" LogicalName="stdlib/option.quod" />
     <EmbeddedResource Include="..\..\stdlib\maps.quod" LogicalName="stdlib/maps.quod" />
+    <EmbeddedResource Include="..\..\stdlib\console.quod" LogicalName="stdlib/console.quod" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,6 +41,7 @@
     <Compile Include="Codegen.fs" />
     <Compile Include="CodegenPython.fs" />
     <Compile Include="CodegenCSharp.fs" />
+    <Compile Include="Capabilities.fs" />
     <Compile Include="Pipeline.fs" />
     <Compile Include="Mcp.fs" />
     <Compile Include="Program.fs" />

@@ -1,0 +1,10 @@
+// A program that writes: run it with `quod run examples/console/hello.quod`.
+// A function writes only through a Console it receives, and uses each Console once.
+import console
+
+fn main(c: console.Console) -> console.Console
+  ensures console.written(result) == console.written(c) + ["Hello from Quod", "this line was proved"]
+{
+  let a = console.say(c, "Hello from Quod");
+  console.say(a, "this line was proved")
+}

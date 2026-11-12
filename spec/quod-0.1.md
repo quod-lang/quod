@@ -53,7 +53,7 @@ fn name(p1: T1, p2: T2) -> T
 { body }
 ```
 
-All functions are pure: no input/output, no mutation of their arguments. Multiple results are a
+All functions are pure (no input/output, no mutation of their arguments) except those that receive a capability: see [Capabilities](#capabilities-the-console). Multiple results are a
 tuple (`-> (int, int)`, `result.0`).
 
 There are two kinds of bodies, told apart by their content:
@@ -216,6 +216,26 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 - **Library:** `import maps` gives `maps.get_or(m, k, other)`, `maps.count_up(m, k)` (one more for a key, 1 if it was not there) and `maps.merge(a, b)` (the entries of both, `b` winning), written in Quod and proved with the program, like `strings` and `option`.
 - **Python:** a `dict` and a `frozenset` (a local set built in a loop is a `set` meanwhile); a Python caller passes a `dict`, and any iterable for a set.
 - **C#:** `IReadOnlyDictionary<K, V>` and `HashSet<T>`; a string key is a C# `string`. For now keys and elements are integers, booleans, strings, tuples of numbers and booleans, structs and enums; values are integers, booleans, tuples of those, structs, enums, maps or sets. `sorted` is generated for numbers, booleans, strings and tuples of numbers and booleans, not yet for structs. Anything else, anything else, and a struct or an enum holding a map or a set, is refused by Quod when it generates the C#. A caller must not change a map or a set it passed.
+
+### Capabilities: the console
+
+*New in 0.6 (step 1 of [the design note](../docs/design/capacites.fr.md)): output only.* A function is pure unless it receives a capability. `import console` gives the type `console.Console` and one operation, `console.say(c, line)`, which writes the line and returns the next `Console`.
+
+```
+import console
+
+fn greet(c: console.Console, name: string) -> console.Console
+  ensures console.written(result) == console.written(c) + ["hello, " + name]
+{
+  console.say(c, "hello, " + name)
+}
+```
+
+- **The model.** In a contract, `console.written(c)` is the `seq<string>` of the lines written so far. `console.say(c, line)` has the contract `console.written(result) == console.written(c) + [line]`. The proofs rest on this model; the real console (a stream) is not verified, as the host is not.
+- **A `Console` is used once.** `let d = console.say(c, "a")` consumes `c`; naming `c` again is an error. Each branch of an `if` or `match` may use it; a loop that uses a console must end each turn by assigning the one it went on with (`d = console.say(d, ...)`).
+- **A program cannot build a `Console`, read its lines in code, or keep one in a sequence, a map, a set, a field or a type argument.** It receives one, and passes it on or returns it (alone or in a tuple). A function with no `Console` among its parameters cannot write.
+- **`quod run file.quod [--function NAME]`** checks the file, then runs `main(c: console.Console) -> console.Console` with the evaluator and prints the lines written (at the end of the run). `quod_run` of the MCP server takes a console as the array of lines already written (`[]`), and returns the lines.
+- **Python:** `console.Console()` writes to the standard output, `console.Console(stream)` to any text stream; `console.say` returns the same object. **C#:** `new ConsoleModule.Console()` or `new ConsoleModule.Console(textWriter)`; `ConsoleModule.Say` returns the same object.
 
 ### Modules
 
@@ -396,6 +416,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 ```
 quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS] [--require-contracts]
 quod build file.quod [--target python|csharp] [--namespace NAME] [--check-requires all] [-o DIR] [--runtime-checks] [--require-contracts] [--json]
+quod run file.quod [--function NAME]   # check, then run main(c: console.Console) and print what it writes
 quod mcp [--require-contracts]  # check, build, run and the reference, served to an AI agent (MCP, stdio)
 quod reference [SECTION]   # the language reference, or one section of it
 quod contract file.quod cases.json --function NAME   # evaluate a contract on given arguments and results
@@ -501,7 +522,7 @@ fn binary_search(xs: seq<int>, target: int) -> int
 |---|---|
 | 0.2 | what a .NET project needs beyond the C# backend and `Quod.Build`, which came with 0.1.5 |
 | 0.4 | general refinement types |
-| 0.6 | capabilities and input/output, sealed contracts (maps and sets came with 0.5, see [Maps and sets](#maps-and-sets)) |
+| 0.6 | capabilities and input/output (the console, output only, is there: see [Capabilities](#capabilities-the-console); then input, files); sealed contracts move to 0.7 (maps and sets came with 0.5, see [Maps and sets](#maps-and-sets)) |
 | later | C backend (native code, WASM); what a compiler needs, for 2.0 |
 
 **Quod 2.0 will be written in Quod.** Self-hosting needs strings, algebraic types (syntax trees),

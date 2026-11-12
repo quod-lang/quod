@@ -62,6 +62,17 @@ let private seqOp (op: string) (seqTy: Ty) =
     | TySeq e -> "q." + op + "." + tySig e
     | _ -> "q." + op + ".i"
 
+/// A string written in the program that is long enough to be a constant of its own. Built as `cat (unit c1)
+/// (cat (unit c2) ...)`, each long literal gave the solver as many concatenations to unfold, and a proof that
+/// compared two lines of a console (`written(c) + [a, b]`) timed out from 17 characters on. As a constant with its
+/// length and its characters, an occurrence of the same literal is the same term.
+let private longLiteral (e: TExpr) : (string * bigint list) option =
+    match e.Ty, e.Kind with
+    | TySeq TyChar, ESeq xs when xs.Length >= 12 && xs |> List.forall (fun x -> match x.Kind with EInt _ -> true | _ -> false) ->
+        let chars = xs |> List.map (fun x -> match x.Kind with EInt n -> n | _ -> 0I)
+        Some(String.Join(",", chars), chars)
+    | _ -> None
+
 /// Declarations and axioms of the wrappers for sequences of `elem`.
 let private seqAxioms (elem: Ty) : string list =
     let s = sortOf (TySeq elem)
@@ -731,6 +742,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
     /// (see RunConcrete), and how many inputs were run.
     let concrete = Dictionary<string * Span, (string * string) list>()
     let mutable concreteRuns = 0
+    /// The long string literals of the program, by their characters: the constant that stands for each.
+    let literals = Dictionary<string, string * bigint list>()
     /// The time budget of the whole check (0: none). Past it, obligations are not sent to the
     /// solver: they are counted as not attempted, per function (external counter-review: an
     /// agent waits for `quod check` as a whole, N obligations at 2T + 5 s each add up).
@@ -906,6 +919,8 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             | None -> failwith ("internal: unbound variable " + n)
         | EResult -> env.["result"]
         | ESeq [] -> seqOp "empty" e.Ty
+        | ESeq _ when (match longLiteral e with Some(key, _) -> literals.ContainsKey key | None -> false) ->
+            fst literals.[fst (longLiteral e).Value]
         | ESeq xs ->
             let units = xs |> List.map (fun x -> "(" + seqOp "unit" e.Ty + " " + go x + ")")
             List.reduceBack (fun a b -> "(" + seqOp "cat" e.Ty + " " + a + " " + b + ")") units
@@ -1657,6 +1672,9 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 match s.Ty with
                 | TySet el -> if not (sorteds |> Seq.exists (fun x -> tySig x = tySig el)) then sorteds.Add el
                 | _ -> ()
+            | ESeq _ when (longLiteral e).IsSome ->
+                let key, chars = (longLiteral e).Value
+                if not (literals.ContainsKey key) then literals.[key] <- ("lit." + string literals.Count, chars)
             | ESeq xs | ETuple xs | ECall(_, xs) | ECons(_, xs) | ECol(_, xs) -> List.iter visitE xs
             | EQuantIn(_, _, a, b) -> visitE a; visitE b
             | EMatch(a, arms) -> visitE a; arms |> List.iter (fun (_, _, b) -> visitE b)
@@ -1702,6 +1720,11 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
                 z3.Send("(declare-datatypes ((" + sortOf (TyData d) + " 0)) ((" + String.Join(" ", cases) + ")))")
         for e in elems do
             for line in seqAxioms e do z3.Send line
+        for KeyValue(_, (name, chars)) in literals do
+            let ty = TySeq TyChar
+            z3.Send("(declare-const " + name + " " + sortOf ty + ")")
+            z3.Send("(assert (= (" + seqOp "len" ty + " " + name + ") " + string chars.Length + "))")
+            chars |> List.iteri (fun i c -> z3.Send("(assert (= (" + seqOp "nth" ty + " " + name + " " + string i + ") " + intLit c + "))"))
         for e in sets do
             for line in setAxioms e do z3.Send line
         for (k, x) in maps do

@@ -16,6 +16,7 @@
     <Compile Include="LemmaTests.fs" />
     <Compile Include="McpTests.fs" />
     <Compile Include="ModuleTests.fs" />
+    <Compile Include="CapabilityTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

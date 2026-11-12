@@ -74,6 +74,8 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
     | Eval.VInt n -> if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then w.WriteNumberValue(int64 n) else w.WriteStringValue(n.ToString())
     | Eval.VBool b -> w.WriteBooleanValue b
     | Eval.VChar c -> w.WriteStringValue(Char.ConvertFromUtf32 c)
+    // a Console is the lines written: an array of strings
+    | Eval.VData(name, [ lines ]) when name = Capabilities.capabilityType -> writeValue w lines
     | Eval.VData(name, xs) ->
         w.WriteStartArray()
         w.WriteStringValue name
@@ -113,6 +115,9 @@ let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
         | _ -> None
     | TySeq TyChar, JsonValueKind.String ->
         Some(Eval.VSeq [ for r in e.GetString().EnumerateRunes() -> Eval.VChar r.Value ])
+    // a Console is given as the lines already written: [] for a new one
+    | TyData d, JsonValueKind.Array when d.DataName = Capabilities.capabilityType ->
+        readValue (TySeq(TySeq TyChar)) e |> Option.map (fun lines -> Eval.VData(d.DataName, [ lines ]))
     | TyBool, JsonValueKind.True -> Some(Eval.VBool true)
     | TyBool, JsonValueKind.False -> Some(Eval.VBool false)
     | TySeq el, JsonValueKind.Array ->
