@@ -89,7 +89,7 @@ let rec private collectionOk (t: Ty) =
 let private collectionCheck (t: Ty) =
     let ok = match t with TyMap(k, v) -> collectionKeyOk k && collectionOk v | TySet e -> collectionKeyOk e | _ -> true
     if not ok then
-        raise (Refused("a " + tyText t + " is not generated for C# yet: keys and elements are integers, booleans or strings, values are integers, booleans, maps or sets"))
+        raise (Refused("a " + tyText t + " is not generated for C# yet: keys and elements are integers, booleans, strings, tuples of numbers and booleans, structs and enums (not char); values are integers, booleans, tuples of numbers and booleans, structs, enums, maps and sets (not strings, chars or sequences)"))
 
 let private keyCs (t: Ty) (cs: Ty -> string) = if t = TySeq TyChar then "string" else cs t
 
@@ -1063,7 +1063,7 @@ and private generateInner (sourceFile: string) (prog: TProgram) (whole: TProgram
             for p in f.Params do g.Bind(p.Name, p.Ty) |> ignore
             for p in f.Params do
                 match p.Ty with
-                | TySeq _ | TyData _ ->
+                | TySeq _ | TyData _ | TyMap _ | TySet _ ->
                     let n = csName p.Name
                     sb.Append(body).Append("if (").Append(n).Append(" == null) throw new ArgumentNullException(\"").Append(p.Name).Append("\");\n") |> ignore
                 | _ -> ()

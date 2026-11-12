@@ -424,3 +424,30 @@ let ``a set of pairs built in a loop holds what the invariants say`` () =
          + "}\n"
          + "struct Pt { x: int, y: int }\n"
          + "fn grid(m: map<Pt, int>, p: Pt) -> int requires p in m ensures result == m[p] { m[p] }\n")
+
+[<Fact>]
+let ``a run that takes too much work is cut, and so is a loop that builds a big map`` () =
+    let src =
+        "fn count(x: nat) -> int { let mut i: nat = 0; while i < x invariant i <= x decreases x - i { i = i + 1; } i }\n"
+        + "fn build(x: nat) -> map<int, int> { let mut m: map<int, int> = map_of([]); let mut i = 0; while i < x invariant 0 <= i && i <= x decreases x - i { m = put(m, i, i); i = i + 1; } m }\n"
+    let typed, errs = Quod.Typecheck.check "test.quod" (Quod.Parser.parseProgram "test.quod" src)
+    Assert.True(errs.IsEmpty)
+    let fns = typed.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+    let ev = Quod.Eval.Evaluator(fns, true)
+    ev.StepLimit <- 5000
+    for name in [ "count"; "build" ] do
+        ev.ResetSteps()
+        Assert.Throws<Quod.Eval.CannotEvaluate>(fun () -> ev.Run(fns.[name], [ Quod.Eval.VInt(bigint 2147483647) ]) |> ignore) |> ignore
+    // a small input is still run
+    ev.ResetSteps()
+    Assert.Equal(Quod.Eval.VInt(bigint 3), ev.Run(fns.["count"], [ Quod.Eval.VInt(bigint 3) ]))
+
+[<Fact>]
+let ``a big constant elsewhere in the program does not make the check last`` () =
+    let src =
+        "fn e(x: i32) -> bool { x == 2147483647 }\n"
+        + "fn g(x: nat) -> int { let mut i: nat = 0; while i < x invariant i <= x decreases x - i { i = i + 1; } i }\n"
+    let clock = System.Diagnostics.Stopwatch.StartNew()
+    assertProved src
+    // 62 s before the work of a run was bounded; a generous limit, for a loaded machine
+    Assert.True(clock.Elapsed.TotalSeconds < 40.0, "took " + string clock.Elapsed.TotalSeconds + " s")

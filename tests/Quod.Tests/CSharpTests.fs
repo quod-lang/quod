@@ -403,3 +403,13 @@ let ``tuples and structs as keys run in C#`` () =
     Assert.Equal("2", got.["cells"])
     Assert.Equal("3", got.["pairs"])
     Assert.Equal("true", got.["seen"])
+
+[<Fact>]
+let ``a null map or set is an ArgumentNullException`` () =
+    let src = "fn size_of(m: map<int, int>, s: set<int>) -> nat { len(m) + len(s) }\n"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"null map\", () => T0.P.SizeOf(null, new HashSet<long>()));"
+              "        Case(\"null set\", () => T0.P.SizeOf(new Dictionary<long, long>(), null));" ]
+    Assert.Equal("!ArgumentNullException", got.["null map"])
+    Assert.Equal("!ArgumentNullException", got.["null set"])

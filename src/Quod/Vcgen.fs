@@ -1219,19 +1219,27 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
         let rnd = Random 7
         let names = f.Params |> List.map (fun p -> p.Name)
         let zero = f.Params |> List.map (fun p -> zeroValue p.Ty)
+        // (true: a constant of the program as a value, false: the others), with the work each kind may take
         let candidates =
             seq {
-                yield zero
+                yield false, zero
                 // each constant of the program in each int parameter, the others zero
                 for (k, p) in List.indexed f.Params do
                     match p.Ty with
                     | TyInt | TyNat | TyI32 | TyI64 ->
                         for c in constants do
                             if (p.Ty = TyInt || c.Sign >= 0) && (match boundsOf p.Ty with Some(lo, hi) -> lo <= c && c <= hi | None -> true) then
-                                yield zero |> List.mapi (fun i z -> if i = k then Eval.VInt c else z)
+                                yield true, (zero |> List.mapi (fun i z -> if i = k then Eval.VInt c else z))
                     | _ -> ()
-                for _ in 1 .. 4000 -> f.Params |> List.map (fun p -> inputValue rnd constants p.Ty)
+                for _ in 1 .. 4000 -> false, (f.Params |> List.map (fun p -> inputValue rnd constants p.Ty))
             }
+        // A run is cut after this much work, and a function may spend this much in all (the review of
+        // 0.5.0: a constant of 2147483647 as the size of a loop made the check last minutes). Counted in
+        // statements and in work on collections, not in seconds: the same file gets the same verdict.
+        ev.StepLimit <- 100000
+        let constantWork = ref 600000
+        let otherWork = ref 1400000
+        let isConstant = ref false
         let define = definedParams f plain
         let run (input: Eval.Value list) =
             concreteTries <- concreteTries + 1
@@ -1240,14 +1248,22 @@ type private Verifier(file: string, prog: TProgram, z3: Session, budgetMs: int) 
             if f.Requires |> List.forall (fun r -> plain.Holds(r, env) = Some true) then
                 concreteRuns <- concreteRuns + 1
                 ev.ResetSteps()
-                try ev.Run(f, values) |> ignore with
-                | Eval.Violation(label, span) ->
-                    if not (concrete.ContainsKey((label, span))) then
-                        concrete.[(label, span)] <- List.zip names values |> List.map (fun (n, x) -> n, Eval.valueText x)
-                | Eval.CannotEvaluate _ -> ()
+                try
+                    try ev.Run(f, values) |> ignore with
+                    | Eval.Violation(label, span) ->
+                        if not (concrete.ContainsKey((label, span))) then
+                            concrete.[(label, span)] <- List.zip names values |> List.map (fun (n, x) -> n, Eval.valueText x)
+                    | Eval.CannotEvaluate _ -> ()
+                finally
+                    if isConstant.Value then constantWork.Value <- constantWork.Value - ev.Steps else otherWork.Value <- otherWork.Value - ev.Steps
         use e = candidates.GetEnumerator()
-        while concreteRuns < 200 && e.MoveNext() do
-            run e.Current
+        let mutable go = true
+        while go && concreteRuns < 200 && e.MoveNext() do
+            let isConst, input = e.Current
+            isConstant.Value <- isConst
+            // the constants have spent their work: the next ones are skipped, the random inputs still run
+            if not (isConst && constantWork.Value <= 0) then run input
+            if otherWork.Value <= 0 then go <- false
         // few random inputs satisfy the requires: ask the solver for some
         if concreteRuns < 20 then
             for input in v.SolverInputs(f, rnd) do

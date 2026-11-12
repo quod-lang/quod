@@ -1,11 +1,11 @@
-refuted      0.5s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] + 2 } else { 1 })
-refuted      0.6s  maps: line 6: let mut i = 0;  ->  let mut i = 1;
-refuted      0.6s  maps: line 7: while i < n  ->  while i <= n
-refuted      6.5s  maps: line 31: if i % 2 == 0 { s = add(s, i); }  ->  if i % 2 == 1 { s = add(s, i); }
-invalid      0.2s  maps: line 5: let mut m: map<int, nat> = map_of([]);  ->  let mut m: map<int, nat>= = map_of([]);
-refuted     10.3s  maps: line 50: i = i + 1;  ->  i = i + 0;
-refuted      0.5s  maps: line 69: sorted(s)[0]  ->  sorted(s)[1]
-refuted     29.8s  maps: line 50: i = i + 1;  ->  i = i - 1;
+refuted      0.4s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] + 2 } else { 1 })
+refuted      0.4s  maps: line 6: let mut i = 0;  ->  let mut i = 1;
+refuted      0.4s  maps: line 7: while i < n  ->  while i <= n
+refuted      4.0s  maps: line 31: if i % 2 == 0 { s = add(s, i); }  ->  if i % 2 == 1 { s = add(s, i); }
+invalid      0.1s  maps: line 5: let mut m: map<int, nat> = map_of([]);  ->  let mut m: map<int, nat>= = map_of([]);
+refuted      5.8s  maps: line 50: i = i + 1;  ->  i = i + 0;
+refuted      0.4s  maps: line 69: sorted(s)[0]  ->  sorted(s)[1]
+refuted     25.0s  maps: line 50: i = i + 1;  ->  i = i - 1;
 invalid      0.1s  maps: line 23: let mut s: set<int> = set_of([]);  ->  let mut s: set<=int> = set_of([]);
 invalid      0.1s  maps: line 23: let mut s: set<int> = set_of([]);  ->  let mut s: set<int>= = set_of([]);
 refuted      0.4s  maps: line 25: while i < n  ->  while i <= n
@@ -13,20 +13,20 @@ refuted      0.4s  maps: line 14: i = i + 1;  ->  i = i + 2;
 invalid      0.1s  maps: line 41: let mut seen: set<(int, int)> = set_of([]);  ->  let mut seen: set<=(int, int)> = set_of([]);
 refuted      0.4s  maps: line 43: while i < len(path)  ->  while i <= len(path)
 refuted      0.4s  maps: line 42: let mut i = 0;  ->  let mut i = 1;
-refuted      2.3s  maps: line 32: i = i + 1;  ->  i = i - 1;
+refuted      2.1s  maps: line 32: i = i + 1;  ->  i = i - 1;
 refuted      0.4s  maps: line 50: i = i + 1;  ->  i = i + 2;
 refuted      0.4s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] + 1 } else { 0 })
 refuted      0.4s  maps: line 24: let mut i = 0;  ->  let mut i = 1;
 invalid      0.1s  maps: line 5: let mut m: map<int, nat> = map_of([]);  ->  let mut m: map<=int, nat> = map_of([]);
-refuted      3.3s  maps: line 14: i = i + 1;  ->  i = i - 1;
-refuted      3.0s  maps: line 32: i = i + 1;  ->  i = i + 2;
+refuted      3.1s  maps: line 14: i = i + 1;  ->  i = i - 1;
+refuted      2.9s  maps: line 32: i = i + 1;  ->  i = i + 2;
 refuted      0.4s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] + 0 } else { 1 })
 refuted      0.4s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] - 1 } else { 1 })
 refuted      0.4s  maps: line 14: i = i + 1;  ->  i = i + 0;
-refuted      2.4s  maps: line 31: if i % 2 == 0 { s = add(s, i); }  ->  if i % 2 != 0 { s = add(s, i); }
-refuted      3.8s  maps: line 32: i = i + 1;  ->  i = i + 0;
+refuted      2.3s  maps: line 31: if i % 2 == 0 { s = add(s, i); }  ->  if i % 2 != 0 { s = add(s, i); }
+refuted      3.5s  maps: line 32: i = i + 1;  ->  i = i + 0;
 invalid      0.1s  maps: line 41: let mut seen: set<(int, int)> = set_of([]);  ->  let mut seen: set<(int, int)>= = set_of([]);
 
 22 mutants (6 invalid ones left out): 22 refuted with a counterexample, 0 with an unconfirmed counterexample, 0 rejected without a hint, 0 survived, 0 hung
-time to reject: median 0.5s, max 29.8s
+time to reject: median 0.4s, max 25.0s
 FIN

@@ -1,34 +1,34 @@
 refuted      0.6s  quantified: line 47: k = k + 1;  ->  k = k + 0;
-refuted      0.7s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k <= len(xs) && xs[k] <= t
-refuted      0.7s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) || xs[k] <= t
-no hint      6.1s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 2
-refuted      0.7s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) && xs[k] < t
-refuted      4.4s  quantified: line 47: k = k + 1;  ->  k = k - 1;
-refuted      0.8s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) && xs[k] <= t
-refuted      0.7s  quantified: line 61: let mut k = 0;  ->  let mut k = 1;
-refuted      0.8s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 0] - xs[k];
-refuted      0.8s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[1] - xs[1];
-refuted      0.8s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[0] - xs[0];
-refuted      0.9s  quantified: line 35: let mut k = 1;  ->  let mut k = 0;
-refuted      0.9s  quantified: line 20: k = k + 1;  ->  k = k + 2;
-refuted      8.4s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 2] - xs[k];
-survived     1.0s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 1] - xs[k] <= best {
-refuted      3.4s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 2] - xs[k] < best {
-refuted      0.9s  quantified: line 67: k = k + 1;  ->  k = k + 0;
-refuted      4.2s  quantified: line 67: k = k + 1;  ->  k = k - 1;
-refuted      0.7s  quantified: line 34: let mut w = 0;  ->  let mut w = 1;
-refuted      0.8s  quantified: line 14: let mut k = 0;  ->  let mut k = 1;
-refuted      5.2s  quantified: line 20: k = k + 1;  ->  k = k - 1;
-refuted      0.8s  quantified: line 36: while k < len(xs) - 1  ->  while k <= len(xs) - 1
-refuted      3.8s  quantified: line 47: k = k + 1;  ->  k = k + 2;
-refuted      0.8s  quantified: line 20: k = k + 1;  ->  k = k + 0;
-refuted      0.8s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) || xs[k] < t
-refuted      0.8s  quantified: line 67: k = k + 1;  ->  k = k + 2;
-refuted      0.8s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k <= len(xs) && xs[k] < t
-refuted      0.7s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k - 1] - xs[k] < best {
-refuted      0.9s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 0
-refuted      0.9s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 0] - xs[k] < best {
-refuted      0.8s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k - 1] - xs[k];
+refuted      0.6s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k <= len(xs) && xs[k] <= t
+refuted      0.6s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) || xs[k] <= t
+no hint      3.2s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 2
+refuted      0.6s  quantified: line 15: while k < len(xs) && xs[k] <= t  ->  while k < len(xs) && xs[k] < t
+refuted      2.9s  quantified: line 47: k = k + 1;  ->  k = k - 1;
+refuted      0.6s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) && xs[k] <= t
+refuted      0.6s  quantified: line 61: let mut k = 0;  ->  let mut k = 1;
+refuted      0.6s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 0] - xs[k];
+refuted      0.6s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[1] - xs[1];
+refuted      0.6s  quantified: line 33: let mut best = xs[1] - xs[0];  ->  let mut best = xs[0] - xs[0];
+refuted      0.6s  quantified: line 35: let mut k = 1;  ->  let mut k = 0;
+refuted      0.7s  quantified: line 20: k = k + 1;  ->  k = k + 2;
+refuted      4.3s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k + 2] - xs[k];
+survived     0.6s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 1] - xs[k] <= best {
+refuted      1.8s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 2] - xs[k] < best {
+refuted      0.6s  quantified: line 67: k = k + 1;  ->  k = k + 0;
+refuted      2.4s  quantified: line 67: k = k + 1;  ->  k = k - 1;
+refuted      0.6s  quantified: line 34: let mut w = 0;  ->  let mut w = 1;
+refuted      0.6s  quantified: line 14: let mut k = 0;  ->  let mut k = 1;
+refuted      2.7s  quantified: line 20: k = k + 1;  ->  k = k - 1;
+refuted      0.6s  quantified: line 36: while k < len(xs) - 1  ->  while k <= len(xs) - 1
+refuted      2.1s  quantified: line 47: k = k + 1;  ->  k = k + 2;
+refuted      0.6s  quantified: line 20: k = k + 1;  ->  k = k + 0;
+refuted      0.6s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k < len(xs) || xs[k] < t
+refuted      0.6s  quantified: line 67: k = k + 1;  ->  k = k + 2;
+refuted      0.6s  quantified: line 62: while k < len(xs) && xs[k] < t  ->  while k <= len(xs) && xs[k] < t
+refuted      0.6s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k - 1] - xs[k] < best {
+refuted      0.6s  quantified: line 36: while k < len(xs) - 1  ->  while k < len(xs) - 0
+refuted      0.6s  quantified: line 43: if xs[k + 1] - xs[k] < best {  ->  if xs[k + 0] - xs[k] < best {
+refuted      0.6s  quantified: line 44: best = xs[k + 1] - xs[k];  ->  best = xs[k - 1] - xs[k];
 
 31 mutants (0 invalid ones left out): 29 refuted with a counterexample, 0 with an unconfirmed counterexample, 1 rejected without a hint, 1 survived, 0 hung
-time to reject: median 0.8s, max 8.4s
+time to reject: median 0.6s, max 4.3s

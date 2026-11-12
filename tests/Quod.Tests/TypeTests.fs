@@ -178,3 +178,14 @@ let ``tuples, structs and enums are keys; only tuples and structs of orderable p
     assertError "is not one" (decls + "fn h(m: map<Bag, int>) -> nat { len(m) }")
     assertError "is not one" "fn h(s: set<(int, seq<int>)>) -> nat { len(s) }"
     assertError "can be put in order" (decls + "fn k(c: set<Color>) -> seq<Color> { sorted(c) }")
+
+[<Fact>]
+let ``x in s does not chain, and says what to write`` () =
+    match (try Quod.Parser.parseProgram "t.quod" "fn f(s: set<int>, a: int) -> bool { a in s == true }" |> ignore; None with Quod.Diagnostics.QuodError d -> Some d.Message) with
+    | Some message -> Assert.Contains("does not chain", message)
+    | None -> failwith "parsed"
+    assertOk "fn f(s: set<int>, a: int) -> bool { (a in s) == true }"
+
+[<Fact>]
+let ``a function that hides an operation on maps says so`` () =
+    assertError "also an operation on maps and sets" "fn put(x: int) -> int { x }\nfn g(m: map<int, int>) -> map<int, int> { put(m, 1, 2) }"

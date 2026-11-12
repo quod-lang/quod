@@ -83,6 +83,10 @@ let rec private substStmt (env: Map<string, TypeExpr>) (s: Stmt) : Stmt =
         | other -> other
     { s with Kind = kind }
 
+/// The operations on maps and sets: a function of the program may take their name, and then hides them.
+let private collectionOperations =
+    set [ "map_of"; "set_of"; "put"; "remove"; "add"; "keys"; "union"; "inter"; "diff"; "subset"; "sorted"; "sorted_keys" ]
+
 type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeDecl list) =
     let errors = ResizeArray<Diagnostic>()
     /// Where to report a key type that is not ordered: the place that wrote the type.
@@ -728,7 +732,13 @@ type private Checker(file: string, initialFns: Map<string, FnDecl>, types: TypeD
                 let isExprFn = match f.Body with ExprBody _ -> true | StmtBody _ -> false
                 if ctx.InSpec && not isExprFn then
                     c.Error(e.Span, ctx.FnName, "'" + name + "' has a statement body, so it cannot be used in a contract; only functions whose body is a single expression can")
-                match c.Args(e, f, args, ctx) with
+                let before = errors.Count
+                let typed = c.Args(e, f, args, ctx)
+                // a function of the program with the name of an operation on maps hides it: say so
+                if errors.Count > before && collectionOperations.Contains name then
+                    for i in before .. errors.Count - 1 do
+                        errors.[i] <- { errors.[i] with Message = errors.[i].Message + " ('" + name + "' is also an operation on maps and sets; the function of this name in your program hides it, so rename the function to use the operation)" }
+                match typed with
                 | Some targs -> mk (ECall(name, targs)) (c.Ty f.Ret)
                 | None -> fail ()
         | Unary(Neg, x) ->

@@ -103,13 +103,27 @@ let rec compareValue (a: Value) (b: Value) : int =
     | _ -> 0
 
 let putEntry (entries: (Value * Value) list) (k: Value) (v: Value) =
-    let before = entries |> List.filter (fun (k', _) -> compareValue k' k < 0)
-    let after = entries |> List.filter (fun (k', _) -> compareValue k' k > 0)
-    before @ [ k, v ] @ after
+    // the entries stay in ascending order of key: one pass, the new entry where it belongs
+    let rec go (rest: (Value * Value) list) =
+        match rest with
+        | [] -> [ k, v ]
+        | (k', x) :: tail ->
+            match compareValue k' k with
+            | c when c < 0 -> (k', x) :: go tail
+            | 0 -> (k, v) :: tail
+            | _ -> (k, v) :: rest
+    go entries
 
 let addElement (items: Value list) (x: Value) =
-    if items |> List.exists (fun y -> compareValue x y = 0) then items
-    else (x :: items) |> List.sortWith compareValue
+    let rec go (rest: Value list) =
+        match rest with
+        | [] -> [ x ]
+        | y :: tail ->
+            match compareValue y x with
+            | c when c < 0 -> y :: go tail
+            | 0 -> rest
+            | _ -> x :: rest
+    go items
 
 let rec valueText (v: Value) =
     match v with
@@ -132,6 +146,8 @@ let rec valueText (v: Value) =
 type Evaluator(fns: Map<string, TFn>, checking: bool) =
     let mutable depth = 0
     let mutable steps = 0
+    /// The most statements (and, for a map or a set, the work of its operations) one run may take.
+    let mutable stepLimit = 1000000
     /// The functions being run (checking mode), innermost first, with their measure on entry.
     let mutable running: (TFn * BigInteger option) list = []
     /// The branches taken: (span of the `if`, value of its condition). Reported when no run
@@ -322,8 +338,13 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
     /// An operation on a map or a set. A read of a key that is not there is a broken obligation.
     member private ev.Collection(e: TExpr, op: ColOp, args: TExpr list, env: Map<string, Value>) : Value =
         let go x = ev.Expr(x, env)
-        let entries x = match go x with VMap m -> m | _ -> raise (CannotEvaluate "not a map")
-        let items x = match go x with VSet s -> s | _ -> raise (CannotEvaluate "not a set")
+        // a change walks the collection: it costs one step in eight entries, so that a loop that builds a
+        // big one is stopped by the limit of a run, as a loop that counts is
+        let charge (n: int) =
+            steps <- steps + n / 8
+            if steps > stepLimit then raise (CannotEvaluate "too many steps")
+        let entries x = match go x with VMap m -> (charge m.Length; m) | _ -> raise (CannotEvaluate "not a map")
+        let items x = match go x with VSet s -> (charge s.Length; s) | _ -> raise (CannotEvaluate "not a set")
         match op, args with
         | MapOf, [ s ] ->
             match go s with
@@ -383,7 +404,7 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
 
     member private ev.Stmt(s: TStmt, env: Map<string, Value>) : Map<string, Value> =
         steps <- steps + 1
-        if steps > 1000000 then raise (CannotEvaluate "too many steps")
+        if steps > stepLimit then raise (CannotEvaluate "too many steps")
         match s.Kind with
         | SLet(_, name, _, value) | SAssign(name, value) -> env.Add(name, ev.Expr(value, env))
         | SAssert e ->
@@ -448,3 +469,9 @@ type Evaluator(fns: Map<string, TFn>, checking: bool) =
 
     /// Steps taken so far (statements run); reset to bound one run.
     member _.ResetSteps() = steps <- 0
+
+    /// The work done since ResetSteps.
+    member _.Steps = steps
+
+    /// A run is stopped past this much work: the search for counterexamples must not take minutes.
+    member _.StepLimit with get () = stepLimit and set (n: int) = stepLimit <- n

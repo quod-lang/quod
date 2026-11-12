@@ -204,7 +204,13 @@ type private Parser(file: string, toks: Token[]) =
         let first = p.Additive()
         if p.IsKw "in" then
             p.Next() |> ignore
-            p.Mk(Member(first, p.Additive()), start)
+            let membership = p.Mk(Member(first, p.Additive()), start)
+            // `a in s == true` or `a in s in t` would read as a chain: say what to write
+            (match p.Peek.Kind with
+             | TkSymbol("==" | "!=" | "<" | "<=" | ">" | ">=") | TkKeyword "in" ->
+                p.FailHere "the end of 'x in s' (it does not chain with a comparison or another 'in'; use parentheses, as in '(x in s) == true')"
+             | _ -> ())
+            membership
         else
         let cmpOp () =
             match p.Peek.Kind with
