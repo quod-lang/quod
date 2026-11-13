@@ -1,0 +1,18 @@
+refuted      0.5s  maps: line 61: put(m, k, if k in m { m[k] + 1 } else { 1 })  ->  put(m, k, if k in m { m[k] + 2 } else { 1 })
+refuted      0.5s  maps: line 6: let mut i = 0;  ->  let mut i = 1;
+refuted      0.5s  maps: line 7: while i < n  ->  while i <= n
+refuted      4.5s  maps: line 31: if i % 2 == 0 { s = add(s, i); }  ->  if i % 2 == 1 { s = add(s, i); }
+invalid      0.1s  maps: line 5: let mut m: map<int, nat> = map_of([]);  ->  let mut m: map<int, nat>= = map_of([]);
+refuted      7.3s  maps: line 50: i = i + 1;  ->  i = i + 0;
+refuted      0.5s  maps: line 69: sorted(s)[0]  ->  sorted(s)[1]
+refuted     29.5s  maps: line 50: i = i + 1;  ->  i = i - 1;
+invalid      0.1s  maps: line 23: let mut s: set<int> = set_of([]);  ->  let mut s: set<=int> = set_of([]);
+invalid      0.1s  maps: line 23: let mut s: set<int> = set_of([]);  ->  let mut s: set<int>= = set_of([]);
+refuted      0.5s  maps: line 25: while i < n  ->  while i <= n
+refuted      0.4s  maps: line 14: i = i + 1;  ->  i = i + 2;
+invalid      0.1s  maps: line 41: let mut seen: set<(int, int)> = set_of([]);  ->  let mut seen: set<=(int, int)> = set_of([]);
+refuted      0.5s  maps: line 43: while i < len(path)  ->  while i <= len(path)
+refuted      0.5s  maps: line 42: let mut i = 0;  ->  let mut i = 1;
+
+11 mutants (4 invalid ones left out): 11 refuted with a counterexample, 0 with an unconfirmed counterexample, 0 rejected without a hint, 0 survived, 0 hung
+time to reject: median 0.5s, max 29.5s
