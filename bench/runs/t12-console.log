@@ -1,0 +1,7 @@
+greet_two 1 verified None pass None cs None secs 20.8 checks None cost 0.006911690000000002
+greet_two 0 verified True pass True cs ok secs 24.0 checks None cost 0.014396390000000002
+respond 0 verified True pass True cs ok secs 30.9 checks None cost 0.020006789999999997
+respond 1 verified True pass True cs ok secs 18.6 checks None cost 0.012200690000000002
+greet_two 2 verified True pass True cs ok secs 26.6 checks None cost 0.013687099999999999
+respond 2 verified True pass True cs ok secs 17.1 checks None cost 0.00809383
+done

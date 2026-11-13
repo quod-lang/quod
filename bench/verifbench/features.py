@@ -181,6 +181,33 @@ def t_module(s, r):
     return out
 
 
+# --- console (0.6) ----------------------------------------------------------
+def _run_console(fn, args, text):
+    import io
+    import console
+    out, src = io.StringIO(), io.StringIO(text)
+    fn(console.Console(out, src), *args)
+    return out.getvalue(), src.read()
+
+
+def t_greet_two(s, r):
+    out = []
+    for a, b in [("Ada", "Bob"), ("", "x"), ("\u00e9", "\u65e5\u672c"), ("a b", "c")]:
+        written, left = _run_console(s.greet_two, (a, b), "unread\n")
+        out.append(written == "hello, " + a + "\nhello, " + b + "\n")
+        out.append(left == "unread\n")
+    return out
+
+
+def t_respond(s, r):
+    out = []
+    for text, want, rest in [("hi\n", "you said: hi\n", ""), ("", "nothing to read\n", ""), ("a\nb\n", "you said: a\n", "b\n"), ("\n", "you said: \n", ""), ("x", "you said: x\n", "")]:
+        written, left = _run_console(s.respond, (), text)
+        out.append(written == want)
+        out.append(left == rest)
+    return out
+
+
 TASKS = [
     T("discount_i32", DISCOUNT_SPEC, DISCOUNT_SIG.replace("{t}", "i32"), t_discount, "enum, match, i32", "discount"),
     T("discount_int", DISCOUNT_SPEC, DISCOUNT_SIG.replace("{t}", "int"), t_discount, "enum, match", "discount"),
@@ -205,6 +232,10 @@ Anything else is the error `"invalid"`. A new state is an `option.Ok`, an error 
     T("module_total", """A module `money`, in the file `money.quod` next to `solution.quod`, has the struct `Money` and the function `add`, the sum of two amounts. Its `requires` says what `add` needs not to overflow.
 `total_of`, in `solution.quod`, adds three amounts with `money.add`. The input of `total_of` guarantees that each of its amounts is between -1000000000000000 and 1000000000000000.""",
       "// money.quod\nstruct Money { cents: i64 }\nfn add(a: Money, b: Money) -> Money\n\n// solution.quod\nimport money\nfn total_of(a: money.Money, b: money.Money, c: money.Money) -> money.Money", t_module, "modules, struct, i64", extra=" and the file `money.quod` next to it"),
+    T("greet_two", "Write two lines on the console: `hello, ` followed by `a`, then `hello, ` followed by `b`. Nothing else is written.",
+      "import console\n\nfn greet_two(c: console.Console, a: string, b: string) -> console.Console", t_greet_two, "console, write"),
+    T("respond", "Read one line from the console. If there is one, write `you said: ` followed by that line; if there is none, write `nothing to read`. Read no more than one line.",
+      "import console\nimport option\n\nfn respond(c: console.Console) -> console.Console", t_respond, "console, read, Option"),
 ]
 BY_ID = {t.id: t for t in TASKS}
 
