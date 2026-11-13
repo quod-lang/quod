@@ -75,7 +75,7 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
     | Eval.VBool b -> w.WriteBooleanValue b
     | Eval.VChar c -> w.WriteStringValue(Char.ConvertFromUtf32 c)
     // a Console is the lines written: an array of strings
-    | Eval.VData(name, [ lines ]) when name = Capabilities.capabilityType -> writeValue w lines
+    | Eval.VData(name, [ lines; _ ]) when name = Capabilities.capabilityType -> writeValue w lines
     | Eval.VData(name, xs) ->
         w.WriteStartArray()
         w.WriteStringValue name
@@ -117,7 +117,16 @@ let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
         Some(Eval.VSeq [ for r in e.GetString().EnumerateRunes() -> Eval.VChar r.Value ])
     // a Console is given as the lines already written: [] for a new one
     | TyData d, JsonValueKind.Array when d.DataName = Capabilities.capabilityType ->
-        readValue (TySeq(TySeq TyChar)) e |> Option.map (fun lines -> Eval.VData(d.DataName, [ lines ]))
+        readValue (TySeq(TySeq TyChar)) e |> Option.map (fun lines -> Eval.VData(d.DataName, [ lines; Eval.VSeq [] ]))
+    // or {"written": [...], "input": [...]}: the lines already written, and those a program may read
+    | TyData d, JsonValueKind.Object when d.DataName = Capabilities.capabilityType ->
+        let lines (name: string) =
+            match e.TryGetProperty name with
+            | true, x -> readValue (TySeq(TySeq TyChar)) x
+            | _ -> Some(Eval.VSeq [])
+        match lines "written", lines "input" with
+        | Some w, Some i -> Some(Eval.VData(d.DataName, [ w; i ]))
+        | _ -> None
     | TyBool, JsonValueKind.True -> Some(Eval.VBool true)
     | TyBool, JsonValueKind.False -> Some(Eval.VBool false)
     | TySeq el, JsonValueKind.Array ->

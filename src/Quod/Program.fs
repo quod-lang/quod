@@ -170,10 +170,18 @@ let private runCommand (file: string) (o: Options) =
                 | Some f when (match f.Params with [ p ] -> Capabilities.isCapability p.Ty | _ -> false) && Capabilities.isCapability f.Ret ->
                     let fns = typed.Fns |> List.map (fun g -> g.Name, g) |> Map.ofList
                     let ev = Eval.Evaluator(fns, false)
-                    let start = Eval.VData(Capabilities.capabilityType, [ Eval.VSeq [] ])
+                    // what the program reads is standard input, all of it up front (none when it is a terminal)
+                    let input =
+                        if Console.IsInputRedirected then
+                            Console.In.ReadToEnd().Replace("\r\n", "\n").Split('\n')
+                            |> Array.toList
+                            |> (fun ls -> match List.rev ls with "" :: rest -> List.rev rest | _ -> ls)
+                        else []
+                    let text (s: string) = Eval.VSeq [ for r in s.EnumerateRunes() -> Eval.VChar r.Value ]
+                    let start = Eval.VData(Capabilities.capabilityType, [ Eval.VSeq []; Eval.VSeq(input |> List.map text) ])
                     try
                         match Eval.withBigStack (fun () -> ev.Run(f, [ start ])) with
-                        | Eval.VData(_, [ Eval.VSeq lines ]) ->
+                        | Eval.VData(_, [ Eval.VSeq lines; _ ]) ->
                             for line in lines do
                                 match line with
                                 | Eval.VSeq cs -> Console.WriteLine(String.Join("", cs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))

@@ -13,7 +13,7 @@ open Quod.Diagnostics
 let capabilityType = "console.Console"
 
 /// The functions that read the model: contracts only.
-let private modelFunctions = set [ "console.written" ]
+let private modelFunctions = set [ "console.written"; "console.pending" ]
 
 let private isConsole (t: Ty) = match t with TyData d -> d.DataName = capabilityType | _ -> false
 
@@ -89,9 +89,9 @@ let check (file: string) (prog: TProgram) : Diagnostic list =
                 | EVar n when isCapability e.Ty -> take n e.Span
                 | EProj({ Kind = EVar n; Ty = TyTuple ts }, k) when isCapability (TyTuple ts) ->
                     if isCapability ts.[k] then take (n + "." + string k) e.Span
-                    elif taken n then error fn e.Span ("'" + n + "' has already been used")
+                    elif consumed.Value.Contains n then error fn e.Span ("'" + n + "' has already been used")
                 | ECall(name, args) when modelFunctions.Contains name ->
-                    error fn e.Span ("'" + name + "' reads the model of the console, for contracts: code cannot read what was written")
+                    error fn e.Span ("'" + name + "' reads the model of the console, for contracts: code cannot read what was written or what is left to read")
                     ignore args
                 | ECons(_, args) when isConsole e.Ty ->
                     error fn e.Span "a Console cannot be built: a program receives it, from whoever runs it"
@@ -170,13 +170,17 @@ let pythonRuntime =
           "import sys as _quod_sys"
           ""
           ""
+          "import option as _quod_option"
+          ""
+          ""
           "class Console:"
-          "    \"\"\"Where a program writes. Console() is the standard output; Console(stream), any text"
-          "    stream (a test gives an io.StringIO). say(c, line) writes the line and returns the same"
+          "    \"\"\"Where a program writes and reads. Console() is the standard output and input; Console(stream, source),"
+          "    any text streams (a test gives io.StringIO objects). say(c, line) and read_line(c) return the same"
           "    Console: the proofs call it the next one, because a Console is used once.\"\"\""
           ""
-          "    def __init__(self, stream=None):"
+          "    def __init__(self, stream=None, source=None):"
           "        self._stream = _quod_sys.stdout if stream is None else stream"
+          "        self._source = _quod_sys.stdin if source is None else source"
           ""
           ""
           "def say(c: Console, line: str) -> Console:"
@@ -188,7 +192,20 @@ let pythonRuntime =
           "    return c"
           ""
           ""
-          "__all__ = [\"Console\", \"say\"]"
+          "def read_line(c: Console):"
+          "    if not isinstance(c, Console):"
+          "        raise TypeError(\"a Console is expected\")"
+          "    line = c._source.readline()"
+          "    if line == \"\":"
+          "        return (c, _quod_option.Option__string_None())"
+          "    if line.endswith(\"\\n\"):"
+          "        line = line[:-1]"
+          "    if line.endswith(\"\\r\"):"
+          "        line = line[:-1]"
+          "    return (c, _quod_option.Option__string_Some(line))"
+          ""
+          ""
+          "__all__ = [\"Console\", \"say\", \"read_line\"]"
           "" ]
 
 /// ConsoleModule.cs, in the namespace of the program: `new ConsoleModule.Console()` writes to the standard
@@ -205,17 +222,22 @@ let csharpRuntime (ns: string) =
           "{"
           "    public static class ConsoleModule"
           "    {"
-          "        /// <summary>Where a program writes. Say returns the same Console: the proofs call it the next one, because a Console is used once.</summary>"
+          "        /// <summary>Where a program writes and reads. Say and ReadLine return the same Console: the proofs call it the next one, because a Console is used once.</summary>"
           "        public sealed class Console"
           "        {"
           "            internal readonly TextWriter _out;"
+          "            internal readonly TextReader _in;"
           ""
-          "            public Console() : this(System.Console.Out) { }"
+          "            public Console() : this(System.Console.Out, System.Console.In) { }"
           ""
-          "            public Console(TextWriter output)"
+          "            public Console(TextWriter output) : this(output, System.Console.In) { }"
+          ""
+          "            public Console(TextWriter output, TextReader input)"
           "            {"
           "                if (output == null) throw new ArgumentNullException(\"output\");"
+          "                if (input == null) throw new ArgumentNullException(\"input\");"
           "                _out = output;"
+          "                _in = input;"
           "            }"
           "        }"
           ""
@@ -235,6 +257,20 @@ let csharpRuntime (ns: string) =
           "            for (int i = 0; i < line.Count; i++) b.Append(char.ConvertFromUtf32(line[i]));"
           "            c._out.WriteLine(b.ToString());"
           "            return c;"
+          "        }"
+          ""
+          "        /// <summary>The next line and the console that follows; None when there is nothing left to read.</summary>"
+          "        public static (Console, Option.Option_string) ReadLine(Console c)"
+          "        {"
+          "            if (c == null) throw new ArgumentNullException(\"c\");"
+          "            string line = c._in.ReadLine();"
+          "            if (line == null) return (c, new Option.Option_string.None());"
+          "            return (c, new Option.Option_string.Some(line));"
+          "        }"
+          ""
+          "        internal static (Console, Option.Option_string) _quod_pub_read_line(Console c)"
+          "        {"
+          "            return ReadLine(c);"
           "        }"
           "    }"
           "}"

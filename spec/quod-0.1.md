@@ -219,23 +219,24 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 
 ### Capabilities: the console
 
-*New in 0.6 (step 1 of [the design note](../docs/design/capacites.fr.md)): output only.* A function is pure unless it receives a capability. `import console` gives the type `console.Console` and one operation, `console.say(c, line)`, which writes the line and returns the next `Console`.
+*New in 0.6 (steps 1 and 2 of [the design note](../docs/design/capacites.fr.md)): writing and reading lines.* A function is pure unless it receives a capability. `import console` gives the type `console.Console` and two operations: `console.say(c, line)` writes the line and returns the next `Console`; `console.read_line(c)` returns a pair, the next `Console` and an `option.Option<string>` (`None` when there is nothing left to read).
 
 ```
 import console
 
 fn greet(c: console.Console, name: string) -> console.Console
   ensures console.written(result) == console.written(c) + ["hello, " + name]
+  ensures console.pending(result) == console.pending(c)
 {
   console.say(c, "hello, " + name)
 }
 ```
 
-- **The model.** In a contract, `console.written(c)` is the `seq<string>` of the lines written so far. `console.say(c, line)` has the contract `console.written(result) == console.written(c) + [line]`. The proofs rest on this model; the real console (a stream) is not verified, as the host is not.
+- **The model.** In a contract, `console.written(c)` is the `seq<string>` of the lines written so far and `console.pending(c)` the lines still to be read (what the one who runs the program gives is not known: it is any sequence). `console.say(c, line)` has the contract `written(result) == written(c) + [line]` and leaves `pending` as it is; `console.read_line(c)` returns `None` and leaves everything as it is when `pending(c)` is empty, and otherwise `Some(pending(c)[0])` with `pending(result) == pending(c)[1..]`. The proofs rest on this model; the real console (a stream) is not verified, as the host is not. **A contract must also say what it does to `pending`**: one that does not leaves two results possible, and the completeness check says so.
 - **A `Console` is used once.** `let d = console.say(c, "a")` consumes `c`; naming `c` again is an error. Each branch of an `if` or `match` may use it; a loop that uses a console must end each turn by assigning the one it went on with (`d = console.say(d, ...)`).
-- **A program cannot build a `Console`, read its lines in code, or keep one in a sequence, a map, a set, a field or a type argument.** It receives one, and passes it on or returns it (alone or in a tuple). A function with no `Console` among its parameters cannot write.
-- **`quod run file.quod [--function NAME]`** checks the file, then runs `main(c: console.Console) -> console.Console` with the evaluator and prints the lines written (at the end of the run). `quod_run` of the MCP server takes a console as the array of lines already written (`[]`), and returns the lines.
-- **Python:** `console.Console()` writes to the standard output, `console.Console(stream)` to any text stream; `console.say` returns the same object. **C#:** `new ConsoleModule.Console()` or `new ConsoleModule.Console(textWriter)`; `ConsoleModule.Say` returns the same object.
+- **A program cannot build a `Console`, read its model (`written`, `pending`) in code, or keep one in a sequence, a map, a set, a field or a type argument.** It receives one, and passes it on or returns it (alone or in a tuple). A function with no `Console` among its parameters cannot write.
+- **`quod run file.quod [--function NAME]`** checks the file, then runs `main(c: console.Console) -> console.Console` with the evaluator and prints the lines written (at the end of the run). What the program reads is the standard input, taken whole before the run starts (nothing when it is a terminal). `quod_run` of the MCP server takes a console as the array of lines already written (`[]`), or as `{"written": [...], "input": [...]}` to give lines to read, and returns the lines written.
+- **Python:** `console.Console()` uses the standard output and input, `console.Console(stream, source)` any text streams; `console.say` and `console.read_line` return the same object (and `read_line` the pair). **C#:** `new ConsoleModule.Console()`, or `new ConsoleModule.Console(textWriter, textReader)`; `ConsoleModule.Say` and `ConsoleModule.ReadLine` return the same object (`ReadLine` the pair, with an `Option.Option_string`).
 
 ### Modules
 

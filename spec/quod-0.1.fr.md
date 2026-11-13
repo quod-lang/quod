@@ -222,23 +222,24 @@ fn price(tariffs: map<string, i64>, code: string) -> i64
 
 ### Capacités : la console
 
-*Nouveau en 0.6 (étape 1 de [la note de conception](../docs/design/capacites.fr.md)) : la sortie seulement.* Une fonction est pure tant qu'elle ne reçoit pas de capacité. `import console` donne le type `console.Console` et une opération, `console.say(c, ligne)`, qui écrit la ligne et rend la `Console` suivante.
+*Nouveau en 0.6 (étapes 1 et 2 de [la note de conception](../docs/design/capacites.fr.md)) : écrire et lire des lignes.* Une fonction est pure tant qu'elle ne reçoit pas de capacité. `import console` donne le type `console.Console` et deux opérations : `console.say(c, ligne)` écrit la ligne et rend la `Console` suivante ; `console.read_line(c)` rend une paire, la `Console` suivante et une `option.Option<string>` (`None` quand il n'y a plus rien à lire).
 
 ```
 import console
 
 fn greet(c: console.Console, name: string) -> console.Console
   ensures console.written(result) == console.written(c) + ["hello, " + name]
+  ensures console.pending(result) == console.pending(c)
 {
   console.say(c, "hello, " + name)
 }
 ```
 
-- **Le modèle.** Dans un contrat, `console.written(c)` est la `seq<string>` des lignes écrites jusqu'ici. `console.say(c, ligne)` a pour contrat `console.written(result) == console.written(c) + [ligne]`. Les preuves reposent sur ce modèle ; la vraie console (un flux) n'est pas vérifiée, pas plus que l'hôte.
+- **Le modèle.** Dans un contrat, `console.written(c)` est la `seq<string>` des lignes écrites jusqu'ici et `console.pending(c)` celles qui restent à lire (ce que donne celui qui exécute le programme n'est pas connu : c'est une séquence quelconque). `console.say(c, ligne)` a pour contrat `written(result) == written(c) + [ligne]` et ne touche pas `pending` ; `console.read_line(c)` rend `None` et ne change rien quand `pending(c)` est vide, et sinon `Some(pending(c)[0])` avec `pending(result) == pending(c)[1..]`. Les preuves reposent sur ce modèle ; la vraie console (un flux) n'est pas vérifiée, pas plus que l'hôte. **Un contrat doit aussi dire ce qu'il fait de `pending`** : celui qui ne le dit pas laisse deux résultats possibles, et le contrôle de complétude le signale.
 - **Une `Console` s'utilise une fois.** `let d = console.say(c, "a")` consomme `c` ; nommer `c` de nouveau est une erreur. Chaque branche d'un `if` ou d'un `match` peut l'utiliser ; une boucle qui utilise une console termine chaque tour en affectant celle qu'elle a obtenue (`d = console.say(d, ...)`).
-- **Un programme ne peut ni construire une `Console`, ni lire ses lignes dans le code, ni en garder une dans une séquence, un dictionnaire, un ensemble, un champ ou un argument de type.** Il en reçoit une, et la transmet ou la rend (seule ou dans un tuple). Une fonction qui n'a pas de `Console` parmi ses paramètres ne peut pas écrire.
-- **`quod run fichier.quod [--function NOM]`** vérifie le fichier, puis exécute `main(c: console.Console) -> console.Console` avec l'évaluateur et affiche les lignes écrites (à la fin de l'exécution). `quod_run` du serveur MCP prend une console sous forme du tableau des lignes déjà écrites (`[]`) et rend les lignes.
-- **Python :** `console.Console()` écrit sur la sortie standard, `console.Console(flux)` sur n'importe quel flux texte ; `console.say` rend le même objet. **C# :** `new ConsoleModule.Console()` ou `new ConsoleModule.Console(textWriter)` ; `ConsoleModule.Say` rend le même objet.
+- **Un programme ne peut ni construire une `Console`, ni lire son modèle (`written`, `pending`) dans le code, ni en garder une dans une séquence, un dictionnaire, un ensemble, un champ ou un argument de type.** Il en reçoit une, et la transmet ou la rend (seule ou dans un tuple). Une fonction qui n'a pas de `Console` parmi ses paramètres ne peut pas écrire.
+- **`quod run fichier.quod [--function NOM]`** vérifie le fichier, puis exécute `main(c: console.Console) -> console.Console` avec l'évaluateur et affiche les lignes écrites (à la fin de l'exécution). Ce que le programme lit est l'entrée standard, prise en entier avant le début de l'exécution (rien si c'est un terminal). `quod_run` du serveur MCP prend une console sous forme du tableau des lignes déjà écrites (`[]`), ou de `{"written": [...], "input": [...]}` pour donner des lignes à lire, et rend les lignes écrites.
+- **Python :** `console.Console()` utilise la sortie et l'entrée standard, `console.Console(flux, source)` n'importe quels flux texte ; `console.say` et `console.read_line` rendent le même objet (et `read_line` la paire). **C# :** `new ConsoleModule.Console()`, ou `new ConsoleModule.Console(textWriter, textReader)` ; `ConsoleModule.Say` et `ConsoleModule.ReadLine` rendent le même objet (`ReadLine` la paire, avec une `Option.Option_string`).
 
 ### Modules
 

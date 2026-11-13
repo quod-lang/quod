@@ -1,9 +1,12 @@
-// The console, as a capability: a function writes only through a Console it receives.
-// A Console is used once: `let c2 = console.say(c, "a")` consumes `c`. The model is the list of the
-// lines written, read in contracts as `console.written(c)`; code cannot read it.
+// The console, as a capability: a function writes and reads only through a Console it receives.
+// A Console is used once: `let c2 = console.say(c, "a")` consumes `c`. The model is two lists, the lines
+// written and the lines still to be read, read in contracts as `console.written(c)` and
+// `console.pending(c)`; code cannot read them.
+import option
 
 struct Console {
   lines: seq<string>,
+  waiting: seq<string>,
 }
 
 // The lines written so far (in contracts only).
@@ -12,9 +15,25 @@ fn written(c: Console) -> seq<string>
   c.lines
 }
 
+// The lines that remain to be read (in contracts only): what the one who runs the program gives is not known.
+fn pending(c: Console) -> seq<string>
+{
+  c.waiting
+}
+
 // The console, with one more line written.
 fn say(c: Console, line: string) -> Console
   ensures written(result) == written(c) + [line]
+  ensures pending(result) == pending(c)
 {
-  Console(c.lines + [line])
+  Console(c.lines + [line], c.waiting)
+}
+
+// The next line, and the console that follows; None when there is nothing left to read.
+fn read_line(c: Console) -> (Console, option.Option<string>)
+  ensures written(result.0) == written(c)
+  ensures len(pending(c)) == 0 ==> result.1 == option.None && pending(result.0) == pending(c)
+  ensures len(pending(c)) > 0 ==> result.1 == option.Some(pending(c)[0]) && pending(result.0) == pending(c)[1..]
+{
+  if len(c.waiting) == 0 { (c, option.None) } else { (Console(c.lines, c.waiting[1..]), option.Some(c.waiting[0])) }
 }

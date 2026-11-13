@@ -1,0 +1,15 @@
+import console
+import option
+
+// Echoes the first line it reads, or says there was none.
+fn main(c: console.Console) -> console.Console
+  ensures len(console.pending(c)) == 0 ==> console.written(result) == console.written(c) + ["nothing to read"] && console.pending(result) == console.pending(c)
+  ensures len(console.pending(c)) > 0 ==> console.written(result) == console.written(c) + ["you said: " + console.pending(c)[0]] && console.pending(result) == console.pending(c)[1..]
+{
+  let r = console.read_line(c);
+  let d = r.0;
+  match r.1 {
+    None => console.say(d, "nothing to read"),
+    Some(line) => console.say(d, "you said: " + line),
+  }
+}
