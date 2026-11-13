@@ -32,6 +32,7 @@ let private usage =
     + "  -o DIR              output directory (build; default: next to FILE)\n"
     + "  --output-file FILE  the generated file itself (build), instead of -o\n"
     + "  --format msbuild    diagnostics as MSBuild reads them, each with a code QUOD0001...\n"
+    + "  --files DIR         the directory a program run by `quod run` reads and writes (a main that takes a Files)\n"
     + "  --runtime-checks    build even if some proofs fail: their contracts become run-time\n"
     + "                      assertions (an underspecified contract still blocks the build)"
 
@@ -47,7 +48,9 @@ type private Options =
       BuildFormat: bool
       RuntimeChecks: bool
       /// --budget was given (quod mcp has its own default otherwise)
-      BudgetGiven: bool }
+      BudgetGiven: bool
+      /// the directory a program run by `quod run` reads and writes (--files)
+      FilesDir: string option }
 
 let private parseOptions (args: string list) : Options * string list =
     let rec go (o: Options) (rest: string list) (positional: string list) =
@@ -65,11 +68,12 @@ let private parseOptions (args: string list) : Options * string list =
         | "-o" :: d :: tl -> go { o with OutDir = Some d } tl positional
         | "--output-file" :: f :: tl -> go { o with OutputFile = Some f } tl positional
         | "--function" :: f :: tl -> go { o with Function = Some f } tl positional
+        | "--files" :: d :: tl -> go { o with FilesDir = Some d } tl positional
         | "--format" :: "msbuild" :: tl -> go { o with BuildFormat = true } tl positional
         | "--runtime-checks" :: tl -> go { o with RuntimeChecks = true } tl positional
         | x :: tl -> go o tl (positional @ [ x ])
         | [] -> o, positional
-    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; OutputFile = None; Function = None; BuildFormat = false; RuntimeChecks = false; BudgetGiven = false } args []
+    go { Json = false; Settings = Pipeline.defaultSettings; Target = "python"; Namespace = None; AllRequires = false; OutDir = None; OutputFile = None; Function = None; BuildFormat = false; RuntimeChecks = false; BudgetGiven = false; FilesDir = None } args []
 
 let private report (o: Options) (ds: Diagnostic list) =
     if o.Json then Console.WriteLine(toJson ds)
@@ -150,8 +154,41 @@ let private buildCommand (file: string) (o: Options) =
                                 "warning: not fully proved, contracts checked at run time in: " + String.Join(", ", unproved))
                     0)
 
-/// `quod run FILE`: check the program, then run `main` (one Console in, one Console out) with the evaluator
-/// and print the lines it wrote. The program is run as it is proved, with no Python or .NET involved.
+/// The text of a string value of the evaluator.
+let private stringOfValue (v: Eval.Value) =
+    match v with
+    | Eval.VSeq cs -> String.Join("", cs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> ""))
+    | _ -> ""
+
+let private valueOfString (s: string) = Eval.VSeq [ for r in s.EnumerateRunes() -> Eval.VChar r.Value ]
+
+/// A path of the model is a relative path with no `..`: the files a program names stay under the directory.
+let private safeRelative (path: string) =
+    path <> "" && not (Path.IsPathRooted path) && not (path.Split([| '/'; '\\' |]) |> Array.exists (fun part -> part = ".." || part = "."))
+
+/// The files under a directory, by path with `/`: the disk a program starts from (at most 1000 files, 1 MB each, UTF-8).
+let private loadDisk (dir: string) : Result<(string * string) list, string> =
+    let root = Path.GetFullPath dir
+    let all = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+    if all.Length > 1000 then Result.Error("more than 1000 files under " + dir + ": give a smaller directory to --files")
+    else
+        let utf8 = Text.UTF8Encoding(false, true)
+        let rows =
+            [ for f in all ->
+                  let rel = Path.GetRelativePath(root, f).Replace('\\', '/')
+                  let info = FileInfo f
+                  if info.Length > 1000000L then Result.Error(rel + " is larger than 1 MB")
+                  else
+                      try Ok(rel, utf8.GetString(File.ReadAllBytes f))
+                      with _ -> Result.Error(rel + " is not UTF-8 text") ]
+        match rows |> List.tryPick (function Result.Error e -> Some e | _ -> None) with
+        | Some e -> Result.Error("cannot start from " + dir + ": " + e + " (put the files the program needs in a directory of their own)")
+        | None -> Ok(rows |> List.choose (function Ok x -> Some x | _ -> None))
+
+/// `quod run FILE`: check the program, then run `main` (capabilities in, capabilities out) with the evaluator.
+/// The console is the standard input and output (the lines written are printed when the run ends); the files
+/// are those under `--files DIR`, and what the program leaves is written back there when it ends.
+/// The program is run as it is proved, with no Python or .NET involved.
 let private runCommand (file: string) (o: Options) =
     withFile file (fun src ->
         match verifyFile file src o with
@@ -159,46 +196,85 @@ let private runCommand (file: string) (o: Options) =
         | Ok(typed, result) ->
             let errors = Pipeline.errorsOf result
             let name = defaultArg o.Function "main"
+            let capabilityName (t: Typed.Ty) = match t with Typed.TyData d when Capabilities.capabilityTypes.Contains d.DataName -> Some d.DataName | _ -> None
             if not errors.IsEmpty then
                 Console.Error.WriteLine("rejected: " + Pipeline.summary result + "; the program is not run")
                 1
             else
                 match typed.Fns |> List.tryFind (fun f -> f.Name = name) with
                 | None ->
-                    Console.Error.WriteLine("error: " + file + " has no function '" + name + "' to run (quod run FILE [--function NAME])")
+                    Console.Error.WriteLine("error: " + file + " has no function '" + name + "' to run (quod run FILE [--function NAME] [--files DIR])")
                     2
-                | Some f when (match f.Params with [ p ] -> Capabilities.isCapability p.Ty | _ -> false) && Capabilities.isCapability f.Ret ->
-                    let fns = typed.Fns |> List.map (fun g -> g.Name, g) |> Map.ofList
-                    let ev = Eval.Evaluator(fns, false)
-                    // what the program reads is standard input, all of it up front (none when it is a terminal)
-                    let input =
-                        if Console.IsInputRedirected then
-                            Console.In.ReadToEnd().Replace("\r\n", "\n").Split('\n')
-                            |> Array.toList
-                            |> (fun ls -> match List.rev ls with "" :: rest -> List.rev rest | _ -> ls)
-                        else []
-                    let text (s: string) = Eval.VSeq [ for r in s.EnumerateRunes() -> Eval.VChar r.Value ]
-                    let start = Eval.VData(Capabilities.capabilityType, [ Eval.VSeq []; Eval.VSeq(input |> List.map text) ])
-                    try
-                        match Eval.withBigStack (fun () -> ev.Run(f, [ start ])) with
-                        | Eval.VData(_, [ Eval.VSeq lines; _ ]) ->
-                            for line in lines do
-                                match line with
-                                | Eval.VSeq cs -> Console.WriteLine(String.Join("", cs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")))
+                | Some f when not f.Params.IsEmpty && f.Params |> List.forall (fun p -> (capabilityName p.Ty).IsSome) && Capabilities.isCapability f.Ret ->
+                    let wantsFiles = f.Params |> List.exists (fun p -> capabilityName p.Ty = Some Capabilities.filesType)
+                    let disk =
+                        match o.FilesDir with
+                        | Some dir when wantsFiles ->
+                            if Directory.Exists dir then loadDisk dir else Result.Error("no directory " + dir)
+                        | _ when wantsFiles -> Result.Error("'" + name + "' takes a Files: say where they are with --files DIR (what it writes is written there)")
+                        | _ -> Ok []
+                    match disk with
+                    | Result.Error why ->
+                        Console.Error.WriteLine("error: " + why)
+                        2
+                    | Ok initial ->
+                        // what the program reads is standard input, all of it up front (none when it is a terminal)
+                        let input =
+                            if Console.IsInputRedirected && f.Params |> List.exists (fun p -> capabilityName p.Ty = Some Capabilities.capabilityType) then
+                                Console.In.ReadToEnd().Replace("\r\n", "\n").Split('\n')
+                                |> Array.toList
+                                |> (fun ls -> match List.rev ls with "" :: rest -> List.rev rest | _ -> ls)
+                            else []
+                        let start (p: Typed.TParam) =
+                            match capabilityName p.Ty with
+                            | Some n when n = Capabilities.filesType ->
+                                let entries = initial |> List.fold (fun m (path, text) -> Eval.putEntry m (valueOfString path) (valueOfString text)) []
+                                Eval.VData(n, [ Eval.VMap entries ])
+                            | Some n -> Eval.VData(n, [ Eval.VSeq []; Eval.VSeq(input |> List.map valueOfString) ])
+                            | None -> Eval.VBool false
+                        let fns = typed.Fns |> List.map (fun g -> g.Name, g) |> Map.ofList
+                        let ev = Eval.Evaluator(fns, false)
+                        try
+                            let out = Eval.withBigStack (fun () -> ev.Run(f, f.Params |> List.map start))
+                            let parts = match out with Eval.VTuple xs -> xs | x -> [ x ]
+                            // the files first, then what was said
+                            let mutable code = 0
+                            for part in parts do
+                                match part with
+                                | Eval.VData(n, [ Eval.VMap entries ]) when n = Capabilities.filesType ->
+                                    let final = entries |> List.map (fun (k, v) -> stringOfValue k, stringOfValue v)
+                                    let root = Path.GetFullPath o.FilesDir.Value
+                                    let unsafe = final |> List.filter (fun (k, _) -> not (safeRelative k))
+                                    if not unsafe.IsEmpty then
+                                        Console.Error.WriteLine("error: the program names a path that leaves the directory: " + fst unsafe.Head)
+                                        code <- 1
+                                    else
+                                        let before = Map.ofList initial
+                                        let after = Map.ofList final
+                                        let utf8 = Text.UTF8Encoding(false)
+                                        for (k, v) in final do
+                                            if before.TryFind k <> Some v then
+                                                let full = Path.Combine(root, k)
+                                                Directory.CreateDirectory(Path.GetDirectoryName full) |> ignore
+                                                File.WriteAllText(full, v, utf8)
+                                        for (k, _) in initial do
+                                            if not (after.ContainsKey k) then File.Delete(Path.Combine(root, k))
                                 | _ -> ()
-                            0
-                        | _ ->
-                            Console.Error.WriteLine("error: '" + name + "' did not return a Console")
+                            for part in parts do
+                                match part with
+                                | Eval.VData(n, [ Eval.VSeq lines; _ ]) when n = Capabilities.capabilityType ->
+                                    for line in lines do Console.WriteLine(stringOfValue line)
+                                | _ -> ()
+                            code
+                        with
+                        | Eval.Violation(label, _) ->
+                            Console.Error.WriteLine("error: " + label + " fails while running '" + name + "'")
                             1
-                    with
-                    | Eval.Violation(label, _) ->
-                        Console.Error.WriteLine("error: " + label + " fails while running '" + name + "'")
-                        1
-                    | Eval.CannotEvaluate why ->
-                        Console.Error.WriteLine("error: cannot run '" + name + "': " + why)
-                        1
+                        | Eval.CannotEvaluate why ->
+                            Console.Error.WriteLine("error: cannot run '" + name + "': " + why)
+                            1
                 | Some _ ->
-                    Console.Error.WriteLine("error: '" + name + "' must take one Console and return one: fn " + name + "(c: console.Console) -> console.Console")
+                    Console.Error.WriteLine("error: '" + name + "' must take capabilities and return them: fn " + name + "(c: console.Console, f: files.Files) -> (console.Console, files.Files)")
                     2)
 
 [<EntryPoint>]

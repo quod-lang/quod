@@ -192,3 +192,78 @@ let ``the generated Python reads the lines it is given`` () =
                 Assert.Contains("ReadLine(Console c)", runtime)
                 Assert.True(g.Imported |> List.exists (fun (m, _) -> m = "option"))
         | other -> failwithf "%A" other)
+
+// --- files -------------------------------------------------------------------------------------------
+
+let private copy =
+    "import files\nimport option\n\nfn copy(f: files.Files, from: string, to: string) -> files.Files\n"
+    + "  requires from != to\n"
+    + "  ensures from in files.contents(f) ==> files.contents(result) == put(files.contents(f), to, files.contents(f)[from])\n"
+    + "  ensures !(from in files.contents(f)) ==> files.contents(result) == files.contents(f)\n"
+    + "{\n  let r = files.read_file(f, from);\n  let g = r.0;\n  match r.1 {\n    None => g,\n    Some(text) => files.write_file(g, to, text),\n  }\n}\n"
+
+[<Fact>]
+let ``a program that copies a file is proved from the model of the files`` () =
+    verified copy
+
+[<Fact>]
+let ``a contract that forgets what happens to the files is refused`` () =
+    // the files that result are not said: two results are possible
+    withMain "import files\n\nfn put_it(f: files.Files, text: string) -> files.Files\n  ensures \"a.txt\" in files.contents(result)\n{\n  files.write_file(f, \"a.txt\", text)\n}\n" (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.True(r.Diagnostics |> List.exists (fun d -> d.Kind = "completeness"), "no completeness diagnostic")
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``files are used once, cannot be built, and cannot be read in code`` () =
+    rejected "has already been used" "import files\n\nfn bad(f: files.Files) -> files.Files {\n  let g = files.write_file(f, \"a\", \"x\");\n  files.write_file(f, \"b\", \"y\")\n}\n"
+    rejected "cannot be built" "import files\n\nfn bad(f: files.Files) -> files.Files {\n  files.Files(map_of([]))\n}\n"
+    rejected "code cannot read" "import files\n\nfn peek(f: files.Files) -> map<string, string> {\n  files.contents(f)\n}\n"
+    rejected "cannot be put in a sequence" "import files\n\nfn keep(f: files.Files) -> seq<files.Files> {\n  [f]\n}\n"
+
+[<Fact>]
+let ``a console and files can be passed together, each used once`` () =
+    verified "import console\nimport files\n\nfn both(c: console.Console, f: files.Files) -> (console.Console, files.Files)\n  ensures result.0 == console.say(c, \"x\")\n  ensures result.1 == files.write_file(f, \"a\", \"b\")\n{\n  (console.say(c, \"x\"), files.write_file(f, \"a\", \"b\"))\n}\n"
+    rejected "has already been used" "import console\nimport files\n\nfn bad(c: console.Console, f: files.Files) -> (console.Console, files.Files) {\n  let r = (console.say(c, \"x\"), files.write_file(f, \"a\", \"b\"));\n  (console.say(c, \"y\"), r.1)\n}\n"
+
+[<Fact>]
+let ``the generated Python copies a file, and refuses a path that leaves the root`` () =
+    withMain copy (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                File.WriteAllText(Path.Combine(dir, "main.py"), g.Code)
+                for m, text in g.Imported do File.WriteAllText(Path.Combine(dir, m + ".py"), text)
+                let data = Path.Combine(dir, "data")
+                Directory.CreateDirectory data |> ignore
+                File.WriteAllText(Path.Combine(data, "a.txt"), "héllo\r\nworld", Text.UTF8Encoding(false))
+                let driver =
+                    [ "import os, main, files"
+                      "f = files.Files('data')"
+                      "main.copy(f, 'a.txt', 'sub/b.txt')"
+                      "print(ascii(open('data/sub/b.txt', encoding='utf-8', newline='').read()))"
+                      "main.copy(f, 'missing.txt', 'c.txt')"
+                      "print(os.path.exists('data/c.txt'))"
+                      "try:"
+                      "    main.copy(f, '../x', 'y')"
+                      "except ValueError:"
+                      "    print('refused')" ]
+                File.WriteAllText(Path.Combine(dir, "driver.py"), String.Join("\n", driver))
+                let psi = Diagnostics.ProcessStartInfo("python", "driver.py")
+                psi.WorkingDirectory <- dir
+                psi.RedirectStandardOutput <- true
+                psi.RedirectStandardError <- true
+                psi.UseShellExecute <- false
+                psi.StandardOutputEncoding <- Text.Encoding.UTF8
+                use p = Diagnostics.Process.Start psi
+                let out = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd()
+                p.WaitForExit()
+                Assert.Equal("'h\\xe9llo\\r\\nworld'|False|refused", String.Join("|", out.Replace("\r\n", "\n").Trim().Split('\n')))
+            match generate (CSharp Quod.CodegenCSharp.defaultOptions) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                let runtime = g.Imported |> List.find (fun (m, _) -> m = "files") |> snd
+                Assert.Contains("public static Files WriteFile(Files f, string path, string text)", runtime)
+        | other -> failwithf "%A" other)

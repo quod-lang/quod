@@ -168,6 +168,8 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
             // the console is not generated from its Quod text: in the code it writes to a stream
             | Python _, Some "console" -> Ok Capabilities.pythonRuntime
             | CSharp options, Some "console" -> Ok(Capabilities.csharpRuntime options.Namespace)
+            | Python _, Some "files" -> Ok Capabilities.pythonFilesRuntime
+            | CSharp options, Some "files" -> Ok(Capabilities.csharpFilesRuntime options.Namespace)
             | Python allRequires, _ -> Ok(CodegenPython.generateWith source view (shortNames m) allRequires)
             | CSharp options, _ -> CodegenCSharp.generateIn source view typed (shortNames m) options
         // a copy of a generic of another module may hold a type of this file (review of 0.3)

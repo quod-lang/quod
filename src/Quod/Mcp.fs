@@ -74,6 +74,13 @@ let rec private writeValue (w: Utf8JsonWriter) (v: Eval.Value) =
     | Eval.VInt n -> if n >= BigInteger Int64.MinValue && n <= BigInteger Int64.MaxValue then w.WriteNumberValue(int64 n) else w.WriteStringValue(n.ToString())
     | Eval.VBool b -> w.WriteBooleanValue b
     | Eval.VChar c -> w.WriteStringValue(Char.ConvertFromUtf32 c)
+    // a Files is its files: an object from path to text
+    | Eval.VData(name, [ Eval.VMap entries ]) when name = Capabilities.filesType ->
+        let text (v: Eval.Value) = match v with Eval.VSeq cs -> String.Join("", cs |> List.map (function Eval.VChar c -> Char.ConvertFromUtf32 c | _ -> "")) | _ -> ""
+        w.WriteStartObject()
+        for (k, x) in entries do
+            w.WriteString(text k, text x)
+        w.WriteEndObject()
     // a Console is the lines written: an array of strings
     | Eval.VData(name, [ lines; _ ]) when name = Capabilities.capabilityType -> writeValue w lines
     | Eval.VData(name, xs) ->
@@ -118,6 +125,16 @@ let rec private readValue (t: Ty) (e: JsonElement) : Eval.Value option =
     // a Console is given as the lines already written: [] for a new one
     | TyData d, JsonValueKind.Array when d.DataName = Capabilities.capabilityType ->
         readValue (TySeq(TySeq TyChar)) e |> Option.map (fun lines -> Eval.VData(d.DataName, [ lines; Eval.VSeq [] ]))
+    // a Files is given as an object from path to text: {} for none
+    | TyData d, JsonValueKind.Object when d.DataName = Capabilities.filesType ->
+        let entries =
+            [ for p in e.EnumerateObject() ->
+                  if p.Value.ValueKind = JsonValueKind.String then
+                      Some(Eval.VSeq [ for r in p.Name.EnumerateRunes() -> Eval.VChar r.Value ], Eval.VSeq [ for r in p.Value.GetString().EnumerateRunes() -> Eval.VChar r.Value ])
+                  else None ]
+        if List.forall Option.isSome entries then
+            Some(Eval.VData(d.DataName, [ Eval.VMap(entries |> List.map Option.get |> List.fold (fun m (k, v) -> Eval.putEntry m k v) []) ]))
+        else None
     // or {"written": [...], "input": [...]}: the lines already written, and those a program may read
     | TyData d, JsonValueKind.Object when d.DataName = Capabilities.capabilityType ->
         let lines (name: string) =

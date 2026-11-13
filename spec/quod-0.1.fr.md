@@ -241,6 +241,35 @@ fn greet(c: console.Console, name: string) -> console.Console
 - **`quod run fichier.quod [--function NOM]`** vérifie le fichier, puis exécute `main(c: console.Console) -> console.Console` avec l'évaluateur et affiche les lignes écrites (à la fin de l'exécution). Ce que le programme lit est l'entrée standard, prise en entier avant le début de l'exécution (rien si c'est un terminal). `quod_run` du serveur MCP prend une console sous forme du tableau des lignes déjà écrites (`[]`), ou de `{"written": [...], "input": [...]}` pour donner des lignes à lire, et rend les lignes écrites.
 - **Python :** `console.Console()` utilise la sortie et l'entrée standard, `console.Console(flux, source)` n'importe quels flux texte ; `console.say` et `console.read_line` rendent le même objet (et `read_line` la paire). **C# :** `new ConsoleModule.Console()`, ou `new ConsoleModule.Console(textWriter, textReader)` ; `ConsoleModule.Say` et `ConsoleModule.ReadLine` rendent le même objet (`ReadLine` la paire, avec une `Option.Option_string`).
 
+### Capacités : les fichiers
+
+*Nouveau après la 0.6 (étape 3 de [la note de conception](../docs/design/capacites.fr.md)).* `import files` donne le type `files.Files` et trois opérations, dont chacune rend le `Files` suivant, comme `console.say` :
+
+```
+import files
+import option
+
+fn copy(f: files.Files, from: string, to: string) -> files.Files
+  requires from != to
+  ensures from in files.contents(f) ==> files.contents(result) == put(files.contents(f), to, files.contents(f)[from])
+  ensures !(from in files.contents(f)) ==> files.contents(result) == files.contents(f)
+{
+  let r = files.read_file(f, from);
+  let g = r.0;
+  match r.1 {
+    None => g,
+    Some(text) => files.write_file(g, to, text),
+  }
+}
+```
+
+- **Le modèle.** Dans un contrat, `files.contents(f)` est une `map<string, string>` du chemin vers le texte. `files.read_file(f, chemin)` rend le `Files` suivant et une `option.Option<string>` : `Some(contents(f)[chemin])` si le chemin est dans la table, `None` sinon, et les fichiers ne changent pas. `files.write_file(f, chemin, texte)` a pour contrat `contents(result) == put(contents(f), chemin, texte)`. `files.delete_file(f, chemin)` a pour contrat `contents(result) == remove(contents(f), chemin)`. Ce que les fichiers contiennent au début du programme n'est pas connu : c'est une table quelconque.
+- **Les mêmes règles que pour la console.** Un `Files` s'utilise une fois, un programme ne peut pas en construire, ni le lire dans le code (`files.contents` est pour les contrats), ni en garder dans une séquence, un dictionnaire, un ensemble, un champ ou un argument de type. Une fonction qui n'a pas de `Files` parmi ses paramètres ne peut toucher aucun fichier. Un contrat doit dire ce que deviennent les fichiers, sinon le contrôle de complétude signale deux résultats possibles.
+- **Enraciné.** Le vrai `Files` est enraciné dans un dossier choisi par celui qui exécute le programme (Python : `files.Files(racine)` ; C# : `new FilesModule.Files(racine)` ; `quod run --files DOSSIER`). Un chemin vide, absolu ou qui sort de la racine (`..`) est refusé : `ValueError` en Python, `ArgumentException` en C#. Le texte est de l'UTF-8, lu et écrit sans changer ses fins de ligne.
+- **Ce que le modèle laisse de côté.** Lire ou écrire un fichier peut échouer là où le modèle ne le peut pas (droits, disque plein, chemin qui est un dossier, fichier qui n'est pas de l'UTF-8) : le code généré lève alors une erreur, qui est hors de ce qui est prouvé. Le modèle n'a ni dossiers, ni droits, ni autre programme qui change les fichiers en même temps.
+- **`quod run fichier.quod --files DOSSIER`** charge les fichiers de `DOSSIER` (au plus 1000 fichiers de 1 Mo, tous en UTF-8) dans le modèle, exécute `main(c: console.Console, f: files.Files) -> (console.Console, files.Files)` (des capacités quelconques en entrée, les mêmes en sortie, en tuple quand il y en a plusieurs), puis écrit dans `DOSSIER` ce que le programme a changé ou supprimé, à la fin. `quod_run` du serveur MCP prend un `Files` sous forme d'un objet du chemin vers le texte (`{}` pour aucun) et rend les fichiers obtenus.
+- **C# :** `FilesModule.ReadFile`, `WriteFile` et `DeleteFile` rendent le même objet (`ReadFile` la paire, avec une `Option.Option_string`).
+
 ### Modules
 
 Depuis la 0.3, un fichier est un module, qui porte le nom du fichier. `import nom`, en tête de fichier, trouve `nom.quod` à côté de lui.
@@ -425,7 +454,7 @@ Lisibles par un humain par défaut, en JSON avec `--json`. Une entrée par const
 ```
 quod check fichier.quod [--json] [--z3 CHEMIN] [--timeout SECONDES] [--budget SECONDES] [--require-contracts]
 quod build fichier.quod [--target python|csharp] [--namespace NOM] [--check-requires all] [-o DOSSIER] [--runtime-checks] [--require-contracts] [--json]
-quod run fichier.quod [--function NOM]   # vérifie, puis exécute main(c: console.Console) et affiche ce qu'il écrit
+quod run fichier.quod [--function NOM] [--files DOSSIER]   # vérifie, puis exécute main(c: console.Console) et affiche ce qu'il écrit
 quod mcp [--require-contracts]  # vérification, compilation, exécution et référence, servies à un agent IA (MCP, stdio)
 quod reference [SECTION]   # la référence du langage, ou l'une de ses sections
 quod contract fichier.quod cas.json --function NOM   # évalue un contrat sur des arguments et des résultats donnés

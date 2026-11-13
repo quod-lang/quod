@@ -1,0 +1,38 @@
+// Files, as a capability: a function reads and writes files only through a Files it receives, and the Files
+// is rooted in a directory chosen by whoever runs the program: a path that leaves it is refused.
+// A Files is used once, like a Console. The model is the contents of the files, a map from path to text,
+// read in contracts as `files.contents(f)`; code cannot read it. The real disk can fail where the model
+// does not (a full disk, a path that is a directory): that raises an error and is outside the model.
+import option
+
+struct Files {
+  disk: map<string, string>,
+}
+
+// The files, by path (in contracts only): what the one who runs the program gives is not known.
+fn contents(f: Files) -> map<string, string>
+{
+  f.disk
+}
+
+// The text of a file, or None if there is no such file; the Files that follows.
+fn read_file(f: Files, path: string) -> (Files, option.Option<string>)
+  ensures contents(result.0) == contents(f)
+  ensures result.1 == (if path in contents(f) { option.Some(contents(f)[path]) } else { option.None })
+{
+  (f, if path in f.disk { option.Some(f.disk[path]) } else { option.None })
+}
+
+// The files, with `text` written at `path` (the file is created, or replaced).
+fn write_file(f: Files, path: string, text: string) -> Files
+  ensures contents(result) == put(contents(f), path, text)
+{
+  Files(put(f.disk, path, text))
+}
+
+// The files, without `path` (nothing happens if there was no such file).
+fn delete_file(f: Files, path: string) -> Files
+  ensures contents(result) == remove(contents(f), path)
+{
+  Files(remove(f.disk, path))
+}

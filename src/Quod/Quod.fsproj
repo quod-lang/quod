@@ -23,6 +23,7 @@
     <EmbeddedResource Include="..\..\stdlib\option.quod" LogicalName="stdlib/option.quod" />
     <EmbeddedResource Include="..\..\stdlib\maps.quod" LogicalName="stdlib/maps.quod" />
     <EmbeddedResource Include="..\..\stdlib\console.quod" LogicalName="stdlib/console.quod" />
+    <EmbeddedResource Include="..\..\stdlib\files.quod" LogicalName="stdlib/files.quod" />
   </ItemGroup>
 
   <ItemGroup>

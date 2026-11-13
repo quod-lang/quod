@@ -238,6 +238,35 @@ fn greet(c: console.Console, name: string) -> console.Console
 - **`quod run file.quod [--function NAME]`** checks the file, then runs `main(c: console.Console) -> console.Console` with the evaluator and prints the lines written (at the end of the run). What the program reads is the standard input, taken whole before the run starts (nothing when it is a terminal). `quod_run` of the MCP server takes a console as the array of lines already written (`[]`), or as `{"written": [...], "input": [...]}` to give lines to read, and returns the lines written.
 - **Python:** `console.Console()` uses the standard output and input, `console.Console(stream, source)` any text streams; `console.say` and `console.read_line` return the same object (and `read_line` the pair). **C#:** `new ConsoleModule.Console()`, or `new ConsoleModule.Console(textWriter, textReader)`; `ConsoleModule.Say` and `ConsoleModule.ReadLine` return the same object (`ReadLine` the pair, with an `Option.Option_string`).
 
+### Capabilities: files
+
+*New after 0.6 (step 3 of [the design note](../docs/design/capacites.fr.md)).* `import files` gives the type `files.Files` and three operations, each of which returns the `Files` that follows, like `console.say`:
+
+```
+import files
+import option
+
+fn copy(f: files.Files, from: string, to: string) -> files.Files
+  requires from != to
+  ensures from in files.contents(f) ==> files.contents(result) == put(files.contents(f), to, files.contents(f)[from])
+  ensures !(from in files.contents(f)) ==> files.contents(result) == files.contents(f)
+{
+  let r = files.read_file(f, from);
+  let g = r.0;
+  match r.1 {
+    None => g,
+    Some(text) => files.write_file(g, to, text),
+  }
+}
+```
+
+- **The model.** In a contract, `files.contents(f)` is a `map<string, string>` from path to text. `files.read_file(f, path)` returns the next `Files` and an `option.Option<string>`: `Some(contents(f)[path])` if the path is in the map, `None` otherwise, and the files are unchanged. `files.write_file(f, path, text)` has `contents(result) == put(contents(f), path, text)`. `files.delete_file(f, path)` has `contents(result) == remove(contents(f), path)`. What the files hold when the program starts is not known: it is any map.
+- **The same rules as for the console.** A `Files` is used once, cannot be built by a program, cannot be read in code (`files.contents` is for contracts), and cannot be kept in a sequence, a map, a set, a field or a type argument. A function with no `Files` among its parameters cannot touch a file. A contract must say what becomes of the files, or the completeness check says that two results are possible.
+- **Rooted.** The real `Files` is rooted in a directory chosen by whoever runs the program (Python: `files.Files(root)`; C#: `new FilesModule.Files(root)`; `quod run --files DIR`). A path that is empty, absolute or leaves the root (`..`) is refused: a `ValueError` in Python, an `ArgumentException` in C#. Text is UTF-8, read and written without any change of its line ends.
+- **What the model leaves out.** Reading or writing a file can fail where the model cannot (permissions, a full disk, a path that is a directory, a file that is not UTF-8): the generated code then raises an error, which is outside what is proved. The model has no directories, no permissions, no other program changing the files at the same time.
+- **`quod run file.quod --files DIR`** loads the files under `DIR` (at most 1000 files of 1 MB, all UTF-8) into the model, runs `main(c: console.Console, f: files.Files) -> (console.Console, files.Files)` (any capabilities in, the same ones out, as a tuple when there are several), then writes back to `DIR` what the program changed or deleted, when it ends. `quod_run` of the MCP server takes a `Files` as an object from path to text (`{}` for none) and returns the files that result.
+- **C#:** `FilesModule.ReadFile`, `WriteFile` and `DeleteFile` return the same object (`ReadFile` the pair, with an `Option.Option_string`).
+
 ### Modules
 
 Since 0.3, a file is a module, named after the file. `import name`, at the top of a file, finds `name.quod` next to it.
@@ -417,7 +446,7 @@ Human-readable by default, JSON with `--json`. One entry per finding:
 ```
 quod check file.quod [--json] [--z3 PATH] [--timeout SECONDS] [--budget SECONDS] [--require-contracts]
 quod build file.quod [--target python|csharp] [--namespace NAME] [--check-requires all] [-o DIR] [--runtime-checks] [--require-contracts] [--json]
-quod run file.quod [--function NAME]   # check, then run main(c: console.Console) and print what it writes
+quod run file.quod [--function NAME] [--files DIR]   # check, then run main(c: console.Console) and print what it writes
 quod mcp [--require-contracts]  # check, build, run and the reference, served to an AI agent (MCP, stdio)
 quod reference [SECTION]   # the language reference, or one section of it
 quod contract file.quod cases.json --function NAME   # evaluate a contract on given arguments and results

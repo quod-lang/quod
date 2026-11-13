@@ -1,0 +1,18 @@
+// Copies notes.txt to notes.bak in a directory, and says what it did.
+// Run it with: quod run examples/files/backup.quod --files DIR   (what it writes is written in DIR)
+// A function touches the files only through the Files it receives, and uses each Files once.
+import console
+import files
+import option
+
+fn main(c: console.Console, f: files.Files) -> (console.Console, files.Files)
+  ensures "notes.txt" in files.contents(f) ==> files.contents(result.1) == put(files.contents(f), "notes.bak", files.contents(f)["notes.txt"]) && console.written(result.0) == console.written(c) + ["copied notes.txt"] && console.pending(result.0) == console.pending(c)
+  ensures !("notes.txt" in files.contents(f)) ==> files.contents(result.1) == files.contents(f) && console.written(result.0) == console.written(c) + ["no notes.txt"] && console.pending(result.0) == console.pending(c)
+{
+  let r = files.read_file(f, "notes.txt");
+  let g = r.0;
+  match r.1 {
+    None => (console.say(c, "no notes.txt"), g),
+    Some(text) => (console.say(c, "copied notes.txt"), files.write_file(g, "notes.bak", text)),
+  }
+}
