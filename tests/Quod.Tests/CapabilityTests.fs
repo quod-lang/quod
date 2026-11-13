@@ -267,3 +267,34 @@ let ``the generated Python copies a file, and refuses a path that leaves the roo
                 let runtime = g.Imported |> List.find (fun (m, _) -> m = "files") |> snd
                 Assert.Contains("public static Files WriteFile(Files f, string path, string text)", runtime)
         | other -> failwithf "%A" other)
+
+// --- private helpers that only contracts call -----------------------------------------------------------
+
+let private helperSource =
+    "import files\n\n"
+    + "// the text of a file, in a map: only the contract uses it\n"
+    + "private fn text_at(m: map<string, string>, path: string) -> string\n{\n  if path in m { m[path] } else { \"\" }\n}\n\n"
+    + "// used by the code\n"
+    + "private fn bang(s: string) -> string\n{\n  s + \"!\"\n}\n\n"
+    + "fn shout(f: files.Files, path: string) -> files.Files\n"
+    + "  ensures files.contents(result) == put(files.contents(f), path, bang(text_at(files.contents(f), path)))\n"
+    + "{\n  let r = files.read_file(f, path);\n  let g = r.0;\n  match r.1 {\n    None => files.write_file(g, path, bang(\"\")),\n    Some(text) => files.write_file(g, path, bang(text)),\n  }\n}\n"
+
+[<Fact>]
+let ``a private helper that only a contract calls is not generated, so it cannot block the C#`` () =
+    withMain helperSource (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (CSharp Quod.CodegenCSharp.defaultOptions) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                // the helper over map<string, string> is left out (C# could not hold it), the one the code calls is kept
+                Assert.DoesNotContain("_quod_f_text_at", g.Code)
+                Assert.Contains("_quod_f_bang(", g.Code)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                Assert.DoesNotContain("_quod_f_text_at", g.Code)
+                Assert.Contains("def _quod_f_bang(", g.Code)
+        | other -> failwithf "%A" other)

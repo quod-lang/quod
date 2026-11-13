@@ -164,6 +164,8 @@ let generate (target: Target) (file: string) (typed: Typed.TProgram) (r: Vcgen.V
             unproved |> Set.filter (fun f -> fst (Modules.split f) = m) |> Set.map (fun f -> snd (Modules.split f))
         let one (m: string option) (source: string) =
             let view = Codegen.moduleView m typed
+            // a private helper that only contracts call is not in the code (unless contracts are checked as it runs)
+            let view = if unproved.IsEmpty then Codegen.withoutContractOnlyHelpers view else view
             match target, m with
             // the console is not generated from its Quod text: in the code it writes to a stream
             | Python _, Some "console" -> Ok Capabilities.pythonRuntime

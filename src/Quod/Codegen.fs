@@ -250,6 +250,43 @@ let moduleView (name: string option) (prog: TProgram) : TProgram =
                     | TExprBody x -> TExprBody(e x)
                     | TStmtBody items -> TStmtBody(List.map (mapCallsS short) items) }) }
 
+/// A `private fn` that only contracts and proofs call has no use in the generated code, and it may hold what the
+/// target cannot yet (a `map<string, string>` in C#): it is left out. What code calls, from the public functions, is kept,
+/// whatever the function the call is in. Only for a program whose proofs all passed: with --runtime-checks, the
+/// contracts that were not proved are checked as the code runs, and the functions they call are needed.
+let withoutContractOnlyHelpers (view: TProgram) : TProgram =
+    let byName = view.Fns |> List.map (fun f -> f.Name, f) |> Map.ofList
+    let codeCalls (f: TFn) : string list =
+        let found = ResizeArray<string>()
+        let expr (e: TExpr) = mapCalls (fun g -> found.Add g; g) e |> ignore
+        let rec stmts (items: TStmt list) =
+            for s in items do
+                match s.Kind with
+                | SLet(_, n, _, _) when isLemmaBinding n -> ()
+                | SLet(_, _, _, e) | SAssign(_, e) | SReturn e -> expr e
+                | SAssert _ -> ()
+                | SIf(c, a, b) ->
+                    expr c
+                    stmts a
+                    stmts b
+                | SWhile(c, _, _, b) ->
+                    expr c
+                    stmts b
+        (match f.Body with
+         | TExprBody e -> if f.RunBy.IsNone then expr e
+         | TStmtBody items -> stmts items)
+        Option.iter found.Add f.RunBy
+        List.ofSeq found
+    let needed = HashSet<string>()
+    let rec visit (name: string) =
+        if needed.Add name then
+            match byName.TryFind name with
+            | Some f -> codeCalls f |> List.iter visit
+            | None -> ()
+    for f in view.Fns do
+        if not f.IsPrivate || f.IsLemma then visit f.Name
+    { view with Fns = view.Fns |> List.filter (fun f -> needed.Contains f.Name) }
+
 let private moduleViewCalls (visit: string -> string) (view: TProgram) =
     let e = mapCalls visit >> ignore
     for f in view.Fns do
