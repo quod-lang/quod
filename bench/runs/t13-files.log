@@ -1,0 +1,11 @@
+copy_file 1 verified None pass None cs None secs 16.2 checks None cost 0.011100980000000002
+append_line 0 verified None pass None cs None secs 18.0 checks None cost 0.011517090000000004
+copy_file 0 verified True pass True cs ok secs 21.9 checks None cost 0.00827319
+append_line 1 verified None pass None cs None secs 16.0 checks None cost 0.00940276
+copy_file 2 verified True pass True cs ok secs 35.6 checks None cost 0.01485256
+append_line 2 verified True pass False cs ok secs 43.4 checks None cost 0.015483690000000001
+done
+append_line 0 verified True pass False cs ok secs 26.8 checks None cost 0.010256260000000001
+copy_file 1 verified True pass True cs ok secs 29.1 checks None cost 0.020336780000000002
+append_line 1 verified None pass None cs None secs 18.9 checks None cost 0.006682199999999999
+done

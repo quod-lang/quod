@@ -208,6 +208,55 @@ def t_respond(s, r):
     return out
 
 
+# --- files (0.7) -----------------------------------------------------------
+def _with_dir(initial, call):
+    """Run call(Files, dir) in a directory holding `initial` (path -> text); the files that result."""
+    import files
+    d = tempfile.mkdtemp()
+    try:
+        for p, t in initial.items():
+            full = os.path.join(d, p)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8", newline="") as h:
+                h.write(t)
+        call(files.Files(d))
+        out = {}
+        for root, _, names in os.walk(d):
+            for n in names:
+                full = os.path.join(root, n)
+                with open(full, encoding="utf-8", newline="") as h:
+                    out[os.path.relpath(full, d).replace(os.sep, "/")] = h.read()
+        return out
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def t_copy_file(s, r):
+    out = []
+    for initial, a, b, want in [
+        ({"a.txt": "hello"}, "a.txt", "b.txt", {"a.txt": "hello", "b.txt": "hello"}),
+        ({"a.txt": "x\r\ny", "b.txt": "old"}, "a.txt", "b.txt", {"a.txt": "x\r\ny", "b.txt": "x\r\ny"}),
+        ({"c.txt": "c"}, "a.txt", "b.txt", {"c.txt": "c"}),
+        ({"a.txt": "\u00e9\u65e5"}, "a.txt", "sub/b.txt", {"a.txt": "\u00e9\u65e5", "sub/b.txt": "\u00e9\u65e5"}),
+        ({"a.txt": ""}, "a.txt", "b.txt", {"a.txt": "", "b.txt": ""}),
+    ]:
+        out.append(_with_dir(initial, lambda f: s.copy_file(f, a, b)) == want)
+    return out
+
+
+def t_append_line(s, r):
+    out = []
+    for initial, p, line, want in [
+        ({}, "log.txt", "one", {"log.txt": "one\n"}),
+        ({"log.txt": "one\n"}, "log.txt", "two", {"log.txt": "one\ntwo\n"}),
+        ({"log.txt": "no newline"}, "log.txt", "x", {"log.txt": "no newline" + "\n" + "x\n"}),
+        ({"a.txt": "a", "log.txt": ""}, "log.txt", "", {"a.txt": "a", "log.txt": "\n"}),
+        ({}, "dir/log.txt", "\u00e9", {"dir/log.txt": "\u00e9\n"}),
+    ]:
+        out.append(_with_dir(initial, lambda f: s.append_line(f, p, line)) == want)
+    return out
+
+
 TASKS = [
     T("discount_i32", DISCOUNT_SPEC, DISCOUNT_SIG.replace("{t}", "i32"), t_discount, "enum, match, i32", "discount"),
     T("discount_int", DISCOUNT_SPEC, DISCOUNT_SIG.replace("{t}", "int"), t_discount, "enum, match", "discount"),
@@ -236,6 +285,10 @@ Anything else is the error `"invalid"`. A new state is an `option.Ok`, an error 
       "import console\n\nfn greet_two(c: console.Console, a: string, b: string) -> console.Console", t_greet_two, "console, write"),
     T("respond", "Read one line from the console. If there is one, write `you said: ` followed by that line; if there is none, write `nothing to read`. Read no more than one line.",
       "import console\nimport option\n\nfn respond(c: console.Console) -> console.Console", t_respond, "console, read, Option"),
+    T("copy_file", "Copy the file at `from` to `to`. If there is a file at `from`, the file at `to` gets its text (it is created, or replaced), and nothing else changes. If there is none, nothing changes. The input guarantees that `from` and `to` are different paths.",
+      "import files\nimport option\n\nfn copy_file(f: files.Files, from: string, to: string) -> files.Files", t_copy_file, "files, read, write, Option"),
+    T("append_line", "Append `line` and a newline (`\\n`) to the text of the file at `path`, and write it back: the file is created if there is none, and if the file is not empty and does not end with a newline, a newline is added first, so that `line` starts a line of its own. Nothing else changes.",
+      "import files\nimport option\n\nfn append_line(f: files.Files, path: string, line: string) -> files.Files", t_append_line, "files, read, write, Option"),
 ]
 BY_ID = {t.id: t for t in TASKS}
 
