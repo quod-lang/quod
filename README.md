@@ -5,9 +5,9 @@
 *Quod erat demonstrandum*: a programming language designed to be **written by AI agents** and
 **checked by machines**. The program comes with its proof.
 
-> **Status: Quod 0.6, a young language that is moving.** The compiler checks types, proves
+> **Status: Quod 0.7, a young language that is moving.** The compiler checks types, proves
 > contracts with Z3, checks that every contract determines its result, and compiles to Python and
-> to C#. Functions are pure, except those that receive the console, as a capability: it writes and reads lines (no files or network yet). It has maps and sets. Agents wrote programs
+> to C#. Functions are pure, except those that receive a capability: the console (it writes and reads lines) or files (no network yet). It has maps and sets. Agents wrote programs
 > of up to 300 lines in it from the reference alone. What was measured is
 > [below](#what-we-learned-so-far). It has had little use outside its author: **feedback and bug
 > reports are what it needs most.** [Download it](https://github.com/quod-lang/quod/releases/latest): z3 is included.
@@ -86,7 +86,7 @@ result (`i32` and `i64` have their bounds proved).
 
 ## What Quod cannot do yet
 
-- **Only the console, no files, no network, yet.** A Quod function is pure unless it receives a capability. Since 0.6 the console is one: `console.say` writes a line and `console.read_line` reads one, and the contract says what is written and what is left to read (`quod run` runs a program on the standard input; the generated Python and C# take a stream). Files come next, then the network; see the [roadmap](#roadmap) and the [design note](docs/design/capacites.fr.md) (in French).
+- **The console and files, no network, yet.** A Quod function is pure unless it receives a capability. Since 0.6 the console is one: `console.say` writes a line and `console.read_line` reads one, and the contract says what is written and what is left to read. Since 0.7 so are files: `files.read_file`, `files.write_file` and `files.delete_file`, in a directory chosen by whoever runs the program, with a contract that says what becomes of the files (`quod run` runs a program on the standard input and on a directory; the generated Python and C# take streams and a root). The network comes next; see the [roadmap](#roadmap) and the [design note](docs/design/capacites.fr.md) (in French).
 - **No classes or inheritance, and none planned** (structs, enums, `match` and generics exist).
 - **Verification can say no to a correct program** (the solver gives up on some nonlinear arithmetic or deep quantifiers), and it takes seconds to a minute on programs of a few hundred lines.
 - **Platforms:** developed and tested on Windows. The Linux and macOS binaries are built and tested by CI, but have been run by hand very little. Tell us if one does not work.
@@ -187,8 +187,9 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 4. **Quod 0.4** ([released](https://github.com/quod-lang/quod/releases/latest)): C# integers as a checked `long`, limits counted in solver operations instead of time. What this line announced before (capabilities, sealed contracts, maps and sets, general refinement types) moves to 0.5 and 0.6.
 5. **Quod 0.5** ([released](https://github.com/quod-lang/quod/releases/latest)): `map<K, V>` and `set<T>`, with `sorted` as the one way to walk them, and a `maps` library in Quod.
 6. **Quod 0.6** ([released](https://github.com/quod-lang/quod/releases/latest)): capabilities, first the console (no ambient authority: a function writes and reads only through a `Console` it receives, used once), `quod run`, and proofs about long strings that no longer time out.
-7. **Quod 0.7**: files as a capability, then the network; sealed contracts, general refinement types.
-8. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
+7. **Quod 0.7** ([released](https://github.com/quod-lang/quod/releases/latest)): files as a capability, and strings or lists of numbers as the values of a map in C#.
+8. **Quod 0.8**: the network, time and randomness as capabilities; sealed contracts, general refinement types.
+9. **Later**: a C backend, towards native code and WASM. **Quod 2.0 will be written in Quod.**
 
 Development happens in the open. If you write Dafny, or let agents write code you need to trust,
 issues and discussions are very welcome.

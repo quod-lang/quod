@@ -5,9 +5,9 @@
 *Quod erat demonstrandum* : un langage de programmation conçu pour être **écrit par des agents IA**
 et **vérifié par la machine**. Le programme arrive avec sa démonstration.
 
-> **État : Quod 0.6, un langage jeune, qui avance.** Le compilateur vérifie les
+> **État : Quod 0.7, un langage jeune, qui avance.** Le compilateur vérifie les
 > types, prouve les contrats avec Z3, contrôle que chaque contrat détermine son résultat, et compile
-> vers Python et vers C#. Ses fonctions sont pures, sauf celles qui reçoivent la console, comme capacité : elle écrit et lit des lignes (pas encore de fichiers ni de réseau). Il a des
+> vers Python et vers C#. Ses fonctions sont pures, sauf celles qui reçoivent une capacité : la console (elle écrit et lit des lignes) ou les fichiers (pas encore de réseau). Il a des
 > dictionnaires et des ensembles. Des agents y ont écrit des programmes de 300 lignes à partir de la
 > seule référence. Ce qui a été mesuré est
 > [plus bas](#ce-quon-a-appris-jusquici). Il a peu servi hors de son auteur : **les retours et les
@@ -89,7 +89,7 @@ calculé en `checked`, et un dépassement lève une exception au lieu de rendre 
 
 ## Ce que Quod ne sait pas faire encore
 
-- **Seulement la console, pas de fichiers, pas de réseau, pour l'instant.** Une fonction Quod est pure tant qu'elle ne reçoit pas de capacité. Depuis la 0.6, la console en est une : `console.say` écrit une ligne et `console.read_line` en lit une, et le contrat dit ce qui est écrit et ce qui reste à lire (`quod run` exécute un programme sur l'entrée standard ; le Python et le C# générés prennent un flux). Les fichiers viennent ensuite, puis le réseau : voir la [feuille de route](#feuille-de-route) et la [note de conception](docs/design/capacites.fr.md).
+- **La console et les fichiers, pas de réseau, pour l'instant.** Une fonction Quod est pure tant qu'elle ne reçoit pas de capacité. Depuis la 0.6, la console en est une : `console.say` écrit une ligne et `console.read_line` en lit une, et le contrat dit ce qui est écrit et ce qui reste à lire. Depuis la 0.7, les fichiers aussi : `files.read_file`, `files.write_file` et `files.delete_file`, dans un dossier choisi par celui qui exécute le programme, avec un contrat qui dit ce que deviennent les fichiers (`quod run` exécute un programme sur l'entrée standard et sur un dossier ; le Python et le C# générés prennent des flux et une racine). Le réseau vient ensuite : voir la [feuille de route](#feuille-de-route) et la [note de conception](docs/design/capacites.fr.md).
 - **Pas de classes ni d'héritage, et aucune de prévue** (structures, énumérations, `match` et génériques existent).
 - **La vérification peut refuser un programme correct** (le solveur abandonne sur certaines arithmétiques non linéaires ou quantificateurs profonds), et elle prend de quelques secondes à une minute sur des programmes de quelques centaines de lignes.
 - **Plateformes :** développé et testé sous Windows. Les binaires Linux et macOS sont construits et testés par la CI, mais très peu lancés à la main. Dites-nous si l'un ne marche pas.
@@ -194,8 +194,9 @@ dotnet src/Quod/bin/Release/net10.0/quod.dll check examples/binary_search.quod
 4. **Quod 0.4** ([publié](https://github.com/quod-lang/quod/releases/latest)) : entiers C# en `long` contrôlé, limites comptées en opérations du solveur plutôt qu'en temps. Ce que cette ligne annonçait avant (capacités, contrats scellés, dictionnaires et ensembles, types raffinés généraux) passe en 0.5 et 0.6.
 5. **Quod 0.5** ([publié](https://github.com/quod-lang/quod/releases/latest)) : `map<K, V>` et `set<T>`, avec `sorted` comme seul moyen de les parcourir, et une bibliothèque `maps` en Quod.
 6. **Quod 0.6** ([publié](https://github.com/quod-lang/quod/releases/latest)) : les capacités, d'abord la console (aucune autorité ambiante : une fonction n'écrit et ne lit qu'au travers d'une `Console` qu'elle reçoit, utilisée une fois), `quod run`, et des preuves sur les chaînes longues qui n'expirent plus.
-7. **Quod 0.7** : les fichiers comme capacité, puis le réseau ; contrats scellés, types raffinés généraux.
-8. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
+7. **Quod 0.7** ([publié](https://github.com/quod-lang/quod/releases/latest)) : les fichiers comme capacité, et les chaînes ou listes de nombres comme valeurs d'un dictionnaire en C#.
+8. **Quod 0.8** : le réseau, l'heure et le hasard comme capacités ; contrats scellés, types raffinés généraux.
+9. **Plus tard** : une génération C, vers le code natif et WASM. **Quod 2.0 sera écrit en
    Quod.**
 
 Le développement se fait en public. Si vous écrivez du Dafny, ou laissez des agents écrire du code

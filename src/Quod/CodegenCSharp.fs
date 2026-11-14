@@ -81,6 +81,10 @@ let rec private collectionKeyOk (t: Ty) =
 let rec private collectionOk (t: Ty) =
     match t with
     | TyInt | TyNat | TyI32 | TyI64 | TyBool | TyData _ -> true
+    // a string is a C# string inside a map, as a key is
+    | TySeq TyChar -> true
+    // a list of numbers or booleans is held as it is: no conversion at the boundary, and a map compares its values by content
+    | TySeq(TyInt | TyNat | TyI32 | TyI64 | TyBool) -> true
     | TyTuple ts -> ts |> List.forall (fun x -> match x with TyInt | TyNat | TyI32 | TyI64 | TyBool -> true | _ -> false)
     | TySet e -> collectionKeyOk e
     | TyMap(k, v) -> collectionKeyOk k && collectionOk v
@@ -89,7 +93,7 @@ let rec private collectionOk (t: Ty) =
 let private collectionCheck (t: Ty) =
     let ok = match t with TyMap(k, v) -> collectionKeyOk k && collectionOk v | TySet e -> collectionKeyOk e | _ -> true
     if not ok then
-        raise (Refused("a " + tyText t + " is not generated for C# yet: keys and elements are integers, booleans, strings, tuples of numbers and booleans, structs and enums (not char); values are integers, booleans, tuples of numbers and booleans, structs, enums, maps and sets (not strings, chars or sequences)"))
+        raise (Refused("a " + tyText t + " is not generated for C# yet: keys and elements are integers, booleans, strings, tuples of numbers and booleans, structs and enums (not char); values are integers, booleans, strings, lists of numbers or booleans, tuples of numbers and booleans, structs, enums, maps and sets (not chars or other sequences)"))
 
 let private keyCs (t: Ty) (cs: Ty -> string) = if t = TySeq TyChar then "string" else cs t
 
@@ -109,7 +113,7 @@ let rec csType (t: Ty) =
     | TySeq e -> "IReadOnlyList<" + csType e + ">"
     | TyMap(k, v) ->
         collectionCheck t
-        "IReadOnlyDictionary<" + keyCs k csType + ", " + csType v + ">"
+        "IReadOnlyDictionary<" + keyCs k csType + ", " + keyCs v csType + ">"
     | TySet e ->
         collectionCheck t
         "HashSet<" + keyCs e csType + ">"
@@ -524,13 +528,13 @@ type private Gen(checks: Set<string>) =
         match op, args with
         | MapOf, [ { Kind = ESeq items } ] ->
             let k, v = (match e.Ty with TyMap(k, v) -> k, v | _ -> TyInt, TyInt)
-            let ck, cv = keyCs k csType, csType v
+            let ck, cv = keyCs k csType, keyCs v csType
             if items.IsEmpty then "(IReadOnlyDictionary<" + ck + ", " + cv + ">)new Dictionary<" + ck + ", " + cv + ">()"
             else
                 let entries =
                     items |> List.map (fun item ->
                         match item.Kind with
-                        | ETuple [ a; b ] -> "new KeyValuePair<" + ck + ", " + cv + ">(" + key k a + ", " + g.Expr(b, v) + ")"
+                        | ETuple [ a; b ] -> "new KeyValuePair<" + ck + ", " + cv + ">(" + key k a + ", " + g.Val(v, b) + ")"
                         | _ -> failwith "internal: a pair that is not written in place")
                 g.Help "mapof" + "<" + ck + ", " + cv + ">(" + String.Join(", ", entries) + ")"
         | SetOf, [ { Kind = ESeq items } ] ->
@@ -538,10 +542,10 @@ type private Gen(checks: Set<string>) =
             "new HashSet<" + keyCs t csType + ">(" + (if items.IsEmpty then "" else "new " + keyCs t csType + "[] { " + String.Join(", ", items |> List.map (key t)) + " }") + ")"
         | Put, [ m; k; x ] ->
             let kt, vt = (match m.Ty with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
-            g.Help "put" + "<" + keyCs kt csType + ", " + csType vt + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ", " + g.Expr(x, vt) + ")"
+            g.Help "put" + "<" + keyCs kt csType + ", " + keyCs vt csType + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ", " + g.Val(vt, x) + ")"
         | MapRemove, [ m; k ] ->
             let kt, vt = (match m.Ty with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
-            g.Help "mremove" + "<" + keyCs kt csType + ", " + csType vt + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ")"
+            g.Help "mremove" + "<" + keyCs kt csType + ", " + keyCs vt csType + ">(" + g.Expr(m, m.Ty) + ", " + key kt k + ")"
         | SetAdd, [ s; x ] -> g.Help "sadd" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
         | SetRemove, [ s; x ] -> g.Help "sremove" + "<" + keyCs (kOf s) csType + ">(" + g.Expr(s, s.Ty) + ", " + key (kOf s) x + ")"
         | Keys, [ m ] -> "new HashSet<" + keyCs (kOf m) csType + ">(" + g.Expr(m, m.Ty) + ".Keys)"
@@ -558,12 +562,24 @@ type private Gen(checks: Set<string>) =
             match colTy c with
             | TyMap _ -> g.Expr(c, c.Ty) + ".ContainsKey(" + key (kOf c) k + ")"
             | _ -> g.Expr(c, c.Ty) + ".Contains(" + key (kOf c) k + ")"
-        | Get, [ m; k ] -> g.Expr(m, m.Ty) + "[" + key (kOf m) k + "]"
+        | Get, [ m; k ] ->
+            let read = g.Expr(m, m.Ty) + "[" + key (kOf m) k + "]"
+            // a string value is a C# string in the map, and a list of scalar values in the code
+            (match m.Ty with
+             | TyMap(_, TySeq TyChar) ->
+                 g.Help "text" |> ignore
+                 "_quod_str(" + read + ")"
+             | _ -> read)
         | Union, [ a; b ] -> g.Help "sunion" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
         | Inter, [ a; b ] -> g.Help "sinter" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
         | Diff, [ a; b ] -> g.Help "sdiff" + "<" + keyCs (kOf a) csType + ">(" + g.Expr(a, a.Ty) + ", " + g.Expr(b, a.Ty) + ")"
         | Subset, [ a; b ] -> g.Expr(a, a.Ty) + ".IsSubsetOf(" + g.Expr(b, a.Ty) + ")"
         | _ -> failwith "internal: an operation on a map or a set that does not fit"
+
+    /// A value as a map holds it: a string is a C# string.
+    member g.Val(vt: Ty, x: TExpr) =
+        let text = g.Expr(x, vt)
+        if vt = TySeq TyChar then g.Help "text" + "(" + text + ")" else text
 
     /// A key as a collection holds it: a string is a C# string.
     member g.Key(kt: Ty, x: TExpr) =
@@ -573,7 +589,7 @@ type private Gen(checks: Set<string>) =
     /// A new, changeable map or set holding what `term` holds.
     member g.CopyOf(t: Ty, term: string) =
         match t with
-        | TyMap(k, v) -> g.Help "mcopy" + "<" + keyCs k csType + ", " + csType v + ">(" + term + ")"
+        | TyMap(k, v) -> g.Help "mcopy" + "<" + keyCs k csType + ", " + keyCs v csType + ">(" + term + ")"
         | TySet e -> "new HashSet<" + keyCs e csType + ">(" + term + ")"
         | _ -> term
 
@@ -587,8 +603,8 @@ type private Gen(checks: Set<string>) =
                       + g.Eq(e, "a[i]", "b[i]") + ") return false;\n            return true;"
                   | TySet _ -> "return a.SetEquals(b);"
                   | TyMap(_, v) ->
-                      "if (a.Count != b.Count) return false;\n            foreach (var p in a)\n            {\n                " + csType v
-                      + " o;\n                if (!b.TryGetValue(p.Key, out o) || !" + g.Eq(v, "p.Value", "o") + ") return false;\n            }\n            return true;"
+                      "if (a.Count != b.Count) return false;\n            foreach (var p in a)\n            {\n                " + keyCs v csType
+                      + " o;\n                if (!b.TryGetValue(p.Key, out o) || !" + (if v = TySeq TyChar then "(p.Value == o)" else g.Eq(v, "p.Value", "o")) + ") return false;\n            }\n            return true;"
                   | TyTuple ts ->
                       "return " + (ts |> List.mapi (fun k x -> g.Eq(x, "a.Item" + string (k + 1), "b.Item" + string (k + 1))) |> String.concat " && ") + ";"
                   | TyData _ -> "return a.Equals(b);"
@@ -796,7 +812,7 @@ type private Gen(checks: Set<string>) =
             | None, None -> None
             | tk, tv ->
                 g.Help "every" |> ignore
-                Some("_quod_every<KeyValuePair<" + keyCs k csType + ", " + csType v + ">>(" + term + ", " + x + " => " + String.Join(" && ", [ tk; tv ] |> List.choose id) + ")")
+                Some("_quod_every<KeyValuePair<" + keyCs k csType + ", " + keyCs v csType + ">>(" + term + ", " + x + " => " + String.Join(" && ", [ tk; tv ] |> List.choose id) + ")")
         | TyTuple ts ->
             match ts |> List.mapi (fun k c -> g.NatTest(c, term + ".Item" + string (k + 1), deep, depth)) |> List.choose id with
             | [] -> None
@@ -827,7 +843,7 @@ type private Gen(checks: Set<string>) =
         | SLet(_, n, _, _) when isLemmaBinding n -> () // a proof step: erased
         | SLet(_, n, ty, v) when inPlace.Contains n && (match ty with TyMap _ | TySet _ -> true | _ -> false) ->
             let name = g.Bind(n, ty)
-            line ((match ty with TyMap(k, x) -> "Dictionary<" + keyCs k csType + ", " + csType x + ">" | _ -> csType ty) + " " + name + " = " + g.CopyOf(ty, g.Expr(v, ty)) + ";")
+            line ((match ty with TyMap(k, x) -> "Dictionary<" + keyCs k csType + ", " + keyCs x csType + ">" | _ -> csType ty) + " " + name + " = " + g.CopyOf(ty, g.Expr(v, ty)) + ";")
         | SLet(_, n, ty, v) when inPlace.Contains n ->
             let value = g.Expr(v, ty)
             let name = g.Bind(n, ty)
@@ -839,7 +855,7 @@ type private Gen(checks: Set<string>) =
         // a map or a set of its own, changed in place (a local of the concrete type, built by a copy)
         | SAssign(n, { Kind = ECol(Put, [ { Kind = EVar n2 }; k; x ]) }) when n2 = n && inPlace.Contains n ->
             let kt, vt = (match types.[n] with TyMap(a, b) -> a, b | _ -> TyInt, TyInt)
-            line (g.Name n + "[" + g.Key(kt, k) + "] = " + g.Expr(x, vt) + ";")
+            line (g.Name n + "[" + g.Key(kt, k) + "] = " + g.Val(vt, x) + ";")
         | SAssign(n, { Kind = ECol(MapRemove, [ { Kind = EVar n2 }; k ]) }) when n2 = n && inPlace.Contains n ->
             let kt = (match types.[n] with TyMap(a, _) -> a | _ -> TyInt)
             line (g.Name n + ".Remove(" + g.Key(kt, k) + ");")

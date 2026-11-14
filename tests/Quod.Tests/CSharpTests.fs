@@ -358,7 +358,7 @@ let ``maps and sets run in C# as in Python`` () =
 
 [<Fact>]
 let ``what C# cannot hold yet is refused by Quod`` () =
-    match generate "p.quod" (typedOf "fn f(m: map<int, seq<int>>) -> nat { len(m) }") Set.empty defaultOptions with
+    match generate "p.quod" (typedOf "fn f(m: map<int, seq<string>>) -> nat { len(m) }") Set.empty defaultOptions with
     | Result.Error why -> Assert.Contains("not generated for C#", why)
     | Ok _ -> failwith "generated"
     match generate "p.quod" (typedOf "struct Box { items: set<int> }
@@ -413,3 +413,72 @@ let ``a null map or set is an ArgumentNullException`` () =
               "        Case(\"null set\", () => T0.P.SizeOf(new Dictionary<long, long>(), null));" ]
     Assert.Equal("!ArgumentNullException", got.["null map"])
     Assert.Equal("!ArgumentNullException", got.["null set"])
+
+[<Fact>]
+let ``a map with string values runs in C# as in Python`` () =
+    let src =
+        "fn greeting(m: map<string, string>, k: string, d: string) -> string { if k in m { m[k] } else { d } }\n"
+        + "fn size_after(m: map<string, string>, k: string, v: string) -> nat { len(put(m, k, v)) }\n"
+        + "fn value_after(m: map<string, string>, k: string, v: string) -> string { put(m, k, v)[k] }\n"
+        + "fn value_len(m: map<string, string>, k: string) -> nat requires k in m { len(m[k]) }\n"
+        + "fn same(a: map<string, string>, b: map<string, string>) -> bool { a == b }\n"
+        + "fn literal_len() -> nat { len(map_of([(\"a\", \"xyz\"), (\"b\", \"\")])[\"a\"]) }\n"
+        + "fn numbered(n: nat) -> map<nat, string> {\n  let mut m: map<nat, string> = map_of([]);\n  let mut i: nat = 0;\n  while i < n invariant 0 <= i && i <= n decreases n - i { m = put(m, i, \"line\"); i = i + 1; }\n  m\n}\n"
+        + "fn numbered_size(n: nat) -> nat { len(numbered(n)) }\n"
+        + "fn nested(m: map<string, set<string>>, k: string) -> bool { k in m }\n"
+    // the runner shows a string as a list of its characters
+    let shown (text: string) = "[" + String.Join(", ", text |> Seq.map string) + "]"
+    let dict (pairs: (string * string) list) = "new Dictionary<string, string> { " + (pairs |> List.map (fun (k, v) -> "{ \"" + k + "\", \"" + v + "\" }") |> String.concat ", ") + " }"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"greeting\", () => T0.P.Greeting(" + dict [ "a", "hi" ] + ", \"a\", \"none\"));"
+              "        Case(\"greeting absent\", () => T0.P.Greeting(" + dict [ "a", "hi" ] + ", \"z\", \"none\"));"
+              "        Case(\"size after new\", () => T0.P.SizeAfter(" + dict [ "a", "hi" ] + ", \"b\", \"x\"));"
+              "        Case(\"size after replace\", () => T0.P.SizeAfter(" + dict [ "a", "hi" ] + ", \"a\", \"x\"));"
+              "        Case(\"value after\", () => T0.P.ValueAfter(" + dict [ "a", "hi" ] + ", \"a\", \"\\u00e9x\"));"
+              "        Case(\"value len\", () => T0.P.ValueLen(" + dict [ "a", "\\u00e9\\u65e5" ] + ", \"a\"));"
+              "        Case(\"same\", () => T0.P.Same(" + dict [ "a", "x"; "b", "y" ] + ", " + dict [ "b", "y"; "a", "x" ] + "));"
+              "        Case(\"not same\", () => T0.P.Same(" + dict [ "a", "x" ] + ", " + dict [ "a", "z" ] + "));"
+              "        Case(\"literal\", () => T0.P.LiteralLen());"
+              "        Case(\"numbered\", () => T0.P.NumberedSize(4L));"
+              "        Case(\"null\", () => T0.P.Greeting(null, \"a\", \"d\"));" ]
+    Assert.Equal(shown "hi", got.["greeting"])
+    Assert.Equal(shown "none", got.["greeting absent"])
+    Assert.Equal("2", got.["size after new"])
+    Assert.Equal("1", got.["size after replace"])
+    Assert.Equal(shown "éx", got.["value after"])
+    Assert.Equal("2", got.["value len"])
+    Assert.Equal("true", got.["same"])
+    Assert.Equal("false", got.["not same"])
+    Assert.Equal("3", got.["literal"])
+    Assert.Equal("4", got.["numbered"])
+    Assert.Equal("!ArgumentNullException", got.["null"])
+
+[<Fact>]
+let ``a map with lists of numbers as values runs in C# as in Python`` () =
+    let src =
+        "fn first_of(m: map<string, seq<int>>, k: string) -> int requires k in m && len(m[k]) > 0 { m[k][0] }\n"
+        + "fn count_of(m: map<string, seq<int>>, k: string) -> nat requires k in m { len(m[k]) }\n"
+        + "fn push(m: map<string, seq<int>>, k: string, x: int) -> nat { len(put(m, k, (if k in m { m[k] } else { [] }) + [x])[k]) }\n"
+        + "fn same(a: map<string, seq<int>>, b: map<string, seq<int>>) -> bool { a == b }\n"
+        + "fn grouped(n: nat) -> map<nat, seq<nat>> {\n  let mut m: map<nat, seq<nat>> = map_of([]);\n  let mut i: nat = 0;\n  while i < n invariant 0 <= i && i <= n decreases n - i { m = put(m, i, [i, i]); i = i + 1; }\n  m\n}\n"
+        + "fn grouped_total(n: nat) -> nat { len(grouped(n)) }\n"
+    let dict (pairs: (string * int list) list) =
+        "new Dictionary<string, IReadOnlyList<long>> { "
+        + (pairs |> List.map (fun (k, v) -> "{ \"" + k + "\", new long[] { " + (v |> List.map (fun x -> string x + "L") |> String.concat ", ") + " } }") |> String.concat ", ") + " }"
+    let got =
+        buildAndRunWith "" "net10.0" [ generated 0 src Set.empty false ]
+            [ "        Case(\"first\", () => T0.P.FirstOf(" + dict [ "a", [ 7; 8 ] ] + ", \"a\"));"
+              "        Case(\"count\", () => T0.P.CountOf(" + dict [ "a", [ 7; 8; 9 ] ] + ", \"a\"));"
+              "        Case(\"push new\", () => T0.P.Push(" + dict [ "a", [ 1 ] ] + ", \"b\", 5L));"
+              "        Case(\"push old\", () => T0.P.Push(" + dict [ "a", [ 1 ] ] + ", \"a\", 5L));"
+              "        Case(\"same\", () => T0.P.Same(" + dict [ "a", [ 1; 2 ] ] + ", " + dict [ "a", [ 1; 2 ] ] + "));"
+              "        Case(\"not same\", () => T0.P.Same(" + dict [ "a", [ 1; 2 ] ] + ", " + dict [ "a", [ 1; 3 ] ] + "));"
+              "        Case(\"grouped\", () => T0.P.GroupedTotal(3L));" ]
+    Assert.Equal("7", got.["first"])
+    Assert.Equal("3", got.["count"])
+    Assert.Equal("1", got.["push new"])
+    Assert.Equal("2", got.["push old"])
+    Assert.Equal("true", got.["same"])
+    Assert.Equal("false", got.["not same"])
+    Assert.Equal("3", got.["grouped"])
