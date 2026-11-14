@@ -298,3 +298,47 @@ let ``a private helper that only a contract calls is not generated, so it cannot
                 Assert.DoesNotContain("_quod_f_text_at", g.Code)
                 Assert.Contains("def _quod_f_bang(", g.Code)
         | other -> failwithf "%A" other)
+
+let private proofOnlyIf =
+    "lemma trivial(x: int)\n  ensures x + 0 == x\n{\n}\n\nfn identity(x: int) -> int\n  ensures result == x\n{\n  if x > 0 {\n    trivial(x);\n    assert x >= 1;\n  }\n  x\n}\n"
+
+[<Fact>]
+let ``an if that holds only proof steps leaves a block that Python can load`` () =
+    withMain proofOnlyIf (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g -> Assert.Contains("if (x > 0):\n        pass\n    return x", g.Code.Replace("\r\n", "\n"))
+        | other -> failwithf "%A" other)
+
+let private drainSource =
+    "import console\nimport option\n\nfn drain(c: console.Console) -> console.Console\n  ensures console.written(result) == console.written(c)\n"
+    + "  ensures console.pending(result) == console.pending(c)[len(console.pending(c))..]\n  decreases len(console.pending(c))\n{\n"
+    + "  let r = console.read_line(c);\n  match r.1 {\n    None => r.0,\n    Some(line) => drain(r.0),\n  }\n}\n"
+
+[<Fact>]
+let ``a tail call after a let, in a match, runs as a loop`` () =
+    withMain drainSource (fun dir outcome ->
+        match outcome with
+        | Checked(typed, r) ->
+            Assert.Empty(errorsOf r)
+            match generate (Python false) (Path.Combine(dir, "main.quod")) typed r false with
+            | Result.Error why -> failwith why
+            | Ok g ->
+                Assert.Contains("while True:", g.Code)
+                Assert.DoesNotContain("lambda line: _quod_f_drain", g.Code)
+        | other -> failwithf "%A" other)
+
+[<Fact>]
+let ``a loop that reads the console may declare the pair it reads in its body`` () =
+    let src =
+        "import console\nimport option\n\nfn skip(c: console.Console, n: nat) -> console.Console\n  ensures console.written(result) == console.written(c)\n  loose\n{\n"
+        + "  let mut d = c;\n  let mut i: nat = 0;\n  while i < n\n    invariant i <= n\n    invariant console.written(d) == console.written(c)\n    decreases n - i\n  {\n"
+        + "    let r = console.read_line(d);\n    d = r.0;\n    i = i + 1;\n  }\n  d\n}\n"
+    withMain src (fun _ outcome ->
+        match outcome with
+        | Checked(_, r) -> Assert.DoesNotContain("hand it back", String.Join(" | ", errorsOf r |> List.map (fun d -> d.Message)))
+        | Rejected ds -> Assert.DoesNotContain("hand it back", String.Join(" | ", ds |> List.map (fun d -> d.Message)))
+        | other -> failwithf "%A" other)

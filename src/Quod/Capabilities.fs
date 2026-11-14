@@ -150,6 +150,17 @@ let check (file: string) (prog: TProgram) : Diagnostic list =
                     code c
                     let afterTest = consumed.Value
                     stmts body
+                    // what the body declared is gone at the end of the turn (`let r = read_line(d)`, then `d = r.0`)
+                    let rec declared (items: TStmt list) =
+                        [ for st in items do
+                              match st.Kind with
+                              | SLet(_, n, _, _) -> yield n
+                              | SIf(_, a, b) -> yield! declared a; yield! declared b
+                              | SWhile(_, _, _, b) -> yield! declared b
+                              | _ -> () ]
+                    let local = set (declared body)
+                    let isLocal (k: string) = local.Contains(k.Split('.').[0]) && not (Set.contains k entry)
+                    consumed.Value <- consumed.Value |> Set.filter (fun k -> not (isLocal k))
                     if not dead.Value && not (Set.isSubset consumed.Value entry) then
                         error fn s.Span "this loop uses a Console and does not hand it back: end the body by assigning the Console it went on with (c = ...), so that each turn starts with a Console that can be used"
                     dead.Value <- false

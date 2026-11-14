@@ -168,6 +168,14 @@ let tailToLoop (f: TFn) : TFn =
         let always = { e with Kind = EBool true; Ty = TyBool }
         let measure = { e with Kind = EInt 0I; Ty = TyInt }
         { f with Body = TStmtBody [ { Kind = SWhile(always, [], measure, items e); Span = e.Span } ] }
+    // a body of statements (`let r = ...;` then a match) whose last statement returns the tail call
+    | TStmtBody stmts when f.IsRecursive && f.RunBy.IsNone && not stmts.IsEmpty
+                           && (match List.last stmts with { Kind = SReturn e } -> hasTail e | _ -> false) ->
+        let last = List.last stmts
+        let e = match last.Kind with SReturn e -> e | _ -> failwith "unreachable"
+        let always = { e with Kind = EBool true; Ty = TyBool }
+        let measure = { e with Kind = EInt 0I; Ty = TyInt }
+        { f with Body = TStmtBody [ { Kind = SWhile(always, [], measure, (List.take (stmts.Length - 1) stmts) @ items e); Span = e.Span } ] }
     | _ -> f
 
 // --- modules: the flattened program, seen from one module ---------------------------------------

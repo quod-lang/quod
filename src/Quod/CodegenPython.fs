@@ -391,9 +391,11 @@ type private Gen(checks: Set<string>, local: Set<string>) =
     member g.Stmts(sb: StringBuilder, indent: string, items: TStmt list, f: TFn) =
         // lemma calls are proof steps: erased (a lemma may be recursive and slow, and its value is true)
         let items = items |> List.filter (fun s -> match s.Kind with SLet(_, n, _, _) -> not (isLemmaBinding n) | _ -> true)
-        if items.IsEmpty then sb.Append(indent).Append("pass\n") |> ignore
+        let before = sb.Length
         for s in items do
             g.Stmt(sb, indent, s, f)
+        // nothing written (no statement, or only erased proof steps): a block needs one
+        if sb.Length = before then sb.Append(indent).Append("pass\n") |> ignore
 
     /// A run-time check. Not a Python `assert`, which `python -O` removes. The message names the
     /// function, the property and the values (the arguments, and the result for a
